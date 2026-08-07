@@ -1828,49 +1828,49 @@ Support normal branch and synchronization workflows safely.
 
 ### Ref browser
 
-- [ ] Load local branches.
-- [ ] Load remote branches.
-- [ ] Load tags.
-- [ ] Load remotes.
-- [ ] Display current branch.
-- [ ] Display upstream.
-- [ ] Display ahead/behind.
-- [ ] Group hierarchical ref names.
-- [ ] Persist expanded groups.
-- [ ] Add ref context menus.
+- [x] Load local branches.
+- [x] Load remote branches.
+- [x] Load tags.
+- [x] Load remotes.
+- [x] Display current branch.
+- [x] Display upstream.
+- [x] Display ahead/behind.
+- [x] Group hierarchical ref names.
+- [x] Persist expanded groups.
+- [x] Add ref context menus.
 
 ### Local branch operations
 
-- [ ] Checkout branch.
-- [ ] Create branch from HEAD.
-- [ ] Create branch from selected commit/ref.
-- [ ] Rename local branch.
-- [ ] Delete merged local branch.
-- [ ] Confirm deleting unmerged branch.
-- [ ] Handle dirty-worktree failures.
-- [ ] Handle detached HEAD.
+- [x] Checkout branch.
+- [x] Create branch from HEAD.
+- [x] Create branch from selected commit/ref.
+- [x] Rename local branch.
+- [x] Delete merged local branch.
+- [x] Confirm deleting unmerged branch.
+- [x] Handle dirty-worktree failures.
+- [x] Handle detached HEAD.
 
 ### Remote operations
 
-- [ ] Fetch default remote.
-- [ ] Fetch selected remote.
-- [ ] Pull current branch.
-- [ ] Push current branch.
-- [ ] Publish branch and set upstream.
-- [ ] Show progress.
-- [ ] Support cancellation.
-- [ ] Present authentication failures.
-- [ ] Present non-fast-forward rejection.
-- [ ] Add force-with-lease only behind explicit advanced action.
-- [ ] Refresh refs and status after completion.
+- [x] Fetch default remote.
+- [x] Fetch selected remote.
+- [x] Pull current branch.
+- [x] Push current branch.
+- [x] Publish branch and set upstream.
+- [x] Show progress.
+- [x] Support cancellation.
+- [x] Present authentication failures.
+- [x] Present non-fast-forward rejection.
+- [x] Add force-with-lease only behind explicit advanced action.
+- [x] Refresh refs and status after completion.
 
 ## Exit criteria
 
-- [ ] User can create, switch, fetch, pull, publish, and push a branch.
-- [ ] Network work never blocks UI rendering.
-- [ ] Non-fast-forward and authentication failures are understandable.
-- [ ] Force push is not the default or easy accidental action.
-- [ ] Local-bare-remote integration suite passes.
+- [x] User can create, switch, fetch, pull, publish, and push a branch.
+- [x] Network work never blocks UI rendering.
+- [x] Non-fast-forward and authentication failures are understandable.
+- [x] Force push is not the default or easy accidental action.
+- [x] Local-bare-remote integration suite passes.
 
 ---
 

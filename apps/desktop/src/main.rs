@@ -1,12 +1,16 @@
 //! macOS application entry point.
 
 use std::{
+    collections::BTreeSet,
     ffi::OsString,
     fs,
     os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
     process::Command,
-    sync::mpsc::{self, Receiver},
+    sync::{
+        Arc, Mutex,
+        mpsc::{self, Receiver},
+    },
     time::Duration,
 };
 
@@ -17,8 +21,9 @@ mod menus;
 use app_core::{RecentRepositoryStore, RepositoryOpenError, WindowGeometry, open_repository};
 use git_cli::{CommitRequest, GitExecutable, GitStatusError, LoadedDiff};
 use git_domain::{
-    GitPath, GraphRow, GraphState, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest,
-    RefDecoration, StatusEntry, WorktreeRepository, WorktreeStatus, layout_history_graph,
+    GitPath, GraphRow, GraphState, HeadStatus, HistoryCommit, HistoryPage, HistoryReference,
+    HistoryRequest, NamedRef, RefDecoration, RefSnapshot, StatusEntry, WorktreeRepository,
+    WorktreeStatus, layout_history_graph,
 };
 use gpui::{
     App, Application, Bounds, ClickEvent, ClipboardItem, Context, ExternalPaths, FocusHandle,
@@ -38,6 +43,22 @@ const INITIAL_WINDOW_SIZE: (f32, f32) = (1200.0, 800.0);
 const MINIMUM_WINDOW_SIZE: (f32, f32) = (800.0, 560.0);
 const MINIMUM_PANE_WIDTH: f32 = 180.0;
 const MAXIMUM_PANE_WIDTH: f32 = 440.0;
+
+fn network_failure_message(label: &str, error: &str) -> String {
+    let error = error.to_lowercase();
+    if error.contains("authentication")
+        || error.contains("permission denied")
+        || error.contains("could not read username")
+    {
+        format!(
+            "{label} failed: authentication was rejected. Check your Git credentials or SSH key."
+        )
+    } else if error.contains("non-fast-forward") || error.contains("fetch first") {
+        format!("{label} failed: the remote has newer commits. Pull or rebase, then push again.")
+    } else {
+        format!("{label} failed. Check the configured remote and repository access.")
+    }
+}
 
 fn main() {
     Application::new().run(|cx: &mut App| {
@@ -166,6 +187,42 @@ enum RepositoryView {
     History,
 }
 
+struct NetworkOperation {
+    child: Option<git_cli::GitChild>,
+    cancelled: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ForcePushState {
+    Idle,
+    AwaitingConfirmation,
+}
+
+#[derive(Clone)]
+enum RefContext {
+    LocalBranch(String),
+    RemoteBranch(String),
+    Tag(String),
+    Remote(String),
+}
+
+#[derive(Clone, Copy)]
+enum RefKind {
+    LocalBranch,
+    RemoteBranch,
+    Tag,
+}
+
+impl RefKind {
+    fn context(self, name: String) -> RefContext {
+        match self {
+            Self::LocalBranch => RefContext::LocalBranch(name),
+            Self::RemoteBranch => RefContext::RemoteBranch(name),
+            Self::Tag => RefContext::Tag(name),
+        }
+    }
+}
+
 struct GitronimoApp {
     focus_handle: FocusHandle,
     last_action: Option<LastAction>,
@@ -177,11 +234,16 @@ struct GitronimoApp {
     recents: Vec<PathBuf>,
     activity: String,
     working_copy: Option<WorktreeStatus>,
+    refs: RefSnapshot,
+    expanded_ref_groups: BTreeSet<String>,
+    ref_context: Option<RefContext>,
     selected_paths: Vec<GitPath>,
     context_path: Option<GitPath>,
     loaded_diff: Option<LoadedDiff>,
     selected_diff: Option<(GitPath, bool)>,
     pending_discard: Option<Vec<GitPath>>,
+    pending_branch_delete: Option<String>,
+    force_push_state: ForcePushState,
     commit_subject: String,
     commit_body: String,
     commit_amend: bool,
@@ -202,6 +264,7 @@ struct GitronimoApp {
     history_selection_token: u64,
     history_load_token: u64,
     mutation_in_flight: bool,
+    network_operation: Option<Arc<Mutex<NetworkOperation>>>,
     watcher: Option<RecommendedWatcher>,
     watch_events: Option<Receiver<()>>,
     store: RecentRepositoryStore,
@@ -216,6 +279,11 @@ impl GitronimoApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let expanded_ref_groups = store
+            .load_expanded_ref_groups()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         let mut app = Self {
             focus_handle: cx.focus_handle(),
             last_action: None,
@@ -227,11 +295,16 @@ impl GitronimoApp {
             recents,
             activity: "Choose a repository to begin.".into(),
             working_copy: None,
+            refs: RefSnapshot::default(),
+            expanded_ref_groups,
+            ref_context: None,
             selected_paths: Vec::new(),
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
             pending_discard: None,
+            pending_branch_delete: None,
+            force_push_state: ForcePushState::Idle,
             commit_subject: String::new(),
             commit_body: String::new(),
             commit_amend: false,
@@ -252,6 +325,7 @@ impl GitronimoApp {
             history_selection_token: 0,
             history_load_token: 0,
             mutation_in_flight: false,
+            network_operation: None,
             watcher: None,
             watch_events: None,
             store,
@@ -297,6 +371,11 @@ impl GitronimoApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let expanded_ref_groups = store
+            .load_expanded_ref_groups()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         let mut app = Self {
             focus_handle: cx.focus_handle(),
             last_action: None,
@@ -308,11 +387,16 @@ impl GitronimoApp {
             recents,
             activity,
             working_copy: None,
+            refs: RefSnapshot::default(),
+            expanded_ref_groups,
+            ref_context: None,
             selected_paths: Vec::new(),
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
             pending_discard: None,
+            pending_branch_delete: None,
+            force_push_state: ForcePushState::Idle,
             commit_subject: String::new(),
             commit_body: String::new(),
             commit_amend: false,
@@ -333,6 +417,7 @@ impl GitronimoApp {
             history_selection_token: 0,
             history_load_token: 0,
             mutation_in_flight: false,
+            network_operation: None,
             watcher: None,
             watch_events: None,
             store,
@@ -345,6 +430,7 @@ impl GitronimoApp {
         if let ShellState::Repository(repository) = &app.state {
             let repository = repository.clone();
             app.load_working_copy(repository.clone(), cx);
+            Self::load_refs(repository.clone(), cx);
             Self::load_author_identity(repository.clone(), cx);
             app.start_watcher(&repository);
             Self::schedule_poll(repository, cx);
@@ -403,11 +489,16 @@ impl GitronimoApp {
                 self.recents = opened.recents;
                 self.activity = "Repository opened.".into();
                 self.working_copy = None;
+                self.refs = RefSnapshot::default();
+                self.ref_context = None;
                 self.selected_paths.clear();
                 self.context_path = None;
                 self.loaded_diff = None;
                 self.selected_diff = None;
                 self.pending_discard = None;
+                self.pending_branch_delete = None;
+                self.force_push_state = ForcePushState::Idle;
+                self.network_operation = None;
                 self.commit_subject.clear();
                 self.commit_body.clear();
                 self.commit_amend = false;
@@ -429,6 +520,7 @@ impl GitronimoApp {
                 if let ShellState::Repository(repository) = &self.state {
                     let repository = repository.clone();
                     self.load_working_copy(repository.clone(), cx);
+                    Self::load_refs(repository.clone(), cx);
                     Self::load_author_identity(repository.clone(), cx);
                     self.start_watcher(&repository);
                     Self::schedule_poll(repository, cx);
@@ -640,6 +732,511 @@ impl GitronimoApp {
             });
         })
         .detach();
+    }
+
+    fn load_refs(repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        cx.spawn(async move |this, cx| {
+            let refs = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .ref_snapshot(&repository)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root) {
+                    match refs {
+                        Ok(refs) => {
+                            if app.pending_branch_delete.as_ref().is_some_and(|branch| {
+                                !refs
+                                    .local_branches
+                                    .iter()
+                                    .any(|entry| entry.name.0 == branch.as_bytes())
+                            }) {
+                                app.pending_branch_delete = None;
+                            }
+                            app.refs = refs;
+                        }
+                        Err(error) => app.activity = format!("Ref load failed: {error}"),
+                    }
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_branch_name(create: bool, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let name = cx
+                .background_spawn(async move {
+                    let title = if create {
+                        "New branch from HEAD"
+                    } else {
+                        "Checkout branch"
+                    };
+                    Command::new("osascript")
+                        .args([
+                            "-e",
+                            &format!(
+                                "text returned of (display dialog \"{title}\" default answer \"\")"
+                            ),
+                        ])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| {
+                            String::from_utf8_lossy(&output.stdout)
+                                .trim_end()
+                                .to_owned()
+                        })
+                        .filter(|name| !name.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                let Some(name) = name else {
+                    return;
+                };
+                if create {
+                    app.create_branch(name, cx);
+                } else {
+                    app.checkout_branch(name, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn checkout_branch(&mut self, branch: String, cx: &mut Context<Self>) {
+        self.run_branch_command(
+            format!("Checking out {branch}"),
+            move |git, repository| git.checkout_branch(repository, &branch),
+            cx,
+        );
+    }
+
+    fn create_branch(&mut self, branch: String, cx: &mut Context<Self>) {
+        self.create_branch_from(branch, None, cx);
+    }
+
+    fn prompt_rename_current_branch(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let name = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Rename current branch\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|name| !name.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                let Some(name) = name else { return; };
+                let Some(current) = app.working_copy.as_ref().and_then(|status| match &status.branch.head {
+                    HeadStatus::Branch(branch) => String::from_utf8(branch.0.clone()).ok(),
+                    _ => None,
+                }) else {
+                    app.activity = "Checkout a local branch before renaming it.".into();
+                    cx.notify();
+                    return;
+                };
+                app.run_branch_command(format!("Renaming {current} to {name}"), move |git, repository| {
+                    git.rename_branch(repository, &current, &name)
+                }, cx);
+            });
+        }).detach();
+    }
+
+    fn prompt_delete_local_branch(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let branch = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Delete local branch\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|branch| !branch.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                let Some(branch) = branch else { return; };
+                if !app
+                    .refs
+                    .local_branches
+                    .iter()
+                    .any(|entry| entry.name.0 == branch.as_bytes())
+                {
+                    app.activity = format!("Unknown local branch: {branch}");
+                    cx.notify();
+                    return;
+                }
+                app.pending_branch_delete = Some(branch.clone());
+                app.activity = format!("Review deletion choices for local branch {branch}.");
+                cx.notify();
+            });
+        }).detach();
+    }
+
+    fn confirm_branch_delete(&mut self, force: bool, cx: &mut Context<Self>) {
+        let Some(branch) = self.pending_branch_delete.clone() else {
+            return;
+        };
+        let label = if force {
+            format!("Force deleting unmerged branch {branch}")
+        } else {
+            format!("Deleting merged branch {branch}")
+        };
+        self.run_branch_command(
+            label,
+            move |git, repository| git.delete_branch(repository, &branch, force),
+            cx,
+        );
+    }
+
+    fn create_branch_from(
+        &mut self,
+        branch: String,
+        start: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.run_branch_command(
+            format!("Creating {branch}"),
+            move |git, repository| git.create_branch(repository, &branch, start.as_deref()),
+            cx,
+        );
+    }
+
+    fn prompt_branch_from_selected(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let name = cx.background_spawn(async {
+                Command::new("osascript")
+                    .args(["-e", "text returned of (display dialog \"New branch from selected commit\" default answer \"\")"])
+                    .output().ok().filter(|output| output.status.success())
+                    .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                    .filter(|name| !name.is_empty())
+            }).await;
+            let _ = this.update(cx, |app, cx| {
+                let Some(name) = name else { return; };
+                let Some(oid) = app.selected_history.and_then(|index| app.history.get(index)).map(|commit| commit.oid.clone()) else {
+                    app.activity = "Select a history commit first.".into();
+                    cx.notify();
+                    return;
+                };
+                app.create_branch_from(name, Some(oid), cx);
+            });
+        }).detach();
+    }
+
+    fn default_remote(&self) -> Option<String> {
+        self.refs
+            .remotes
+            .first()
+            .and_then(|remote| String::from_utf8(remote.name.0.clone()).ok())
+    }
+
+    fn fetch_default_remote(&mut self, cx: &mut Context<Self>) {
+        let Some(remote) = self.default_remote() else {
+            self.activity = "No configured remote to fetch.".into();
+            cx.notify();
+            return;
+        };
+        self.run_network_command(
+            format!("Fetching {remote}"),
+            vec!["fetch".into(), "--progress".into(), remote.into()],
+            cx,
+        );
+    }
+
+    fn prompt_fetch_remote(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let remote = cx.background_spawn(async {
+                Command::new("osascript")
+                    .args(["-e", "text returned of (display dialog \"Fetch configured remote\" default answer \"\")"])
+                    .output().ok().filter(|output| output.status.success())
+                    .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                    .filter(|name| !name.is_empty())
+            }).await;
+            let _ = this.update(cx, |app, cx| {
+                let Some(remote) = remote else { return; };
+                if !app.refs.remotes.iter().any(|entry| entry.name.0 == remote.as_bytes()) {
+                    app.activity = format!("Unknown configured remote: {remote}");
+                    cx.notify();
+                    return;
+                }
+                app.run_network_command(
+                    format!("Fetching {remote}"),
+                    vec!["fetch".into(), "--progress".into(), remote.into()],
+                    cx,
+                );
+            });
+        }).detach();
+    }
+
+    fn pull_current(&mut self, cx: &mut Context<Self>) {
+        self.run_network_command(
+            "Pulling current branch".into(),
+            vec!["pull".into(), "--progress".into()],
+            cx,
+        );
+    }
+
+    fn push_current(&mut self, cx: &mut Context<Self>) {
+        self.run_network_command(
+            "Pushing current branch".into(),
+            vec!["push".into(), "--progress".into()],
+            cx,
+        );
+    }
+
+    fn publish_current(&mut self, cx: &mut Context<Self>) {
+        let Some(remote) = self.default_remote() else {
+            self.activity = "No configured remote to publish to.".into();
+            cx.notify();
+            return;
+        };
+        let Some(branch) =
+            self.working_copy
+                .as_ref()
+                .and_then(|status| match &status.branch.head {
+                    HeadStatus::Branch(branch) => String::from_utf8(branch.0.clone()).ok(),
+                    _ => None,
+                })
+        else {
+            self.activity = "Checkout a local branch before publishing.".into();
+            cx.notify();
+            return;
+        };
+        self.run_network_command(
+            format!("Publishing {branch} to {remote}"),
+            vec![
+                "push".into(),
+                "--progress".into(),
+                "--set-upstream".into(),
+                remote.into(),
+                branch.into(),
+            ],
+            cx,
+        );
+    }
+
+    fn request_force_with_lease(&mut self, cx: &mut Context<Self>) {
+        self.force_push_state = ForcePushState::AwaitingConfirmation;
+        self.activity =
+            "Force-with-lease can rewrite the remote branch. Review and confirm.".into();
+        cx.notify();
+    }
+
+    fn confirm_force_with_lease(&mut self, cx: &mut Context<Self>) {
+        self.force_push_state = ForcePushState::Idle;
+        self.run_network_command(
+            "Force pushing current branch with lease".into(),
+            vec![
+                "push".into(),
+                "--progress".into(),
+                "--force-with-lease".into(),
+            ],
+            cx,
+        );
+    }
+
+    fn run_network_command(&mut self, label: String, args: Vec<OsString>, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let operation = Arc::new(Mutex::new(NetworkOperation {
+            child: None,
+            cancelled: false,
+        }));
+        let worker_operation = operation.clone();
+        let worker_repository = repository.clone();
+        self.mutation_in_flight = true;
+        self.network_operation = Some(operation.clone());
+        self.activity = format!("{label} in progress. You can cancel it.");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let mut child = git
+                        .start(&worker_repository.worktree_root, args)
+                        .map_err(|error| error.to_string())?;
+                    let mut stderr = child
+                        .take_stderr()
+                        .ok_or_else(|| "Git did not expose operation progress.".to_owned())?;
+                    {
+                        let mut operation = worker_operation
+                            .lock()
+                            .map_err(|_| "Network operation state was unavailable.".to_owned())?;
+                        if operation.cancelled {
+                            child.cancel().map_err(|error| error.to_string())?;
+                        }
+                        operation.child = Some(child);
+                    }
+                    let mut progress = String::new();
+                    std::io::Read::read_to_string(&mut stderr, &mut progress)
+                        .map_err(|error| error.to_string())?;
+                    let mut operation = worker_operation
+                        .lock()
+                        .map_err(|_| "Network operation state was unavailable.".to_owned())?;
+                    let cancelled = operation.cancelled;
+                    let status = operation
+                        .child
+                        .as_mut()
+                        .ok_or_else(|| "Git operation ended unexpectedly.".to_owned())?
+                        .wait()
+                        .map_err(|error| error.to_string())?;
+                    if cancelled {
+                        Err("cancelled".to_owned())
+                    } else if status.success() {
+                        Ok(())
+                    } else {
+                        Err(progress)
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !app
+                    .network_operation
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &operation))
+                {
+                    return;
+                }
+                app.network_operation = None;
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = format!("{label} complete.");
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_refs(repository, cx);
+                    }
+                    Err(error) if error == "cancelled" => {
+                        app.activity = format!("{label} cancelled.");
+                    }
+                    Err(error) => app.activity = network_failure_message(&label, &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn cancel_network_operation(&mut self, cx: &mut Context<Self>) {
+        let Some(operation) = &self.network_operation else {
+            return;
+        };
+        let cancelled = operation.lock().is_ok_and(|mut operation| {
+            operation.cancelled = true;
+            operation
+                .child
+                .as_mut()
+                .is_none_or(|child| child.cancel().is_ok())
+        });
+        self.activity = if cancelled {
+            "Cancelling network operation…".into()
+        } else {
+            "Unable to cancel the network operation.".into()
+        };
+        cx.notify();
+    }
+
+    fn run_branch_command(
+        &mut self,
+        label: String,
+        command: impl FnOnce(&GitExecutable, &WorktreeRepository) -> Result<(), GitStatusError>
+        + Send
+        + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        self.mutation_in_flight = true;
+        self.activity = format!("{label}…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    command(&git, &worker_repository).map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = format!("{label} complete.");
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_refs(repository, cx);
+                    }
+                    Err(error) => app.activity = format!("{label} failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn toggle_ref_group(&mut self, key: String, cx: &mut Context<Self>) {
+        if !self.expanded_ref_groups.remove(&key) {
+            self.expanded_ref_groups.insert(key);
+        }
+        if self
+            .store
+            .save_expanded_ref_groups(self.expanded_ref_groups.iter().cloned().collect())
+            .is_err()
+        {
+            self.activity = "Ref group expansion could not be saved.".into();
+        }
+        cx.notify();
+    }
+
+    fn select_ref_context(&mut self, context: RefContext, cx: &mut Context<Self>) {
+        self.ref_context = Some(context);
+        cx.notify();
+    }
+
+    fn prompt_branch_from_ref(start: String, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let name = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"New branch from ref\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|name| !name.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(name) = name {
+                    app.create_branch_from(name, Some(start), cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn show_ref_history(&mut self, reference: String, cx: &mut Context<Self>) {
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        self.repository_view = RepositoryView::History;
+        self.change_history_reference(HistoryReference::Named(reference), repository.clone(), cx);
     }
 
     fn prompt_history_search(cx: &mut Context<Self>) {
@@ -1234,7 +1831,7 @@ impl Render for GitronimoApp {
                 div()
                     .flex_1()
                     .flex()
-                    .child(self.sidebar_view(sidebar_width, &colors))
+                    .child(self.sidebar_view(sidebar_width, &colors, cx))
                     .child(div().flex_1().h_full().p_6().child(content))
                     .child(
                         div()
@@ -1265,8 +1862,32 @@ impl Render for GitronimoApp {
 }
 
 impl GitronimoApp {
-    fn sidebar_view(&self, width: f32, colors: &ui_kit::ThemeColors) -> impl IntoElement {
+    fn sidebar_view(
+        &self,
+        width: f32,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let groups = self.status_groups();
+        let branch = self.working_copy.as_ref().map_or_else(
+            || "Branch: loading…".to_owned(),
+            |status| match &status.branch.head {
+                HeadStatus::Branch(name) => format!("Branch: {}", String::from_utf8_lossy(&name.0)),
+                HeadStatus::Detached => "Branch: detached HEAD".into(),
+                HeadStatus::Unborn => "Branch: unborn".into(),
+                HeadStatus::Unknown => "Branch: unknown".into(),
+            },
+        );
+        let upstream = self.working_copy.as_ref().and_then(|status| {
+            status.branch.upstream.as_ref().map(|upstream| {
+                format!(
+                    "Upstream: {} (+{}/-{})",
+                    String::from_utf8_lossy(&upstream.0),
+                    status.branch.ahead,
+                    status.branch.behind
+                )
+            })
+        });
         div()
             .w(px(width))
             .h_full()
@@ -1278,14 +1899,128 @@ impl GitronimoApp {
             .border_r_1()
             .border_color(colors.border)
             .child("Workspace")
+            .child(branch)
+            .children(upstream)
             .child("Working Copy")
             .child(status_badge("Staged", groups.staged.len(), colors))
             .child(status_badge("Unstaged", groups.unstaged.len(), colors))
             .child(status_badge("Untracked", groups.untracked.len(), colors))
             .child(status_badge("Conflicts", groups.conflicts.len(), colors))
             .child("History")
+            .child("Local branches")
+            .children(self.ref_rows(
+                "local",
+                &self.refs.local_branches,
+                RefKind::LocalBranch,
+                colors,
+                cx,
+            ))
+            .child("Remote branches")
+            .children(self.ref_rows(
+                "remote",
+                &self.refs.remote_branches,
+                RefKind::RemoteBranch,
+                colors,
+                cx,
+            ))
+            .child("Tags")
+            .children(self.ref_rows("tag", &self.refs.tags, RefKind::Tag, colors, cx))
+            .child("Remotes")
+            .children(
+                self.refs
+                    .remotes
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, remote)| {
+                        String::from_utf8(remote.name.0.clone()).ok().map(|name| {
+                            let context = RefContext::Remote(name.clone());
+                            div()
+                                .id(("remote-ref", index))
+                                .pl_2()
+                                .cursor_pointer()
+                                .on_click(cx.listener(move |app, _, _, cx| {
+                                    app.select_ref_context(context.clone(), cx);
+                                }))
+                                .child(name)
+                        })
+                    }),
+            )
     }
 
+    fn ref_rows(
+        &self,
+        category: &str,
+        refs: &[NamedRef],
+        kind: RefKind,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Vec<gpui::AnyElement> {
+        let mut groups = BTreeSet::new();
+        let mut rows = Vec::new();
+        let id_prefix = match category {
+            "local" => "local-ref",
+            "remote" => "remote-branch-ref",
+            _ => "tag-ref",
+        };
+        let group_id_prefix = match category {
+            "local" => "local-ref-group",
+            "remote" => "remote-ref-group",
+            _ => "tag-ref-group",
+        };
+        for reference in refs {
+            let Ok(name) = String::from_utf8(reference.name.0.clone()) else {
+                continue;
+            };
+            let parts: Vec<_> = name.split('/').collect();
+            let mut visible = true;
+            for depth in 1..parts.len() {
+                let group = parts[..depth].join("/");
+                let key = format!("{category}:{group}");
+                let expanded = self.expanded_ref_groups.contains(&key);
+                if groups.insert(key.clone()) {
+                    let label = format!(
+                        "{}{} {}",
+                        "  ".repeat(depth),
+                        if expanded { "⌄" } else { "›" },
+                        group.rsplit('/').next().unwrap_or_default()
+                    );
+                    rows.push(
+                        div()
+                            .id((group_id_prefix, rows.len()))
+                            .text_color(colors.text_secondary)
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |app, _, _, cx| {
+                                app.toggle_ref_group(key.clone(), cx);
+                            }))
+                            .child(label)
+                            .into_any_element(),
+                    );
+                }
+                visible &= expanded;
+                if !visible {
+                    break;
+                }
+            }
+            if visible {
+                let context = kind.context(name.clone());
+                let indent = u16::try_from(parts.len().saturating_mul(12)).unwrap_or(u16::MAX);
+                rows.push(
+                    div()
+                        .id((id_prefix, rows.len()))
+                        .pl(px(f32::from(indent)))
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |app, _, _, cx| {
+                            app.select_ref_context(context.clone(), cx);
+                        }))
+                        .child(parts.last().copied().unwrap_or_default().to_owned())
+                        .into_any_element(),
+                );
+            }
+        }
+        rows
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn repository_view(
         &self,
         repository: &WorktreeRepository,
@@ -1301,13 +2036,91 @@ impl GitronimoApp {
             .flex_col()
             .gap_4()
             .child(div().text_xl().child("Working Copy"))
+            .child(file_action_button(
+                "Checkout branch…",
+                colors,
+                cx,
+                |_, cx| {
+                    GitronimoApp::prompt_branch_name(false, cx);
+                },
+            ))
+            .child(file_action_button(
+                "New branch from HEAD…",
+                colors,
+                cx,
+                |_, cx| {
+                    GitronimoApp::prompt_branch_name(true, cx);
+                },
+            ))
+            .child(file_action_button(
+                "Rename current branch…",
+                colors,
+                cx,
+                |_, cx| GitronimoApp::prompt_rename_current_branch(cx),
+            ))
+            .child(file_action_button(
+                "Delete local branch…",
+                colors,
+                cx,
+                |_, cx| GitronimoApp::prompt_delete_local_branch(cx),
+            ))
+            .child(file_action_button(
+                "Fetch default remote",
+                colors,
+                cx,
+                |app, cx| {
+                    app.fetch_default_remote(cx);
+                },
+            ))
+            .child(file_action_button(
+                "Fetch remote…",
+                colors,
+                cx,
+                |_, cx| {
+                    GitronimoApp::prompt_fetch_remote(cx);
+                },
+            ))
+            .child(file_action_button(
+                "Pull current branch",
+                colors,
+                cx,
+                |app, cx| {
+                    app.pull_current(cx);
+                },
+            ))
+            .child(file_action_button(
+                "Push current branch",
+                colors,
+                cx,
+                |app, cx| {
+                    app.push_current(cx);
+                },
+            ))
+            .child(file_action_button(
+                "Publish current branch",
+                colors,
+                cx,
+                |app, cx| {
+                    app.publish_current(cx);
+                },
+            ))
+            .child(file_action_button(
+                "Advanced force-with-lease…",
+                colors,
+                cx,
+                GitronimoApp::request_force_with_lease,
+            ))
+            .children(self.network_cancel_button(colors, cx))
             .child(file_action_button("History", colors, cx, {
                 let repository = repository.clone();
                 move |app, cx| app.show_history(repository.clone(), cx)
             }))
             .child(repository.worktree_root.display().to_string())
+            .children(self.ref_context_menu_view(colors, cx))
             .child(self.mutation_controls(colors, cx))
             .children(self.discard_confirmation_view(colors, cx))
+            .children(self.branch_delete_confirmation_view(colors, cx))
+            .children(self.force_with_lease_confirmation_view(colors, cx))
             .child(self.commit_composer_view(colors, cx))
             .children(self.context_menu_view(repository, colors, cx))
             .child(self.status_group_view("Staged", &groups.staged, true, colors, cx))
@@ -1333,6 +2146,88 @@ impl GitronimoApp {
                         .contains(&search)
             })
             .count()
+    }
+
+    fn ref_context_menu_view(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        let context = self.ref_context.clone()?;
+        let (title, reference) = match &context {
+            RefContext::LocalBranch(name) => ("Local branch", name.clone()),
+            RefContext::RemoteBranch(name) => ("Remote branch", name.clone()),
+            RefContext::Tag(name) => ("Tag", name.clone()),
+            RefContext::Remote(name) => ("Remote", name.clone()),
+        };
+        let mut menu = div()
+            .p_2()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .bg(colors.raised_background)
+            .border_1()
+            .border_color(colors.border)
+            .child(format!("{title}: {reference}"));
+        match context {
+            RefContext::LocalBranch(branch) => {
+                let checkout = branch.clone();
+                let history = branch.clone();
+                menu = menu
+                    .child(file_action_button(
+                        "Checkout branch",
+                        colors,
+                        cx,
+                        move |app, cx| {
+                            app.checkout_branch(checkout.clone(), cx);
+                        },
+                    ))
+                    .child(file_action_button(
+                        "View branch history",
+                        colors,
+                        cx,
+                        move |app, cx| {
+                            app.show_ref_history(history.clone(), cx);
+                        },
+                    ));
+            }
+            RefContext::RemoteBranch(branch) | RefContext::Tag(branch) => {
+                let create_start = branch.clone();
+                let history = branch.clone();
+                menu = menu
+                    .child(file_action_button(
+                        "New branch from ref…",
+                        colors,
+                        cx,
+                        move |_, cx| {
+                            GitronimoApp::prompt_branch_from_ref(create_start.clone(), cx);
+                        },
+                    ))
+                    .child(file_action_button(
+                        "View ref history",
+                        colors,
+                        cx,
+                        move |app, cx| {
+                            app.show_ref_history(history.clone(), cx);
+                        },
+                    ));
+            }
+            RefContext::Remote(remote) => {
+                menu = menu.child(file_action_button(
+                    "Fetch this remote",
+                    colors,
+                    cx,
+                    move |app, cx| {
+                        app.run_network_command(
+                            format!("Fetching {remote}"),
+                            vec!["fetch".into(), "--progress".into(), remote.clone().into()],
+                            cx,
+                        );
+                    },
+                ));
+            }
+        }
+        Some(menu.into_any_element())
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1543,6 +2438,12 @@ impl GitronimoApp {
                 cx,
                 GitronimoApp::copy_selected_history_oid,
             ))
+            .child(file_action_button(
+                "New branch from selected commit…",
+                colors,
+                cx,
+                |_, cx| GitronimoApp::prompt_branch_from_selected(cx),
+            ))
             .child(rows)
             .children(load_more)
             .children(inspector)
@@ -1621,6 +2522,70 @@ impl GitronimoApp {
                 ))
                 .child(file_action_button("Confirm discard", colors, cx, |app, cx| {
                     app.confirm_discard(cx);
+                }))
+                .into_any_element()
+        })
+    }
+
+    fn branch_delete_confirmation_view(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        self.pending_branch_delete.as_ref().map(|branch| {
+            div()
+                .p_2()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child(format!(
+                    "Delete local branch {branch}? Safe deletion refuses unmerged work."
+                ))
+                .child(file_action_button(
+                    "Delete merged branch",
+                    colors,
+                    cx,
+                    |app, cx| {
+                        app.confirm_branch_delete(false, cx);
+                    },
+                ))
+                .child(file_action_button(
+                    "Force delete unmerged branch",
+                    colors,
+                    cx,
+                    |app, cx| app.confirm_branch_delete(true, cx),
+                ))
+                .into_any_element()
+        })
+    }
+
+    fn network_cancel_button(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        self.network_operation.as_ref().map(|_| {
+            file_action_button("Cancel network operation", colors, cx, |app, cx| {
+                app.cancel_network_operation(cx);
+            })
+            .into_any_element()
+        })
+    }
+
+    fn force_with_lease_confirmation_view(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        (self.force_push_state == ForcePushState::AwaitingConfirmation).then(|| {
+            div()
+                .p_2()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child("Force-with-lease can replace remote commits only when your fetched remote ref is current.")
+                .child(file_action_button("Confirm force-with-lease", colors, cx, |app, cx| {
+                    app.confirm_force_with_lease(cx);
                 }))
                 .into_any_element()
         })
@@ -2028,7 +2993,7 @@ fn resize_width(width: f32) -> f32 {
 mod tests {
     use super::{
         GitPath, GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, ShellState,
-        eligible_trash_path, keymap, resize_width, window_options,
+        eligible_trash_path, keymap, network_failure_message, resize_width, window_options,
     };
     use app_core::RecentRepositoryStore;
     use gpui::{AppContext, Keystroke, TestAppContext};
@@ -2096,6 +3061,22 @@ mod tests {
             ShellState::Error("message".into()),
             ShellState::Error(_)
         ));
+    }
+
+    #[test]
+    fn network_failures_are_actionable_without_echoing_remote_output() {
+        assert!(
+            network_failure_message("Pushing", "Permission denied (publickey)")
+                .contains("authentication was rejected")
+        );
+        assert!(
+            network_failure_message("Pushing", "rejected non-fast-forward")
+                .contains("remote has newer commits")
+        );
+        assert!(
+            !network_failure_message("Fetching", "https://token@example.test/repo")
+                .contains("token@example.test")
+        );
     }
 
     #[test]

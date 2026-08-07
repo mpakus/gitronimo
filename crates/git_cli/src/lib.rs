@@ -14,9 +14,9 @@ use std::{
 use app_core::{RepositoryDiscoverer, RepositoryOpenError};
 use git_domain::{
     BranchStatus, CommitIdentity, DiffFile, DiffHunk, DiffLine, DiffLineKind, FileStatus, GitPath,
-    HeadStatus, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest, RefDecoration,
-    RenameKind, RepositoryLocation, StatusEntry, SubmoduleState, UnifiedDiff, WorktreeRepository,
-    WorktreeStatus,
+    HeadStatus, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest, NamedRef,
+    RefDecoration, RefSnapshot, Remote, RenameKind, RepositoryLocation, StatusEntry,
+    SubmoduleState, UnifiedDiff, WorktreeRepository, WorktreeStatus,
 };
 
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
@@ -233,6 +233,154 @@ impl GitExecutable {
             return Err(command_error(&output));
         }
         parse_ref_decorations(&output.stdout)
+    }
+
+    /// Loads branches, tags, and configured remotes without parsing presentation output.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects a ref or configuration query.
+    pub fn ref_snapshot(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<RefSnapshot, GitStatusError> {
+        let refs = self.run(
+            &repository.worktree_root,
+            [
+                "for-each-ref",
+                "--format=%(refname)%00%(objectname)%00",
+                "refs/heads",
+                "refs/remotes",
+                "refs/tags",
+            ],
+        )?;
+        if !refs.status.success() {
+            return Err(command_error(&refs));
+        }
+        let remotes = self.run(
+            &repository.worktree_root,
+            ["config", "--null", "--get-regexp", "^remote\\..*\\.url$"],
+        )?;
+        if !remotes.status.success() && remotes.status.code() != Some(1) {
+            return Err(command_error(&remotes));
+        }
+        parse_ref_snapshot(&refs.stdout, &remotes.stdout)
+    }
+
+    /// Checks out an existing branch through Git's safe switch command.
+    ///
+    /// # Errors
+    /// Returns Git's actionable failure, including dirty-worktree rejection.
+    pub fn checkout_branch(
+        &self,
+        repository: &WorktreeRepository,
+        branch: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["switch", branch])
+    }
+
+    /// Creates and checks out a branch from HEAD or an explicit starting ref.
+    ///
+    /// # Errors
+    /// Returns Git's actionable failure when the name or starting ref is invalid.
+    pub fn create_branch(
+        &self,
+        repository: &WorktreeRepository,
+        branch: &str,
+        start: Option<&str>,
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![
+            OsString::from("switch"),
+            OsString::from("--create"),
+            OsString::from(branch),
+        ];
+        if let Some(start) = start {
+            args.push(OsString::from(start));
+        }
+        self.mutate(repository, args)
+    }
+
+    /// Renames a local branch without a shell command.
+    ///
+    /// # Errors
+    /// Returns Git's actionable failure when the requested rename is invalid.
+    pub fn rename_branch(
+        &self,
+        repository: &WorktreeRepository,
+        old: &str,
+        new: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["branch", "--move", old, new])
+    }
+
+    /// Deletes a local branch; callers must explicitly opt in to force deletion.
+    ///
+    /// # Errors
+    /// Returns Git's refusal for an unmerged branch unless `force` is true.
+    pub fn delete_branch(
+        &self,
+        repository: &WorktreeRepository,
+        branch: &str,
+        force: bool,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(
+            repository,
+            ["branch", if force { "-D" } else { "--delete" }, branch],
+        )
+    }
+
+    /// Fetches all configured refs from a selected remote.
+    ///
+    /// # Errors
+    /// Returns Git's actionable authentication or transport failure.
+    pub fn fetch_remote(
+        &self,
+        repository: &WorktreeRepository,
+        remote: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["fetch", "--progress", remote])
+    }
+
+    /// Pulls the configured upstream for the current branch.
+    ///
+    /// # Errors
+    /// Returns Git's actionable transport, authentication, or merge failure.
+    pub fn pull_current(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["pull", "--progress"])
+    }
+
+    /// Pushes the current branch without force.
+    ///
+    /// # Errors
+    /// Returns Git's actionable transport, authentication, or non-fast-forward failure.
+    pub fn push_current(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["push", "--progress"])
+    }
+
+    /// Force-pushes the current branch only when the tracked remote ref has not changed.
+    ///
+    /// # Errors
+    /// Returns Git's lease rejection or transport failure.
+    pub fn push_current_with_lease(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["push", "--progress", "--force-with-lease"])
+    }
+
+    /// Publishes a branch and sets its upstream without force.
+    ///
+    /// # Errors
+    /// Returns Git's actionable transport or authentication failure.
+    pub fn publish_branch(
+        &self,
+        repository: &WorktreeRepository,
+        remote: &str,
+        branch: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(
+            repository,
+            ["push", "--progress", "--set-upstream", remote, branch],
+        )
     }
 
     /// Lists the paths changed by one commit without parsing human-oriented output.
@@ -1024,6 +1172,54 @@ fn parse_ref_decorations(bytes: &[u8]) -> Result<Vec<RefDecoration>, GitStatusEr
         .collect()
 }
 
+fn parse_ref_snapshot(refs: &[u8], remotes: &[u8]) -> Result<RefSnapshot, GitStatusError> {
+    let fields = refs
+        .split(|byte| *byte == 0)
+        .filter(|field| field.iter().any(|byte| !byte.is_ascii_whitespace()))
+        .collect::<Vec<_>>();
+    if fields.len() % 2 != 0 {
+        return Err(GitStatusError::ParseHistory);
+    }
+    let mut snapshot = RefSnapshot::default();
+    for pair in fields.chunks_exact(2) {
+        let (name, target) = (
+            pair[0].trim_ascii_start(),
+            std::str::from_utf8(pair[1]).map_err(|_| GitStatusError::ParseHistory)?,
+        );
+        let named = |prefix: &[u8]| NamedRef {
+            name: GitPath(name[prefix.len()..].to_vec()),
+            target: target.to_owned(),
+        };
+        if name.starts_with(b"refs/heads/") {
+            snapshot.local_branches.push(named(b"refs/heads/"));
+        } else if name.starts_with(b"refs/remotes/") {
+            snapshot.remote_branches.push(named(b"refs/remotes/"));
+        } else if name.starts_with(b"refs/tags/") {
+            snapshot.tags.push(named(b"refs/tags/"));
+        }
+    }
+    for entry in remotes
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+    {
+        let (key, url) = entry.split_at(
+            entry
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .ok_or(GitStatusError::ParseHistory)?,
+        );
+        let name = key
+            .strip_prefix(b"remote.")
+            .and_then(|key| key.strip_suffix(b".url"))
+            .ok_or(GitStatusError::ParseHistory)?;
+        snapshot.remotes.push(Remote {
+            name: GitPath(name.to_vec()),
+            fetch_url: url[1..].to_vec(),
+        });
+    }
+    Ok(snapshot)
+}
+
 fn git_candidates() -> Vec<PathBuf> {
     let mut candidates = env::var_os("GITRONIMO_GIT")
         .into_iter()
@@ -1075,6 +1271,15 @@ mod tests {
                 GitExecutable::discover().expect("Git should be installed for integration tests");
             let repository = Self { path, git };
             repository.success(["init", "--initial-branch=main"]);
+            repository.success(["config", "user.email", "test@gitronimo.invalid"]);
+            repository.success(["config", "user.name", "Gitronimo Test"]);
+            repository
+        }
+
+        fn at(path: std::path::PathBuf) -> Self {
+            let git =
+                GitExecutable::discover().expect("Git should be installed for integration tests");
+            let repository = Self { path, git };
             repository.success(["config", "user.email", "test@gitronimo.invalid"]);
             repository.success(["config", "user.name", "Gitronimo Test"]);
             repository
@@ -1584,6 +1789,217 @@ Binary files a/image.png and b/image.png differ\n",
                 .iter()
                 .all(|commit| !commit.oid.is_empty())
         );
+    }
+
+    #[test]
+    fn loads_ref_snapshot_from_a_real_repository() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        repository.success(["branch", "feature/nested"]);
+        repository.success(["tag", "v1.0.0"]);
+        let remote = repository.path.with_extension("refs.git");
+        repository.success([
+            "clone",
+            "--bare",
+            ".",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        repository.success([
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        repository.success(["fetch", "origin"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("worktree should resolve")
+        else {
+            panic!("fixture should be worktree")
+        };
+        let snapshot = repository
+            .git
+            .ref_snapshot(&worktree)
+            .expect("snapshot should load");
+        assert!(
+            snapshot
+                .local_branches
+                .iter()
+                .any(|branch| branch.name.0 == b"main")
+        );
+        assert!(
+            snapshot
+                .local_branches
+                .iter()
+                .any(|branch| branch.name.0 == b"feature/nested")
+        );
+        assert!(
+            snapshot
+                .remote_branches
+                .iter()
+                .any(|branch| branch.name.0 == b"origin/main")
+        );
+        assert!(snapshot.tags.iter().any(|tag| tag.name.0 == b"v1.0.0"));
+        assert!(
+            snapshot
+                .remotes
+                .iter()
+                .any(|remote| remote.name.0 == b"origin")
+        );
+        let _ = fs::remove_dir_all(remote);
+    }
+
+    #[test]
+    fn creates_switches_renames_and_safely_deletes_branches() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("worktree should resolve")
+        else {
+            panic!("fixture should be worktree")
+        };
+        repository
+            .git
+            .create_branch(&worktree, "feature/from-head", None)
+            .expect("branch should create from HEAD");
+        repository
+            .git
+            .rename_branch(&worktree, "feature/from-head", "feature/renamed")
+            .expect("branch should rename");
+        repository
+            .git
+            .checkout_branch(&worktree, "main")
+            .expect("main should checkout");
+        repository
+            .git
+            .delete_branch(&worktree, "feature/renamed", false)
+            .expect("merged branch should delete");
+        repository
+            .git
+            .create_branch(&worktree, "topic", Some("main"))
+            .expect("branch should create from explicit ref");
+        repository.commit("unmerged");
+        repository
+            .git
+            .checkout_branch(&worktree, "main")
+            .expect("main should checkout");
+        assert!(
+            repository
+                .git
+                .delete_branch(&worktree, "topic", false)
+                .is_err()
+        );
+        repository
+            .git
+            .delete_branch(&worktree, "topic", true)
+            .expect("explicit forced deletion should work");
+    }
+
+    #[test]
+    fn fetches_pushes_and_publishes_to_a_local_bare_remote() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let remote = repository.path.with_extension("publish.git");
+        repository.success([
+            "clone",
+            "--bare",
+            ".",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        repository.success([
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("worktree should resolve")
+        else {
+            panic!("fixture should be worktree")
+        };
+        repository
+            .git
+            .fetch_remote(&worktree, "origin")
+            .expect("fetch should work");
+        repository
+            .git
+            .publish_branch(&worktree, "origin", "main")
+            .expect("publish should set upstream");
+        repository.commit("push");
+        repository
+            .git
+            .push_current(&worktree)
+            .expect("ordinary push should work");
+        let collaborator = repository.path.with_extension("pull-collaborator");
+        repository.success([
+            "clone",
+            remote.to_str().expect("temporary path is UTF-8"),
+            collaborator.to_str().expect("temporary path is UTF-8"),
+        ]);
+        let collaborator_repository = Repository::at(collaborator.clone());
+        collaborator_repository.commit("remote change");
+        collaborator_repository.success(["push"]);
+        repository
+            .git
+            .pull_current(&worktree)
+            .expect("pull should apply the configured upstream");
+        let _ = fs::remove_dir_all(remote);
+        let _ = fs::remove_dir_all(collaborator);
+    }
+
+    #[test]
+    fn force_with_lease_updates_a_fetched_diverged_branch() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let remote = repository.path.with_extension("lease.git");
+        repository.success([
+            "clone",
+            "--bare",
+            ".",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        repository.success([
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("worktree should resolve")
+        else {
+            panic!("fixture should be worktree")
+        };
+        repository
+            .git
+            .publish_branch(&worktree, "origin", "main")
+            .expect("main should publish");
+        let collaborator = repository.path.with_extension("collaborator");
+        repository.success([
+            "clone",
+            remote.to_str().expect("temporary path is UTF-8"),
+            collaborator.to_str().expect("temporary path is UTF-8"),
+        ]);
+        let collaborator_repository = Repository::at(collaborator.clone());
+        collaborator_repository.commit("remote change");
+        collaborator_repository.success(["push"]);
+        repository.commit("local change");
+        repository
+            .git
+            .fetch_remote(&worktree, "origin")
+            .expect("tracking ref should refresh");
+        repository
+            .git
+            .push_current_with_lease(&worktree)
+            .expect("explicit lease push should update the diverged remote");
+        let _ = fs::remove_dir_all(remote);
+        let _ = fs::remove_dir_all(collaborator);
     }
 
     #[test]

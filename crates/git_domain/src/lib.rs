@@ -180,6 +180,27 @@ pub struct RefDecoration {
     pub target: String,
 }
 
+/// A non-mutating snapshot of refs and configured remotes.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RefSnapshot {
+    pub local_branches: Vec<NamedRef>,
+    pub remote_branches: Vec<NamedRef>,
+    pub tags: Vec<NamedRef>,
+    pub remotes: Vec<Remote>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NamedRef {
+    pub name: GitPath,
+    pub target: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Remote {
+    pub name: GitPath,
+    pub fetch_url: Vec<u8>,
+}
+
 /// Lane state carried between bounded history pages.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GraphState {

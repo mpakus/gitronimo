@@ -133,6 +133,27 @@ impl RecentRepositoryStore {
         self.save(&document)
     }
 
+    /// Returns persisted ref-browser group keys.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_expanded_ref_groups(&self) -> Result<Vec<String>, RecentRepositoryStoreError> {
+        Ok(self.load_document()?.expanded_ref_groups)
+    }
+
+    /// Stores ref-browser group keys while retaining recents and geometry.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_expanded_ref_groups(
+        &self,
+        groups: Vec<String>,
+    ) -> Result<(), RecentRepositoryStoreError> {
+        let mut document = self.load_document()?;
+        document.expanded_ref_groups = groups;
+        self.save(&document)
+    }
+
     fn load_document(&self) -> Result<RecentRepositoryDocument, RecentRepositoryStoreError> {
         match fs::read(&self.path) {
             Ok(bytes) => {
@@ -195,6 +216,8 @@ struct RecentRepositoryDocument {
     recent_repositories: Vec<PathBuf>,
     #[serde(default)]
     window_geometry: Option<WindowGeometry>,
+    #[serde(default)]
+    expanded_ref_groups: Vec<String>,
 }
 
 impl Default for RecentRepositoryDocument {
@@ -203,6 +226,7 @@ impl Default for RecentRepositoryDocument {
             schema_version: STORE_SCHEMA_VERSION,
             recent_repositories: Vec::new(),
             window_geometry: None,
+            expanded_ref_groups: Vec::new(),
         }
     }
 }
@@ -247,6 +271,22 @@ mod tests {
 
         assert_eq!(recents, vec![first, second]);
         assert_eq!(store.load().expect("store should reload"), recents);
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn expanded_ref_groups_survive_restart() {
+        let (directory, store) = temporary_store();
+        let groups = vec!["local:feature".into(), "remote:origin/topic".into()];
+        store
+            .save_expanded_ref_groups(groups.clone())
+            .expect("groups should save");
+        assert_eq!(
+            store
+                .load_expanded_ref_groups()
+                .expect("groups should reload"),
+            groups
+        );
         let _ = fs::remove_dir_all(directory);
     }
 

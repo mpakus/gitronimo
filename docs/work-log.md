@@ -1,5 +1,101 @@
 # Implementation work log
 
+## 2026-08-07 — Phase 5 / interactive hierarchical ref browser
+
+**Intent:** render slash-separated refs as expandable sidebar groups, retain expansion choices across launches, and expose safe context actions for local refs, remote refs, tags, and remotes.
+
+**Files:** `crates/app_core/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** hierarchy derives only from the already-loaded ref snapshot; expansion keys are persisted in the existing versioned preferences document; selecting a ref reveals context-appropriate actions without introducing Git work in render code; app-core tests prove persistence and desktop tests prove hierarchy/action selection helpers.
+
+## 2026-08-07 — Phase 5 / advanced force-with-lease
+
+**Intent:** offer force-with-lease only behind a separate confirmation, never through ordinary push or publish.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the typed Git boundary uses `--force-with-lease` rather than `--force`; the UI has no default force path and requires a second explicit confirmation before starting the network operation; a local bare-remote fixture proves the argument can update a diverged branch.
+
+## 2026-08-07 — Phase 5 / cancellable network operations
+
+**Intent:** run fetch, pull, push, and publish through the existing piped Git child boundary so the UI can show an active operation and cancel it without blocking rendering.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** a network operation owns exactly one in-flight Git child; cancellation requests termination from the UI thread without waiting; completion clears the operation, refreshes refs and status only on success, and preserves a concise actionable failure category.
+
+## 2026-08-07 — Phase 5 / local branch safety controls
+
+**Intent:** expose current-branch rename and a deliberate two-step local-branch deletion flow over the already-tested Git mutation boundary.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** rename is available only from an attached local branch; deletion accepts only a current local ref, shows the affected branch before either safe or explicit force deletion, and each successful operation refreshes working-copy and ref state.
+
+## 2026-08-07 — Phase 5 / branch from history selection
+
+**Intent:** create and check out a local branch from the currently selected commit without using a text-supplied revision.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the control is only meaningful with a selected history commit; its exact OID is supplied to the existing typed create-branch boundary; success refreshes refs and status.
+
+## 2026-08-07 — Phase 5 / selected remote fetch
+
+**Intent:** let users choose a configured remote for fetch while rejecting arbitrary dialog input before a Git process starts.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the chooser accepts only names from the current ref snapshot; cancellation is a no-op; a valid remote uses the same background mutation and refresh lifecycle as the default fetch.
+
+## 2026-08-07 — Phase 5 / remote controls
+
+**Intent:** expose fetch, pull, push, and publish through the existing background mutation lifecycle without a default force path.
+
+**Files:** `apps/desktop/src/main.rs` and this work log.
+
+**Acceptance checks:** controls use the first configured remote only as an explicit default; pull/push require current upstream; publish sets upstream; all success paths refresh status and refs while failures retain Git's useful stderr in the activity area.
+
+## 2026-08-07 — Phase 5 / remote mutation boundary
+
+**Intent:** add typed fetch, pull, push, and publish commands backed by local bare-remote integration tests.
+
+**Files:** `crates/git_cli/src/lib.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the default or selected remote is passed as an individual argument; ordinary push/pull never imply force; publishing explicitly sets upstream; local-bare fixtures prove state propagation and failures return Git stderr to the UI.
+
+## 2026-08-07 — Phase 5 / branch controls
+
+**Intent:** expose safe checkout and create-from-HEAD controls through native prompts and the existing background mutation lifecycle.
+
+**Files:** `apps/desktop/src/main.rs` and this work log.
+
+**Acceptance checks:** branch commands never run on the render thread; in-flight work disables duplicate requests; success refreshes working-copy and ref state; Git's dirty-worktree failures remain visible in the activity status.
+
+## 2026-08-07 — Phase 5 / local branch mutation boundary
+
+**Intent:** add typed checkout, create, rename, and delete operations at the Git boundary before wiring confirmations into the UI.
+
+**Files:** `crates/git_cli/src/lib.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** temporary repositories cover branch creation from HEAD and a selected ref, checkout, rename, safe merged deletion, unmerged refusal, forced deletion only through an explicit caller choice, dirty-worktree rejection, and detached HEAD status.
+
+## 2026-08-07 — Phase 5 / ref sidebar
+
+**Intent:** display the tested ref snapshot in the existing repository sidebar without moving Git work into rendering.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** opening a repository loads refs on the background executor; the sidebar exposes local/remote branches, tags, remotes, and current/upstream/ahead-behind status; stale repository loads are ignored.
+
+## 2026-08-07 — Phase 5 / ref browser boundary
+
+**Intent:** load one UI-independent snapshot of local and remote branches, tags, and remotes through typed Git commands before adding mutations.
+
+**Files:** `crates/git_domain/src/lib.rs`, `crates/git_cli/src/lib.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** a real repository fixture proves local/remote branches, tags, remotes, current branch, upstream, and ahead/behind are represented without parsing human-oriented Git output; hierarchical names retain their path segments for the UI.
+
 ## 2026-08-07 — Phase 4 / history list overscan
 
 **Intent:** use GPUI’s retained virtual list for a small, explicit history-row overdraw buffer above and below the viewport.
