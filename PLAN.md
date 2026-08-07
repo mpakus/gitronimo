@@ -1533,7 +1533,7 @@ Prove that GPUI, packaging, virtualization, Git process execution, and the propo
 - [x] Add `rust-toolchain.toml`.
 - [x] Pin `gpui = "=0.2.2"`.
 - [x] Pin `gpui-component = "=0.5.1"` for evaluation.
-- [ ] Commit `Cargo.lock`.
+- [x] Commit `Cargo.lock`.
 - [x] Add formatting, Clippy, tests, and `cargo-deny` CI.
 - [x] Add Apache-2.0 or MIT/Apache-2.0 project license decision.
 - [x] Add `AGENTS.md` with Codex rules.
@@ -1584,7 +1584,7 @@ Prove that GPUI, packaging, virtualization, Git process execution, and the propo
 
 ## Exit criteria
 
-- [ ] All spikes compile from a clean checkout.
+- [x] All spikes compile from a clean checkout.
 - [x] GPUI version and component decision are recorded.
 - [ ] 100,000-row synthetic list remains responsive.
 - [x] Git status fixture with unusual filenames parses correctly.

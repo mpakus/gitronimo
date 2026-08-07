@@ -157,3 +157,5 @@
 **Files:** all Phase 0 source, policy, packaging, and original icon files; explicitly excluding `docs/screens` and `.DS_Store` files.
 
 **Acceptance checks:** the commit contains `Cargo.lock` and every required Phase 0 implementation file, and its detached worktree passes the workspace build and test suite.
+
+**Verification:** commit `65998ae` contains the Phase 0 implementation and `Cargo.lock`, without the Tower screenshots or `.DS_Store` files. A detached worktree at that exact commit passed `cargo build --workspace --all-targets` and the full workspace unit and doc test suite under the pinned Rust 1.97.1 Cargo/Rustc/Rustdoc executables.
