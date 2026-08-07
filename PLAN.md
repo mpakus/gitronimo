@@ -1601,31 +1601,31 @@ Create a stable macOS application shell that can open and remember repositories.
 
 ## Checklist
 
-- [ ] Implement application startup.
-- [ ] Implement main window.
-- [ ] Implement app menu.
-- [ ] Implement global actions.
-- [ ] Implement system/light/dark theme.
-- [ ] Implement welcome view.
-- [ ] Implement folder picker.
-- [ ] Implement drag-and-drop folder opening.
-- [ ] Implement repository discovery.
-- [ ] Detect worktree root and Git directory.
-- [ ] Detect bare repository and show unsupported state.
-- [ ] Implement recent repository persistence.
-- [ ] Implement one window per repository or a clearly documented single-window model.
-- [ ] Restore window geometry.
-- [ ] Add empty, loading, and error states.
-- [ ] Add activity status area.
-- [ ] Add application diagnostics view.
+- [x] Implement application startup.
+- [x] Implement main window.
+- [x] Implement app menu.
+- [x] Implement global actions.
+- [x] Implement system/light/dark theme.
+- [x] Implement welcome view.
+- [x] Implement folder picker.
+- [x] Implement drag-and-drop folder opening.
+- [x] Implement repository discovery.
+- [x] Detect worktree root and Git directory.
+- [x] Detect bare repository and show unsupported state.
+- [x] Implement recent repository persistence.
+- [x] Implement one window per repository or a clearly documented single-window model.
+- [x] Restore window geometry.
+- [x] Add empty, loading, and error states.
+- [x] Add activity status area.
+- [x] Add application diagnostics view.
 
 ## Exit criteria
 
-- [ ] User can launch `.app`, choose a repository, close, relaunch, and reopen it.
-- [ ] Invalid and non-repository folders show actionable messages.
-- [ ] Repository opening never blocks first window rendering.
-- [ ] Recent repository data survives schema-safe restart.
-- [ ] Core actions are keyboard accessible.
+- [x] User can launch `.app`, choose a repository, close, relaunch, and reopen it.
+- [x] Invalid and non-repository folders show actionable messages.
+- [x] Repository opening never blocks first window rendering.
+- [x] Recent repository data survives schema-safe restart.
+- [x] Core actions are keyboard accessible.
 
 ---
 

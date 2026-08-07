@@ -9,6 +9,8 @@ publish = false
 
 [dependencies]
 git_domain = { path = "../git_domain", version = "0.1.0" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
 
 [lints]
 workspace = true

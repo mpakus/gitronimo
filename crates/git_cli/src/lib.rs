@@ -8,6 +8,9 @@ use std::{
     process::{Child, ChildStderr, Command, ExitStatus, Output, Stdio},
 };
 
+use app_core::{RepositoryDiscoverer, RepositoryOpenError};
+use git_domain::{RepositoryLocation, WorktreeRepository};
+
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +75,61 @@ impl GitExecutable {
         self.command(directory, args).output()
     }
 
+    /// Classifies a selected directory using Git's canonical worktree and Git-dir paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns an actionable error when Git cannot classify the selected path.
+    pub fn discover_repository(
+        &self,
+        path: &Path,
+    ) -> Result<RepositoryLocation, RepositoryOpenError> {
+        if !path.is_dir() {
+            return Err(RepositoryOpenError::NotDirectory(path.to_path_buf()));
+        }
+
+        let bare = self
+            .run(path, ["rev-parse", "--is-bare-repository"])
+            .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+        if !bare.status.success() {
+            return Err(RepositoryOpenError::NotRepository(path.to_path_buf()));
+        }
+
+        match String::from_utf8_lossy(&bare.stdout).trim() {
+            "true" => path
+                .canonicalize()
+                .map(|git_dir| RepositoryLocation::Bare { git_dir })
+                .map_err(|_| RepositoryOpenError::DiscoveryFailed),
+            "false" => {
+                let locations = self
+                    .run(path, ["rev-parse", "--show-toplevel", "--absolute-git-dir"])
+                    .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+                if !locations.status.success() {
+                    return Err(RepositoryOpenError::DiscoveryFailed);
+                }
+                let locations = String::from_utf8_lossy(&locations.stdout);
+                let mut lines = locations.lines();
+                let Some(worktree_root) = lines.next() else {
+                    return Err(RepositoryOpenError::DiscoveryFailed);
+                };
+                let Some(git_dir) = lines.next() else {
+                    return Err(RepositoryOpenError::DiscoveryFailed);
+                };
+                let worktree_root = PathBuf::from(worktree_root)
+                    .canonicalize()
+                    .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+                let git_dir = PathBuf::from(git_dir)
+                    .canonicalize()
+                    .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+                Ok(RepositoryLocation::Worktree(WorktreeRepository {
+                    worktree_root,
+                    git_dir,
+                }))
+            }
+            _ => Err(RepositoryOpenError::DiscoveryFailed),
+        }
+    }
+
     /// Starts Git with piped standard streams for progress and cancellation.
     ///
     /// # Errors
@@ -99,6 +157,12 @@ impl GitExecutable {
         let mut command = Command::new(&self.0);
         command.current_dir(directory).args(args);
         command
+    }
+}
+
+impl RepositoryDiscoverer for GitExecutable {
+    fn discover_repository(&self, path: &Path) -> Result<RepositoryLocation, RepositoryOpenError> {
+        self.discover_repository(path)
     }
 }
 
@@ -221,6 +285,8 @@ mod tests {
     use super::{
         GitExecutable, StatusEntry, git_candidates, parse_commit_records, parse_porcelain_v2_z,
     };
+    use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
+    use git_domain::RepositoryLocation;
 
     static NEXT_REPOSITORY: AtomicUsize = AtomicUsize::new(0);
 
@@ -328,6 +394,62 @@ mod tests {
         let commits = parse_commit_records(&output.stdout).expect("commit separators should parse");
         assert_eq!(commits.len(), 500);
         assert_eq!(commits[0].subject, b"commit 499");
+    }
+
+    #[test]
+    fn discovers_nested_worktrees_and_rejects_bare_or_invalid_locations() {
+        let repository = Repository::new();
+        let nested = repository.path.join("nested");
+        fs::create_dir_all(&nested).expect("nested directory should create");
+
+        let location = repository
+            .git
+            .discover_repository(&nested)
+            .expect("nested folder should resolve to its worktree");
+        let RepositoryLocation::Worktree(worktree) = location else {
+            panic!("fixture should be a working-tree repository");
+        };
+        assert_eq!(
+            worktree.worktree_root,
+            repository
+                .path
+                .canonicalize()
+                .expect("fixture path should resolve")
+        );
+        assert!(worktree.git_dir.is_dir());
+        assert_eq!(
+            open_repository(&repository.git, &nested).expect("app core should open worktree"),
+            worktree
+        );
+
+        let bare = repository.path.with_extension("bare.git");
+        repository.success([
+            "init",
+            "--bare",
+            bare.to_str().expect("temporary path is UTF-8"),
+        ]);
+        assert!(matches!(
+            repository.git.discover_repository(&bare),
+            Ok(RepositoryLocation::Bare { .. })
+        ));
+        assert!(matches!(
+            open_repository(&repository.git, &bare),
+            Err(RepositoryOpenError::BareRepository(_))
+        ));
+        assert!(matches!(
+            repository
+                .git
+                .discover_repository(&nested.join("not-a-directory")),
+            Err(RepositoryOpenError::NotDirectory(_))
+        ));
+        let outside = repository.path.with_extension("outside");
+        fs::create_dir_all(&outside).expect("outside directory should create");
+        assert!(matches!(
+            RepositoryDiscoverer::discover_repository(&repository.git, &outside),
+            Err(RepositoryOpenError::NotRepository(_))
+        ));
+        let _ = fs::remove_dir_all(bare);
+        let _ = fs::remove_dir_all(outside);
     }
 
     #[test]

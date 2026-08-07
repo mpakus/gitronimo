@@ -80,6 +80,8 @@ name = "app_core"
 version = "0.1.0"
 dependencies = [
  "git_domain",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

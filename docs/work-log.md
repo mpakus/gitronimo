@@ -169,3 +169,33 @@
 **Acceptance checks:** the root view retains a `UniformListScrollHandle`; a GPUI visual test draws the same 100,000-row uniform-list configuration, requests item 99,999, redraws, and observes only the final visible range.
 
 **Verification:** the visual test jumps strictly to item 99,999 and confirms the rendered range ends at 100,000 while its length remains smaller than the full list. GPUI 0.2.2's `logical_scroll_top_index` test helper is not used because it tracks retained child bounds, which virtual lists intentionally omit for off-screen rows.
+
+## 2026-08-06 — Phase 1 / repository opening boundary
+
+**Intent:** define a UI-independent repository classification and versioned recent-repository store before wiring asynchronous opening into the desktop shell.
+
+**Files:** `git_domain`, `app_core`, `git_cli`, their manifests, and this work log.
+
+**Acceptance checks:** Git discovery resolves a selected nested directory to its worktree root and absolute Git directory, classifies bare repositories as unsupported, and distinguishes non-repositories; a schema-versioned JSON store preserves recent paths and safely rejects unknown schema versions.
+
+**Verification:** focused real-repository and persistence tests will cover nested worktrees, bare repositories, invalid paths, deduplicated recents, and unsupported store versions.
+
+## 2026-08-06 — Phase 1 / desktop shell
+
+**Intent:** replace the Phase 0 synthetic proof layout with a keyboard-accessible welcome and repository shell that opens selected directories without blocking first-window rendering.
+
+**Files:** desktop actions, menu/keymap, root view, and this work log.
+
+**Acceptance checks:** Command-O invokes GPUI's native directory picker; opening runs Git discovery in GPUI's background executor; valid repositories render a dedicated shell, while invalid and bare selections render actionable errors; the welcome view exposes recent repositories, an activity area, and diagnostics.
+
+**Verification:** focused GPUI state tests and a manual packaged-app smoke test will cover welcome, error, and repository states.
+
+## 2026-08-06 — Phase 1 / window geometry
+
+**Intent:** restore and preserve the main window's safe geometry alongside recents without changing the store schema compatibility policy.
+
+**Files:** `app_core`, desktop startup/window lifecycle, and this work log.
+
+**Acceptance checks:** the store preserves recents while recording optional bounds; invalid or newer data remains untouched; startup uses stored bounds only when they meet the minimum window size; resize observations save the next restore geometry.
+
+**Verification:** the repository-opening boundary has five real-Git tests for nested working trees, bare repositories, invalid directories, `-z` porcelain paths, bounded history, and process cancellation. The app-core store tests verify recents survive restart, unknown schemas are left untouched, and geometry coexists with recents. The desktop tests render the welcome shell and verify core keyboard actions. Native folder selection and external folder drops use GPUI's platform paths; repository discovery and diagnostics execute on the background executor. The model is one window per selected repository, with the originating window reused for recent and dropped paths.
