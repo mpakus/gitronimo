@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title>Gitronimo application icon</title>
+  <rect width="1024" height="1024" rx="224" fill="#172033"/>
+  <path d="M512 174 810 346v332L512 850 214 678V346z" fill="#5de4c7"/>
+  <path d="m512 274 211 122v232L512 750 301 628V396z" fill="#172033"/>
+  <circle cx="512" cy="370" r="54" fill="#5de4c7"/>
+  <circle cx="399" cy="590" r="54" fill="#5de4c7"/>
+  <circle cx="625" cy="590" r="54" fill="#5de4c7"/>
+  <path d="M488 414 422 546m180-132 66 132M453 590h118" fill="none" stroke="#5de4c7" stroke-linecap="round" stroke-width="38"/>
+</svg>

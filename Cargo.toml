@@ -27,5 +27,3 @@ pedantic = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
 gpui = "=0.2.2"
-gpui-component = "=0.5.1"
-

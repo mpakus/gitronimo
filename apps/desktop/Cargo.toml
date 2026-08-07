@@ -8,11 +8,25 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-app_core = { path = "../../crates/app_core" }
-git_cli = { path = "../../crates/git_cli" }
-git_domain = { path = "../../crates/git_domain" }
-ui_kit = { path = "../../crates/ui_kit" }
+app_core = { path = "../../crates/app_core", version = "0.1.0" }
+git_cli = { path = "../../crates/git_cli", version = "0.1.0" }
+git_domain = { path = "../../crates/git_domain", version = "0.1.0" }
+gpui.workspace = true
+ui_kit = { path = "../../crates/ui_kit", version = "0.1.0" }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+[package.metadata.packager]
+product-name = "Gitronimo"
+identifier = "com.gitronimo.desktop"
+category = "DeveloperTool"
+copyright = "Copyright (c) 2026 Gitronimo contributors"
+icons = ["../../assets/gitronimo.icns"]
+
+[[package.metadata.packager.binaries]]
+path = "gitronimo-desktop"
+main = true
 
 [lints]
 workspace = true
-

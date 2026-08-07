@@ -8,8 +8,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-git_domain = { path = "../git_domain" }
+git_domain = { path = "../git_domain", version = "0.1.0" }
 
 [lints]
 workspace = true
-

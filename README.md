@@ -15,6 +15,8 @@ cargo deny check
 
 The build requires macOS once the GPUI window spike begins. An installed Git executable is an MVP requirement.
 
+See [macOS packaging](docs/packaging.md) for the unsigned development bundle and release-signing handoff.
+
 ## Scope
 
 The MVP focuses on opening a local repository, reviewing status and diffs, staging, committing, browsing history, and normal branch/remote workflows. See [PLAN.md](PLAN.md) for the implementation contract and non-goals.
@@ -24,4 +26,3 @@ Gitronimo is not affiliated with Tower. It does not include Tower code, assets, 
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT), at your option.
-

@@ -8,9 +8,8 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-app_core = { path = "../app_core" }
-git_domain = { path = "../git_domain" }
+app_core = { path = "../app_core", version = "0.1.0" }
+git_domain = { path = "../git_domain", version = "0.1.0" }
 
 [lints]
 workspace = true
-
