@@ -1769,52 +1769,52 @@ Provide a fast, understandable history browser.
 
 ### History data
 
-- [ ] Define history request and page model.
-- [ ] Load bounded first page.
-- [ ] Load additional pages.
-- [ ] Load parent OIDs.
-- [ ] Load author and committer metadata.
-- [ ] Load commit subject and body.
-- [ ] Load ref decorations separately.
-- [ ] Support current branch history.
-- [ ] Support all refs history.
-- [ ] Support selected branch/tag history.
-- [ ] Cancel stale searches.
+- [x] Define history request and page model.
+- [x] Load bounded first page.
+- [x] Load additional pages.
+- [x] Load parent OIDs.
+- [x] Load author and committer metadata.
+- [x] Load commit subject and body.
+- [x] Load ref decorations separately.
+- [x] Support current branch history.
+- [x] Support all refs history.
+- [x] Support selected branch/tag history.
+- [x] Cancel stale searches.
 
 ### Graph
 
-- [ ] Implement linear history layout.
-- [ ] Implement branch lanes.
-- [ ] Implement two-parent merges.
-- [ ] Implement octopus merge fallback.
-- [ ] Preserve lane continuity across pages.
-- [ ] Add graph snapshot tests.
-- [ ] Render graph with a custom GPUI element or canvas.
-- [ ] Virtualize rows.
-- [ ] Add overscan.
-- [ ] Cache graph rows.
+- [x] Implement linear history layout.
+- [x] Implement branch lanes.
+- [x] Implement two-parent merges.
+- [x] Implement octopus merge fallback.
+- [x] Preserve lane continuity across pages.
+- [x] Add graph snapshot tests.
+- [x] Render graph with a custom GPUI element or canvas.
+- [x] Virtualize rows.
+- [x] Add overscan.
+- [x] Cache graph rows.
 
 ### History UI
 
-- [ ] Add History navigation item.
-- [ ] Add commit row.
-- [ ] Add author, subject, time, and decorations.
-- [ ] Add selection.
-- [ ] Add keyboard navigation.
-- [ ] Add commit inspector.
-- [ ] Add changed-file list.
-- [ ] Add selected-commit diff.
-- [ ] Add copy OID.
-- [ ] Add search by subject, author, and OID.
-- [ ] Add reveal current HEAD.
+- [x] Add History navigation item.
+- [x] Add commit row.
+- [x] Add author, subject, time, and decorations.
+- [x] Add selection.
+- [x] Add keyboard navigation.
+- [x] Add commit inspector.
+- [x] Add changed-file list.
+- [x] Add selected-commit diff.
+- [x] Add copy OID.
+- [x] Add search by subject, author, and OID.
+- [x] Add reveal current HEAD.
 
 ## Exit criteria
 
-- [ ] First history page appears without full-history loading.
-- [ ] Scrolling tens of thousands of commits remains responsive.
-- [ ] Graph tests cover representative branch and merge shapes.
-- [ ] Selecting a commit shows correct metadata and changes.
-- [ ] Search cancellation prevents stale result replacement.
+- [x] First history page appears without full-history loading.
+- [x] Scrolling tens of thousands of commits remains responsive.
+- [x] Graph tests cover representative branch and merge shapes.
+- [x] Selecting a commit shows correct metadata and changes.
+- [x] Search cancellation prevents stale result replacement.
 
 ---
 

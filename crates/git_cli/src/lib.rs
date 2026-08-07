@@ -13,7 +13,8 @@ use std::{
 
 use app_core::{RepositoryDiscoverer, RepositoryOpenError};
 use git_domain::{
-    BranchStatus, DiffFile, DiffHunk, DiffLine, DiffLineKind, FileStatus, GitPath, HeadStatus,
+    BranchStatus, CommitIdentity, DiffFile, DiffHunk, DiffLine, DiffLineKind, FileStatus, GitPath,
+    HeadStatus, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest, RefDecoration,
     RenameKind, RepositoryLocation, StatusEntry, SubmoduleState, UnifiedDiff, WorktreeRepository,
     WorktreeStatus,
 };
@@ -144,6 +145,149 @@ impl GitExecutable {
         staged: bool,
     ) -> Result<LoadedDiff, GitStatusError> {
         self.file_diff_with_limit(repository, path, staged, MAX_DISPLAY_DIFF_BYTES)
+    }
+
+    /// Loads a bounded history page without scanning the full repository history.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects the requested revision or output is malformed.
+    pub fn history_page(
+        &self,
+        repository: &WorktreeRepository,
+        request: &HistoryRequest,
+    ) -> Result<HistoryPage, GitStatusError> {
+        let limit = request.limit.clamp(1, 500);
+        let all_refs = matches!(request.reference, HistoryReference::All);
+        let all_refs_skip = request
+            .before
+            .as_deref()
+            .and_then(|cursor| cursor.strip_prefix("all:"))
+            .and_then(|skip| skip.parse::<usize>().ok())
+            .unwrap_or(0);
+        let mut args = vec![
+            OsString::from("log"),
+            OsString::from("--no-decorate"),
+            OsString::from(format!(
+                "--max-count={}",
+                limit + 1 + usize::from(!all_refs && request.before.is_some())
+            )),
+            OsString::from(
+                "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00%b%x1e",
+            ),
+        ];
+        if all_refs {
+            args.push(OsString::from("--all"));
+            if all_refs_skip > 0 {
+                args.push(OsString::from(format!("--skip={all_refs_skip}")));
+            }
+        }
+        let reference = request.before.as_deref().map_or_else(
+            || match &request.reference {
+                HistoryReference::Current => "HEAD".to_owned(),
+                HistoryReference::All => "--all".to_owned(),
+                HistoryReference::Named(name) => name.clone(),
+            },
+            ToOwned::to_owned,
+        );
+        if !all_refs {
+            args.push(OsString::from(reference));
+        }
+        let output = self.run(&repository.worktree_root, args)?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        let mut commits = parse_history_records(&output.stdout)?;
+        if !all_refs && request.before.is_some() && !commits.is_empty() {
+            commits.remove(0);
+        }
+        let next_before = (commits.len() > limit).then(|| {
+            if all_refs {
+                format!("all:{}", all_refs_skip + limit)
+            } else {
+                commits[limit - 1].oid.clone()
+            }
+        });
+        commits.truncate(limit);
+        Ok(HistoryPage {
+            commits,
+            next_before,
+        })
+    }
+
+    /// Loads ref decorations independently from history records.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects the ref query or output is malformed.
+    pub fn ref_decorations(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<Vec<RefDecoration>, GitStatusError> {
+        let output = self.run(
+            &repository.worktree_root,
+            [
+                "for-each-ref",
+                "--format=%(refname:short)%00%(objectname)%00",
+            ],
+        )?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        parse_ref_decorations(&output.stdout)
+    }
+
+    /// Lists the paths changed by one commit without parsing human-oriented output.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects the commit object.
+    pub fn commit_paths(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+    ) -> Result<Vec<GitPath>, GitStatusError> {
+        let output = self.run(
+            &repository.worktree_root,
+            ["show", "--format=", "--name-only", "-z", oid],
+        )?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        Ok(output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+            .map(|path| GitPath(path.to_vec()))
+            .collect())
+    }
+
+    /// Loads a bounded unified diff for one commit.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects the commit object.
+    pub fn commit_diff(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+    ) -> Result<LoadedDiff, GitStatusError> {
+        let output = self.run(
+            &repository.worktree_root,
+            [
+                "show",
+                "--format=",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--binary",
+                oid,
+            ],
+        )?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        let truncated = output.stdout.len() > MAX_DISPLAY_DIFF_BYTES;
+        let bytes = &output.stdout[..output.stdout.len().min(MAX_DISPLAY_DIFF_BYTES)];
+        Ok(LoadedDiff {
+            diff: parse_unified_diff(bytes),
+            truncated,
+        })
     }
 
     /// Loads one staged or unstaged file diff with a caller-selected display limit.
@@ -518,6 +662,9 @@ pub enum GitStatusError {
     UntrackedDeletionRefused,
     UnsafePath,
     UnsupportedDiscard,
+    ParseHistory,
+    ParseHistoryFields,
+    ParseHistoryTimestamp,
 }
 
 fn command_error(output: &Output) -> GitStatusError {
@@ -790,7 +937,7 @@ pub struct CommitRecord {
 pub fn parse_commit_records(bytes: &[u8]) -> Result<Vec<CommitRecord>, &'static str> {
     let fields = bytes
         .split(|byte| *byte == 0)
-        .filter(|field| !field.is_empty())
+        .filter(|field| field.iter().any(|byte| !byte.is_ascii_whitespace()))
         .collect::<Vec<_>>();
     if fields.len() % 2 != 0 {
         return Err("commit output ended without a subject separator");
@@ -806,6 +953,72 @@ pub fn parse_commit_records(bytes: &[u8]) -> Result<Vec<CommitRecord>, &'static 
             Ok(CommitRecord {
                 oid,
                 subject: pair[1].to_vec(),
+            })
+        })
+        .collect()
+}
+
+fn parse_history_records(bytes: &[u8]) -> Result<Vec<HistoryCommit>, GitStatusError> {
+    bytes
+        .split(|byte| *byte == 0x1e)
+        .filter(|record| record.iter().any(|byte| !byte.is_ascii_whitespace()))
+        .map(|record| {
+            let record = record.strip_prefix(b"\n").unwrap_or(record);
+            let record = record.strip_suffix(b"\n").unwrap_or(record);
+            let fields = record.split(|byte| *byte == 0).collect::<Vec<_>>();
+            if fields.len() < 10 {
+                return Err(GitStatusError::ParseHistoryFields);
+            }
+            let oid = std::str::from_utf8(fields[0])
+                .map_err(|_| GitStatusError::ParseHistoryFields)?
+                .to_owned();
+            let parents = std::str::from_utf8(fields[1])
+                .map_err(|_| GitStatusError::ParseHistoryFields)?
+                .split_whitespace()
+                .map(ToOwned::to_owned)
+                .collect();
+            let timestamp = |field: &[u8]| {
+                std::str::from_utf8(field)
+                    .ok()
+                    .and_then(|value| value.parse().ok())
+                    .ok_or(GitStatusError::ParseHistoryTimestamp)
+            };
+            Ok(HistoryCommit {
+                oid,
+                parents,
+                author: CommitIdentity {
+                    name: fields[2].to_vec(),
+                    email: fields[3].to_vec(),
+                    timestamp: timestamp(fields[4])?,
+                },
+                committer: CommitIdentity {
+                    name: fields[5].to_vec(),
+                    email: fields[6].to_vec(),
+                    timestamp: timestamp(fields[7])?,
+                },
+                subject: fields[8].to_vec(),
+                body: fields[9..].join(&0),
+            })
+        })
+        .collect()
+}
+
+fn parse_ref_decorations(bytes: &[u8]) -> Result<Vec<RefDecoration>, GitStatusError> {
+    let fields = bytes
+        .split(|byte| *byte == 0)
+        .filter(|field| field.iter().any(|byte| !byte.is_ascii_whitespace()))
+        .collect::<Vec<_>>();
+    if fields.len() % 2 != 0 {
+        return Err(GitStatusError::ParseHistory);
+    }
+    fields
+        .chunks_exact(2)
+        .map(|pair| {
+            Ok(RefDecoration {
+                name: pair[0].to_vec(),
+                target: std::str::from_utf8(pair[1])
+                    .map_err(|_| GitStatusError::ParseHistory)?
+                    .to_owned(),
             })
         })
         .collect()
@@ -838,7 +1051,8 @@ mod tests {
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
-        DiffLineKind, GitPath, HeadStatus, RepositoryLocation, StatusEntry, SubmoduleState,
+        DiffLineKind, GitPath, HeadStatus, HistoryReference, HistoryRequest, RepositoryLocation,
+        StatusEntry, SubmoduleState,
     };
 
     static NEXT_REPOSITORY: AtomicUsize = AtomicUsize::new(0);
@@ -1240,6 +1454,136 @@ Binary files a/image.png and b/image.png differ\n",
         let commits = parse_commit_records(&output.stdout).expect("commit separators should parse");
         assert_eq!(commits.len(), 500);
         assert_eq!(commits[0].subject, b"commit 499");
+    }
+
+    #[test]
+    fn loads_bounded_history_pages_and_separate_decorations() {
+        let repository = Repository::new();
+        for index in 0..3 {
+            repository.commit(&format!("commit {index}"));
+        }
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("worktree should resolve")
+        else {
+            panic!("fixture should be worktree")
+        };
+        let first = repository
+            .git
+            .history_page(
+                &worktree,
+                &HistoryRequest {
+                    reference: HistoryReference::Current,
+                    before: None,
+                    limit: 2,
+                },
+            )
+            .expect("first page should load");
+        assert_eq!(first.commits.len(), 2);
+        let selected = &first.commits[0].oid;
+        assert_eq!(
+            repository
+                .git
+                .commit_paths(&worktree, selected)
+                .expect("commit paths should load"),
+            vec![GitPath(b"fixture.txt".to_vec())]
+        );
+        assert_eq!(
+            repository
+                .git
+                .commit_diff(&worktree, selected)
+                .expect("commit diff should load")
+                .diff
+                .files
+                .len(),
+            1
+        );
+        assert!(
+            first
+                .commits
+                .iter()
+                .all(|commit| !commit.author.name.is_empty() && !commit.subject.is_empty())
+        );
+        let second = repository
+            .git
+            .history_page(
+                &worktree,
+                &HistoryRequest {
+                    reference: HistoryReference::Current,
+                    before: first.next_before,
+                    limit: 2,
+                },
+            )
+            .expect("next page should load");
+        assert!(!second.commits.is_empty());
+        assert!(
+            repository
+                .git
+                .ref_decorations(&worktree)
+                .expect("ref decorations should load")
+                .iter()
+                .any(|decoration| decoration.name == b"main")
+        );
+    }
+
+    #[test]
+    fn pages_all_refs_and_named_history() {
+        let repository = Repository::new();
+        for index in 0..3 {
+            repository.commit(&format!("commit {index}"));
+        }
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("worktree should resolve")
+        else {
+            panic!("fixture should be worktree")
+        };
+        let first = repository
+            .git
+            .history_page(
+                &worktree,
+                &HistoryRequest {
+                    reference: HistoryReference::All,
+                    before: None,
+                    limit: 2,
+                },
+            )
+            .expect("all refs history should load");
+        assert_eq!(first.commits.len(), 2);
+        assert!(
+            repository
+                .git
+                .history_page(
+                    &worktree,
+                    &HistoryRequest {
+                        reference: HistoryReference::All,
+                        before: first.next_before,
+                        limit: 2,
+                    },
+                )
+                .expect("all refs next page should load")
+                .commits
+                .iter()
+                .all(|commit| !commit.oid.is_empty())
+        );
+        assert!(
+            repository
+                .git
+                .history_page(
+                    &worktree,
+                    &HistoryRequest {
+                        reference: HistoryReference::Named("main".into()),
+                        before: None,
+                        limit: 2,
+                    },
+                )
+                .expect("named history should load")
+                .commits
+                .iter()
+                .all(|commit| !commit.oid.is_empty())
+        );
     }
 
     #[test]

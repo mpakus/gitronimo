@@ -6,6 +6,8 @@ actions!(
         OpenRepository,
         Refresh,
         FocusComposer,
+        HistoryPrevious,
+        HistoryNext,
         ToggleAppearance,
         WidenSidebar,
         WidenInspector

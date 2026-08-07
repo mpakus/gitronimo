@@ -1,5 +1,73 @@
 # Implementation work log
 
+## 2026-08-07 — Phase 4 / history list overscan
+
+**Intent:** use GPUI’s retained virtual list for a small, explicit history-row overdraw buffer above and below the viewport.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the History list uses `ListState` with two row-heights of overdraw; source, page, and search changes reset its item count; only the visible range plus overdraw is constructed.
+
+**Verification:** `ListState::new(..., px(56.0))` supplies a two-row overdraw buffer above and below the visible history viewport. The desktop target passes Clippy and its test suite after replacing `uniform_list`; no custom virtualizer or dependency was introduced.
+
+## 2026-08-07 — Phase 4 / virtual history selection and source changes
+
+**Intent:** keep the history browser virtualized while preserving mouse selection, and reject a page that returns after its history source changes.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** visible virtual rows retain their source indexes and invoke the existing guarded inspector loader on click; changing between current/all/named history clears the previous page; stale page responses cannot update the new source; the UI only constructs the visible `uniform_list` range.
+
+**Verification:** the all-ref traversal uses an opaque `all:<skip>` cursor, so subsequent pages do not duplicate the first union-of-refs page. The focused real-repository test covers current, all-ref, and named history. The workspace Clippy and test gates pass; the only output is the pre-existing upstream future-incompatibility warning for `block 0.1.6` and `proc-macro-error2 2.0.1`. GPUI 0.2.2 exposes only the visible range from `uniform_list`, not a configurable overscan range, so that checklist item remains deliberately open rather than simulated.
+
+## 2026-08-07 — Phase 4 / keyboard history navigation
+
+**Intent:** make history selection navigable without mouse input and prevent a stale inspector request from replacing a newer selection.
+
+**Files:** `apps/desktop/src/actions.rs`, `apps/desktop/src/keymap.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** Up/Down select adjacent loaded commits only in History; a monotonically increasing selection token rejects stale inspector responses; navigation reuses the same background inspector request.
+
+## 2026-08-07 — Phase 4 / selected-commit inspection
+
+**Intent:** load changed paths and a bounded unified diff for the selected history commit through the existing Git process boundary.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** a temporary repository proves commit file listing and commit diff loading; inspector requests run off the UI thread; stale selection responses do not replace a newer inspector.
+
+## 2026-08-07 — Phase 4 / history interactions
+
+**Intent:** make the bounded history browser useful without expanding the query scope: filter loaded rows, copy OIDs, reveal HEAD, and show commit metadata.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** search filters subject/author/OID in the loaded page and cannot overwrite a newer repository state; the inspector exposes commit details; copy uses the platform clipboard; Reveal HEAD selects the matching loaded row.
+
+## 2026-08-07 — Phase 4 / history browser shell
+
+**Intent:** connect the bounded history adapter to an asynchronous desktop History view with graph lanes, commit selection, basic inspector data, and explicit paging.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** entering History starts a background first-page request; rows show graph lane, author, subject, time, and ref decorations; selecting a row updates an inspector; Load more uses the page cursor rather than full-history loading; stale repository responses are ignored.
+
+## 2026-08-07 — Phase 4 / graph layout
+
+**Intent:** add a deterministic pure lane layout that supports linear history, branches, two-parent merges, and an explicit octopus fallback while carrying lanes across history pages.
+
+**Files:** `crates/git_domain/src/lib.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** graph fixtures assert lane assignment for linear, branch, merge, and octopus shapes; passing the returned lane state into a later page preserves the next row’s lane.
+
+## 2026-08-07 — Phase 4 / bounded history data
+
+**Intent:** add the smallest cursor-paged, UI-independent history model: bounded commits with parents, author/committer data, subject/body, plus decorations loaded separately.
+
+**Files:** `crates/git_domain/src/lib.rs`, `crates/git_cli/src/lib.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** typed Git requests load a bounded page for current/all/selected refs; each record retains parents and metadata; a cursor limits subsequent pages; decorations are not embedded in the main history log; temporary repositories prove page boundaries and all-ref selection.
+
 ## 2026-08-07 — Phase 3 / composer identity and shortcut
 
 **Intent:** complete the composer feedback loop by loading the repository’s configured author identity and making the subject prompt reachable from the keyboard.

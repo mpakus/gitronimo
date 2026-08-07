@@ -135,3 +135,153 @@ pub enum DiffLineKind {
     Addition,
     Removal,
 }
+
+/// A bounded request for commit history.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoryRequest {
+    pub reference: HistoryReference,
+    pub before: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HistoryReference {
+    Current,
+    All,
+    Named(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoryPage {
+    pub commits: Vec<HistoryCommit>,
+    pub next_before: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoryCommit {
+    pub oid: String,
+    pub parents: Vec<String>,
+    pub author: CommitIdentity,
+    pub committer: CommitIdentity,
+    pub subject: Vec<u8>,
+    pub body: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitIdentity {
+    pub name: Vec<u8>,
+    pub email: Vec<u8>,
+    pub timestamp: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefDecoration {
+    pub name: Vec<u8>,
+    pub target: String,
+}
+
+/// Lane state carried between bounded history pages.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GraphState {
+    pub lanes: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GraphRow {
+    pub lane: usize,
+    pub parent_lanes: Vec<usize>,
+    pub octopus: bool,
+}
+
+/// Lays out a history page while retaining unresolved parent lanes for the next page.
+#[must_use]
+pub fn layout_history_graph(commits: &[HistoryCommit], state: &mut GraphState) -> Vec<GraphRow> {
+    commits
+        .iter()
+        .map(|commit| {
+            let lane = state
+                .lanes
+                .iter()
+                .position(|oid| oid == &commit.oid)
+                .unwrap_or_else(|| {
+                    state.lanes.insert(0, commit.oid.clone());
+                    0
+                });
+            let mut parent_lanes = Vec::new();
+            if let Some(first_parent) = commit.parents.first() {
+                state.lanes[lane].clone_from(first_parent);
+                parent_lanes.push(lane);
+                for parent in commit.parents.iter().skip(1) {
+                    let parent_lane = state
+                        .lanes
+                        .iter()
+                        .position(|oid| oid == parent)
+                        .unwrap_or_else(|| {
+                            let next = lane + parent_lanes.len();
+                            state.lanes.insert(next, parent.clone());
+                            next
+                        });
+                    parent_lanes.push(parent_lane);
+                }
+            } else {
+                state.lanes.remove(lane);
+            }
+            GraphRow {
+                lane,
+                parent_lanes,
+                octopus: commit.parents.len() > 2,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CommitIdentity, GraphState, HistoryCommit, layout_history_graph};
+
+    fn commit(oid: &str, parents: &[&str]) -> HistoryCommit {
+        let identity = CommitIdentity {
+            name: b"Test".to_vec(),
+            email: b"test@example.invalid".to_vec(),
+            timestamp: 0,
+        };
+        HistoryCommit {
+            oid: oid.into(),
+            parents: parents.iter().map(|parent| (*parent).into()).collect(),
+            author: identity.clone(),
+            committer: identity,
+            subject: Vec::new(),
+            body: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn graph_layout_preserves_linear_branch_merge_and_page_lanes() {
+        let mut state = GraphState::default();
+        let rows = layout_history_graph(
+            &[
+                commit("merge", &["main", "topic"]),
+                commit("main", &["base"]),
+                commit("topic", &["base"]),
+                commit("base", &[]),
+            ],
+            &mut state,
+        );
+        assert_eq!(
+            rows.iter().map(|row| row.lane).collect::<Vec<_>>(),
+            vec![0, 0, 1, 0]
+        );
+        assert_eq!(rows[0].parent_lanes, vec![0, 1]);
+        let mut paged_state = GraphState::default();
+        let first = layout_history_graph(&[commit("head", &["parent"])], &mut paged_state);
+        let second = layout_history_graph(&[commit("parent", &[])], &mut paged_state);
+        assert_eq!((first[0].lane, second[0].lane), (0, 0));
+        assert!(
+            layout_history_graph(
+                &[commit("octopus", &["a", "b", "c"])],
+                &mut GraphState::default()
+            )[0]
+            .octopus
+        );
+    }
+}

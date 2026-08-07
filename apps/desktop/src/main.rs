@@ -16,17 +16,22 @@ mod menus;
 
 use app_core::{RecentRepositoryStore, RepositoryOpenError, WindowGeometry, open_repository};
 use git_cli::{CommitRequest, GitExecutable, GitStatusError, LoadedDiff};
-use git_domain::{GitPath, StatusEntry, WorktreeRepository, WorktreeStatus};
+use git_domain::{
+    GitPath, GraphRow, GraphState, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest,
+    RefDecoration, StatusEntry, WorktreeRepository, WorktreeStatus, layout_history_graph,
+};
 use gpui::{
     App, Application, Bounds, ClickEvent, ClipboardItem, Context, ExternalPaths, FocusHandle,
-    IntoElement, MouseButton, PathPromptOptions, Render, Subscription, Window, WindowAppearance,
-    WindowBounds, WindowOptions, div, point, prelude::*, px, size,
+    IntoElement, ListAlignment, ListState, MouseButton, PathBuilder, PathPromptOptions, Render,
+    Subscription, Window, WindowAppearance, WindowBounds, WindowOptions, canvas, div, list, point,
+    prelude::*, px, size,
 };
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use ui_kit::{Appearance, Theme};
 
 use actions::{
-    FocusComposer, OpenRepository, Refresh, ToggleAppearance, WidenInspector, WidenSidebar,
+    FocusComposer, HistoryNext, HistoryPrevious, OpenRepository, Refresh, ToggleAppearance,
+    WidenInspector, WidenSidebar,
 };
 
 const INITIAL_WINDOW_SIZE: (f32, f32) = (1200.0, 800.0);
@@ -155,6 +160,12 @@ enum ThemeMode {
     Dark,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RepositoryView {
+    WorkingCopy,
+    History,
+}
+
 struct GitronimoApp {
     focus_handle: FocusHandle,
     last_action: Option<LastAction>,
@@ -176,6 +187,20 @@ struct GitronimoApp {
     commit_amend: bool,
     commit_sign_off: bool,
     author_identity: String,
+    repository_view: RepositoryView,
+    history: Vec<HistoryCommit>,
+    history_rows: Vec<GraphRow>,
+    history_state: GraphState,
+    history_reference: HistoryReference,
+    history_next: Option<String>,
+    history_decorations: Vec<RefDecoration>,
+    selected_history: Option<usize>,
+    history_search: String,
+    history_list_state: ListState,
+    history_paths: Vec<GitPath>,
+    history_diff: Option<LoadedDiff>,
+    history_selection_token: u64,
+    history_load_token: u64,
     mutation_in_flight: bool,
     watcher: Option<RecommendedWatcher>,
     watch_events: Option<Receiver<()>>,
@@ -212,6 +237,20 @@ impl GitronimoApp {
             commit_amend: false,
             commit_sign_off: false,
             author_identity: "Loading author identity…".into(),
+            repository_view: RepositoryView::WorkingCopy,
+            history: Vec::new(),
+            history_rows: Vec::new(),
+            history_state: GraphState::default(),
+            history_reference: HistoryReference::Current,
+            history_next: None,
+            history_decorations: Vec::new(),
+            selected_history: None,
+            history_search: String::new(),
+            history_list_state: ListState::new(0, ListAlignment::Top, px(56.0)),
+            history_paths: Vec::new(),
+            history_diff: None,
+            history_selection_token: 0,
+            history_load_token: 0,
             mutation_in_flight: false,
             watcher: None,
             watch_events: None,
@@ -279,6 +318,20 @@ impl GitronimoApp {
             commit_amend: false,
             commit_sign_off: false,
             author_identity: "Loading author identity…".into(),
+            repository_view: RepositoryView::WorkingCopy,
+            history: Vec::new(),
+            history_rows: Vec::new(),
+            history_state: GraphState::default(),
+            history_reference: HistoryReference::Current,
+            history_next: None,
+            history_decorations: Vec::new(),
+            selected_history: None,
+            history_search: String::new(),
+            history_list_state: ListState::new(0, ListAlignment::Top, px(56.0)),
+            history_paths: Vec::new(),
+            history_diff: None,
+            history_selection_token: 0,
+            history_load_token: 0,
             mutation_in_flight: false,
             watcher: None,
             watch_events: None,
@@ -359,6 +412,20 @@ impl GitronimoApp {
                 self.commit_body.clear();
                 self.commit_amend = false;
                 self.commit_sign_off = false;
+                self.repository_view = RepositoryView::WorkingCopy;
+                self.history.clear();
+                self.history_rows.clear();
+                self.history_state = GraphState::default();
+                self.history_reference = HistoryReference::Current;
+                self.history_next = None;
+                self.history_decorations.clear();
+                self.selected_history = None;
+                self.history_search.clear();
+                self.history_list_state.reset(0);
+                self.history_paths.clear();
+                self.history_diff = None;
+                self.history_selection_token = self.history_selection_token.wrapping_add(1);
+                self.history_load_token = self.history_load_token.wrapping_add(1);
                 if let ShellState::Repository(repository) = &self.state {
                     let repository = repository.clone();
                     self.load_working_copy(repository.clone(), cx);
@@ -387,6 +454,97 @@ impl GitronimoApp {
 
     fn focus_composer(&mut self, _: &FocusComposer, _: &mut Window, cx: &mut Context<Self>) {
         self.edit_commit_subject(cx);
+    }
+
+    fn history_previous(&mut self, _: &HistoryPrevious, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_history_selection(-1, cx);
+    }
+
+    fn history_next(&mut self, _: &HistoryNext, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_history_selection(1, cx);
+    }
+
+    fn move_history_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.repository_view != RepositoryView::History || self.history.is_empty() {
+            return;
+        }
+        let current = self.selected_history.unwrap_or(0);
+        let index = if delta.is_negative() {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current
+                .saturating_add(delta.unsigned_abs())
+                .min(self.history.len() - 1)
+        };
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        self.select_history_commit(index, repository.clone(), cx);
+    }
+
+    fn show_history(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        self.repository_view = RepositoryView::History;
+        if self.history.is_empty() {
+            self.load_history(repository, None, cx);
+        }
+        cx.notify();
+    }
+
+    fn change_history_reference(
+        &mut self,
+        reference: HistoryReference,
+        repository: WorktreeRepository,
+        cx: &mut Context<Self>,
+    ) {
+        self.history_reference = reference;
+        self.history.clear();
+        self.history_rows.clear();
+        self.history_state = GraphState::default();
+        self.history_next = None;
+        self.history_decorations.clear();
+        self.selected_history = None;
+        self.history_list_state.reset(0);
+        self.history_paths.clear();
+        self.history_diff = None;
+        self.history_selection_token = self.history_selection_token.wrapping_add(1);
+        self.history_load_token = self.history_load_token.wrapping_add(1);
+        self.load_history(repository, None, cx);
+    }
+
+    fn load_history(
+        &mut self,
+        repository: WorktreeRepository,
+        before: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let root = repository.worktree_root.clone();
+        let reference = self.history_reference.clone();
+        let load_token = self.history_load_token;
+        self.activity = "Loading history…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx.background_spawn(async move {
+                let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                let page = git.history_page(&repository, &HistoryRequest { reference, before, limit: 100 }).map_err(|error| format!("{error:?}"))?;
+                let decorations = git.ref_decorations(&repository).map_err(|error| format!("{error:?}"))?;
+                Ok::<_, String>((page, decorations))
+            }).await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root)
+                    || app.history_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok((HistoryPage { commits, next_before }, decorations)) => {
+                        let rows = layout_history_graph(&commits, &mut app.history_state);
+                        app.history.extend(commits); app.history_rows.extend(rows); app.history_next = next_before; app.history_decorations = decorations; app.activity = format!("Loaded {} history commits.", app.history.len());
+                        app.history_list_state.reset(app.history_row_count());
+                    }
+                    Err(error) => app.activity = format!("History load failed: {error}"),
+                }
+                cx.notify();
+            });
+        }).detach();
     }
 
     fn toggle_appearance(
@@ -482,6 +640,113 @@ impl GitronimoApp {
             });
         })
         .detach();
+    }
+
+    fn prompt_history_search(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let search = cx.background_spawn(async {
+                Command::new("osascript")
+                    .args(["-e", "text returned of (display dialog \"Search loaded history\" default answer \"\")"])
+                    .output().ok().filter(|output| output.status.success())
+                    .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+            }).await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(search) = search {
+                    app.history_search = search;
+                    app.history_list_state.reset(app.history_row_count());
+                    cx.notify();
+                }
+            });
+        }).detach();
+    }
+
+    fn prompt_history_reference(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let reference = cx.background_spawn(async {
+                Command::new("osascript")
+                    .args(["-e", "text returned of (display dialog \"Branch or tag history\" default answer \"\")"])
+                    .output().ok().filter(|output| output.status.success())
+                    .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                    .filter(|reference| !reference.is_empty())
+            }).await;
+            let _ = this.update(cx, |app, cx| {
+                let Some(reference) = reference else { return; };
+                let ShellState::Repository(repository) = &app.state else { return; };
+                app.change_history_reference(HistoryReference::Named(reference), repository.clone(), cx);
+            });
+        }).detach();
+    }
+
+    fn copy_selected_history_oid(&mut self, cx: &mut Context<Self>) {
+        if let Some(commit) = self
+            .selected_history
+            .and_then(|index| self.history.get(index))
+        {
+            cx.write_to_clipboard(ClipboardItem::new_string(commit.oid.clone()));
+            self.activity = "Commit OID copied.".into();
+            cx.notify();
+        }
+    }
+
+    fn reveal_history_head(&mut self, cx: &mut Context<Self>) {
+        let Some(oid) = self
+            .working_copy
+            .as_ref()
+            .and_then(|status| status.branch.oid.as_ref())
+            .and_then(|oid| std::str::from_utf8(oid).ok())
+        else {
+            return;
+        };
+        self.selected_history = self.history.iter().position(|commit| commit.oid == oid);
+        cx.notify();
+    }
+
+    fn select_history_commit(
+        &mut self,
+        index: usize,
+        repository: WorktreeRepository,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(commit) = self.history.get(index) else {
+            return;
+        };
+        let oid = commit.oid.clone();
+        let worker_oid = oid.clone();
+        self.selected_history = Some(index);
+        self.history_selection_token = self.history_selection_token.wrapping_add(1);
+        let selection_token = self.history_selection_token;
+        self.history_paths.clear();
+        self.history_diff = None;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    Ok::<_, String>((
+                        git.commit_paths(&repository, &worker_oid)
+                            .map_err(|error| format!("{error:?}"))?,
+                        git.commit_diff(&repository, &worker_oid)
+                            .map_err(|error| format!("{error:?}"))?,
+                    ))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if app.history_selection_token == selection_token
+                    && app.selected_history == Some(index)
+                    && app
+                        .history
+                        .get(index)
+                        .is_some_and(|commit| commit.oid == oid)
+                {
+                    if let Ok((paths, diff)) = result {
+                        app.history_paths = paths;
+                        app.history_diff = Some(diff);
+                    }
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     fn load_author_identity(repository: WorktreeRepository, cx: &mut Context<Self>) {
@@ -959,6 +1224,8 @@ impl Render for GitronimoApp {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::refresh))
             .on_action(cx.listener(Self::focus_composer))
+            .on_action(cx.listener(Self::history_previous))
+            .on_action(cx.listener(Self::history_next))
             .on_action(cx.listener(Self::toggle_appearance))
             .on_action(cx.listener(Self::widen_sidebar))
             .on_action(cx.listener(Self::widen_inspector))
@@ -1025,12 +1292,19 @@ impl GitronimoApp {
         colors: &ui_kit::ThemeColors,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        if self.repository_view == RepositoryView::History {
+            return self.history_view(repository, colors, cx).into_any_element();
+        }
         let groups = self.status_groups();
         div()
             .flex()
             .flex_col()
             .gap_4()
             .child(div().text_xl().child("Working Copy"))
+            .child(file_action_button("History", colors, cx, {
+                let repository = repository.clone();
+                move |app, cx| app.show_history(repository.clone(), cx)
+            }))
             .child(repository.worktree_root.display().to_string())
             .child(self.mutation_controls(colors, cx))
             .children(self.discard_confirmation_view(colors, cx))
@@ -1041,6 +1315,237 @@ impl GitronimoApp {
             .child(self.status_group_view("Untracked", &groups.untracked, false, colors, cx))
             .child(self.status_group_view("Conflicts", &groups.conflicts, false, colors, cx))
             .children(self.diff_view(colors, cx))
+            .into_any_element()
+    }
+
+    fn history_row_count(&self) -> usize {
+        let search = self.history_search.to_lowercase();
+        self.history
+            .iter()
+            .filter(|commit| {
+                search.is_empty()
+                    || commit.oid.contains(&search)
+                    || String::from_utf8_lossy(&commit.subject)
+                        .to_lowercase()
+                        .contains(&search)
+                    || String::from_utf8_lossy(&commit.author.name)
+                        .to_lowercase()
+                        .contains(&search)
+            })
+            .count()
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn history_view(
+        &self,
+        repository: &WorktreeRepository,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let search = self.history_search.to_lowercase();
+        let rows = self
+            .history
+            .iter()
+            .enumerate()
+            .filter(|(_, commit)| {
+                search.is_empty()
+                    || commit.oid.contains(&search)
+                    || String::from_utf8_lossy(&commit.subject)
+                        .to_lowercase()
+                        .contains(&search)
+                    || String::from_utf8_lossy(&commit.author.name)
+                        .to_lowercase()
+                        .contains(&search)
+            })
+            .map(|(history_index, commit)| {
+                let graph_row = self.history_rows.get(history_index);
+                let lane = graph_row.map_or(0, |row| row.lane);
+                let parent_lanes = graph_row.map_or_else(Vec::new, |row| row.parent_lanes.clone());
+                let decorations = self
+                    .history_decorations
+                    .iter()
+                    .filter(|decoration| decoration.target == commit.oid)
+                    .map(|decoration| String::from_utf8_lossy(&decoration.name).to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (
+                    history_index,
+                    lane,
+                    parent_lanes,
+                    format!(
+                        "{} ● {} · {} — {} {}",
+                        "│ ".repeat(lane),
+                        String::from_utf8_lossy(&commit.author.name),
+                        commit.author.timestamp,
+                        String::from_utf8_lossy(&commit.subject),
+                        decorations
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let selected = self.selected_history;
+        let list_colors = *colors;
+        let list_repository = repository.clone();
+        let rows = list(
+            self.history_list_state.clone(),
+            cx.processor(move |_app, visible_index: usize, _, cx| {
+                let (history_index, lane, parent_lanes, label) = rows[visible_index].clone();
+                let repository = list_repository.clone();
+                div()
+                    .id(visible_index)
+                    .h(px(28.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .bg(if selected == Some(history_index) {
+                        list_colors.raised_background
+                    } else {
+                        list_colors.panel_background
+                    })
+                    .border_b_1()
+                    .border_color(list_colors.border)
+                    .child(
+                        canvas(
+                            move |bounds, _, _| {
+                                let lane_offset = u8::try_from(lane.min(100)).unwrap_or(100);
+                                let x = bounds.origin.x + px(10.0 + f32::from(lane_offset) * 8.0);
+                                let mut path = PathBuilder::stroke(px(2.0));
+                                path.move_to(point(x, bounds.origin.y));
+                                let center_y = bounds.origin.y + bounds.size.height / 2.0;
+                                path.line_to(point(x, center_y));
+                                for parent_lane in &parent_lanes {
+                                    let parent_offset =
+                                        u8::try_from((*parent_lane).min(100)).unwrap_or(100);
+                                    let parent_x =
+                                        bounds.origin.x + px(10.0 + f32::from(parent_offset) * 8.0);
+                                    path.move_to(point(x, center_y));
+                                    path.line_to(point(
+                                        parent_x,
+                                        bounds.origin.y + bounds.size.height,
+                                    ));
+                                }
+                                if parent_lanes.is_empty() {
+                                    path.line_to(point(x, bounds.origin.y + bounds.size.height));
+                                }
+                                path.build().ok()
+                            },
+                            move |_, path, window, _| {
+                                if let Some(path) = path {
+                                    window.paint_path(
+                                        path,
+                                        list_colors.graph_lanes
+                                            [lane % list_colors.graph_lanes.len()],
+                                    );
+                                }
+                            },
+                        )
+                        .w(px(28.0))
+                        .h_full(),
+                    )
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                        app.select_history_commit(history_index, repository.clone(), cx);
+                    }))
+                    .child(label)
+                    .into_any_element()
+            }),
+        )
+        .h(px(360.0));
+        let inspector = self
+            .selected_history
+            .and_then(|index| self.history.get(index))
+            .map(|commit| {
+                div()
+                    .p_2()
+                    .border_1()
+                    .border_color(colors.border)
+                    .child(format!(
+                        "{}\n{}\n{}\nChanged: {}",
+                        commit.oid,
+                        String::from_utf8_lossy(&commit.body),
+                        commit.parents.join(" "),
+                        self.history_paths
+                            .iter()
+                            .map(|path| String::from_utf8_lossy(&path.0))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ))
+                    .children(self.history_diff.as_ref().map(|diff| {
+                        div().child(format!(
+                            "Selected diff: {} file(s){}",
+                            diff.diff.files.len(),
+                            if diff.truncated { " (truncated)" } else { "" }
+                        ))
+                    }))
+                    .into_any_element()
+            });
+        let load_more = self.history_next.as_ref().map(|before| {
+            let repository = repository.clone();
+            let before = before.clone();
+            file_action_button("Load more history", colors, cx, move |app, cx| {
+                app.load_history(repository.clone(), Some(before.clone()), cx);
+            })
+        });
+        let current_repository = repository.clone();
+        let all_repository = repository.clone();
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(div().text_xl().child("History"))
+            .child(file_action_button("Working Copy", colors, cx, |app, cx| {
+                app.repository_view = RepositoryView::WorkingCopy;
+                cx.notify();
+            }))
+            .child(file_action_button(
+                "Current branch",
+                colors,
+                cx,
+                move |app, cx| {
+                    app.change_history_reference(
+                        HistoryReference::Current,
+                        current_repository.clone(),
+                        cx,
+                    );
+                },
+            ))
+            .child(file_action_button(
+                "All refs",
+                colors,
+                cx,
+                move |app, cx| {
+                    app.change_history_reference(HistoryReference::All, all_repository.clone(), cx);
+                },
+            ))
+            .child(file_action_button(
+                "Branch or tag…",
+                colors,
+                cx,
+                |_, cx| GitronimoApp::prompt_history_reference(cx),
+            ))
+            .child(format!(
+                "Search: {}",
+                if self.history_search.is_empty() {
+                    "(all loaded commits)"
+                } else {
+                    &self.history_search
+                }
+            ))
+            .child(file_action_button("Search history", colors, cx, |_, cx| {
+                GitronimoApp::prompt_history_search(cx);
+            }))
+            .child(file_action_button("Reveal HEAD", colors, cx, |app, cx| {
+                app.reveal_history_head(cx);
+            }))
+            .child(file_action_button(
+                "Copy selected OID",
+                colors,
+                cx,
+                GitronimoApp::copy_selected_history_oid,
+            ))
+            .child(rows)
+            .children(load_more)
+            .children(inspector)
     }
 
     fn status_groups(&self) -> StatusGroups<'_> {
