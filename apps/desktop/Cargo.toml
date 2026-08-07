@@ -12,6 +12,7 @@ app_core = { path = "../../crates/app_core", version = "0.1.0" }
 git_cli = { path = "../../crates/git_cli", version = "0.1.0" }
 git_domain = { path = "../../crates/git_domain", version = "0.1.0" }
 gpui.workspace = true
+notify.workspace = true
 ui_kit = { path = "../../crates/ui_kit", version = "0.1.0" }
 
 [dev-dependencies]

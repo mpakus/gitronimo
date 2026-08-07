@@ -5,6 +5,7 @@ actions!(
     [
         OpenRepository,
         Refresh,
+        FocusComposer,
         ToggleAppearance,
         WidenSidebar,
         WidenInspector

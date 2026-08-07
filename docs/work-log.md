@@ -1,5 +1,37 @@
 # Implementation work log
 
+## 2026-08-07 — Phase 3 / composer identity and shortcut
+
+**Intent:** complete the composer feedback loop by loading the repository’s configured author identity and making the subject prompt reachable from the keyboard.
+
+**Files:** `apps/desktop/src/actions.rs`, `apps/desktop/src/keymap.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** opening a repository loads and displays `Name <email>` or a precise missing-identity message; Command-Shift-C opens subject entry; commit failures keep the current drafts unchanged.
+
+## 2026-08-07 — Phase 3 / native commit composer
+
+**Intent:** expose the already-tested secure commit boundary through an accessible macOS composer flow without a third-party component library.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** subject and body are collected through native keyboard-accessible prompts; drafts, amend, and sign-off state stay in the app; commit is enabled only with staged content and a non-empty subject; author identity is shown or reported missing; a rejected commit retains both drafts.
+
+## 2026-08-07 — Phase 3 / confirmed discard and Finder trash
+
+**Intent:** make discard explicit and reversible where possible: restore tracked paths with Git, move eligible untracked paths to Finder’s Trash, and refuse symlinks, nested repositories, non-UTF-8 names, and unsafe paths.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the first destructive click shows affected-path consequences and a distinct confirmation; tracked paths use the existing tested Git restore; untracked paths are sent to Finder with arguments rather than shell interpolation; validation tests cover unsafe paths, symlinks, and nested repositories.
+
+## 2026-08-07 — Phase 2 / file actions and bounded diff expansion
+
+**Intent:** finish the selected-file affordances without adding a UI framework: copy the resolved path, invoke Finder or the default editor through typed platform commands, and reload a deliberately truncated diff only when the user asks.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** default diff loading is capped at one megabyte; “Load full diff” explicitly reloads the same selected staged or unstaged path; Copy path writes the resolved worktree path to the platform clipboard; Finder reveal and editor open are passed as individual process arguments; replacing or leaving a repository releases the prior watcher.
+
 ## 2026-08-07 — Phase 2 / porcelain status model
 
 **Intent:** add the smallest UI-independent, byte-safe working-copy status model and parser needed to represent Git porcelain-v2 output accurately.
@@ -29,6 +61,62 @@
 **Files:** `crates/git_domain/src/lib.rs`, `crates/git_cli/src/lib.rs`, and this work log.
 
 **Acceptance checks:** parser fixtures cover text hunks, rename metadata, binary files, and no-final-newline markers without decoding path bytes; command/UI integration and large-output truncation remain separate diff checklist items.
+
+## 2026-08-07 — Phase 2 / diff loading
+
+**Intent:** load selected staged or unstaged diffs through typed Git arguments in the background, with a bounded display result.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, and this work log.
+
+**Acceptance checks:** temporary repositories prove separate cached and worktree diffs; selected rows load without rendering-thread Git calls; over-limit output shows an explicit load-more affordance.
+
+## 2026-08-07 — Phase 3 / Git mutation boundary
+
+**Intent:** add typed, non-shell Git staging and unstaging operations before attaching destructive UI controls.
+
+**Files:** `crates/git_cli/src/lib.rs` and this work log.
+
+**Acceptance checks:** real temporary repositories cover one, many, all, and unborn-repository staging/unstaging paths; command failures remain actionable to the caller.
+
+## 2026-08-07 — Phase 3 / staging controls
+
+**Intent:** expose the tested staging boundary through a single-flight Working Copy control surface.
+
+**Files:** `apps/desktop/src/main.rs` and this work log.
+
+**Acceptance checks:** selected and all stage/unstage controls execute off the UI thread, disable while a mutation is active, and refresh status plus clear stale diff data afterward.
+
+## 2026-08-07 — Phase 3 / commit boundary
+
+**Intent:** commit through typed Git arguments and an atomically-created temporary message file, preserving UI drafts when Git rejects the operation.
+
+**Files:** `crates/git_cli/src/lib.rs` and this work log.
+
+**Acceptance checks:** integration fixtures cover normal, amend, sign-off, missing identity, and hook rejection; message files are removed after both success and failure.
+
+## 2026-08-07 — Phase 3 / discard boundary
+
+**Intent:** safely discard tracked modifications using Git while refusing untracked deletion until a platform trash implementation is available.
+
+**Files:** `crates/git_cli/src/lib.rs` and this work log.
+
+**Acceptance checks:** tracked paths restore from the index; unsafe, nested-repository, and untracked paths are rejected rather than deleted.
+
+## 2026-08-07 — Phase 2 / polling refresh fallback
+
+**Intent:** keep Working Copy current without UI-thread filesystem work while a native watcher integration remains unavailable.
+
+**Files:** `apps/desktop/src/main.rs` and this work log.
+
+**Acceptance checks:** an open repository schedules bounded background refreshes; switching repositories drops the old loop; closing the model prevents further updates.
+
+## 2026-08-07 — Phase 2 / native watcher
+
+**Intent:** receive platform filesystem events for the active worktree and coalesce them into the existing status refresh lifecycle.
+
+**Files:** workspace manifests and lockfile, `apps/desktop/src/main.rs`, and this work log.
+
+**Acceptance checks:** one `notify` watcher is retained per active repository; events are coalesced through a channel, stale watchers are replaced on repository changes, and polling remains available when watcher creation fails.
 
 ## 2026-08-06 — Phase 0 / issue 1: initialize workspace and CI
 

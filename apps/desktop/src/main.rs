@@ -1,22 +1,33 @@
 //! macOS application entry point.
 
-use std::path::{Path, PathBuf};
+use std::{
+    ffi::OsString,
+    fs,
+    os::unix::ffi::OsStringExt,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::mpsc::{self, Receiver},
+    time::Duration,
+};
 
 mod actions;
 mod keymap;
 mod menus;
 
 use app_core::{RecentRepositoryStore, RepositoryOpenError, WindowGeometry, open_repository};
-use git_cli::GitExecutable;
+use git_cli::{CommitRequest, GitExecutable, GitStatusError, LoadedDiff};
 use git_domain::{GitPath, StatusEntry, WorktreeRepository, WorktreeStatus};
 use gpui::{
-    App, Application, Bounds, ClickEvent, Context, ExternalPaths, FocusHandle, IntoElement,
-    MouseButton, PathPromptOptions, Render, Subscription, Window, WindowAppearance, WindowBounds,
-    WindowOptions, div, point, prelude::*, px, size,
+    App, Application, Bounds, ClickEvent, ClipboardItem, Context, ExternalPaths, FocusHandle,
+    IntoElement, MouseButton, PathPromptOptions, Render, Subscription, Window, WindowAppearance,
+    WindowBounds, WindowOptions, div, point, prelude::*, px, size,
 };
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use ui_kit::{Appearance, Theme};
 
-use actions::{OpenRepository, Refresh, ToggleAppearance, WidenInspector, WidenSidebar};
+use actions::{
+    FocusComposer, OpenRepository, Refresh, ToggleAppearance, WidenInspector, WidenSidebar,
+};
 
 const INITIAL_WINDOW_SIZE: (f32, f32) = (1200.0, 800.0);
 const MINIMUM_WINDOW_SIZE: (f32, f32) = (800.0, 560.0);
@@ -157,6 +168,17 @@ struct GitronimoApp {
     working_copy: Option<WorktreeStatus>,
     selected_paths: Vec<GitPath>,
     context_path: Option<GitPath>,
+    loaded_diff: Option<LoadedDiff>,
+    selected_diff: Option<(GitPath, bool)>,
+    pending_discard: Option<Vec<GitPath>>,
+    commit_subject: String,
+    commit_body: String,
+    commit_amend: bool,
+    commit_sign_off: bool,
+    author_identity: String,
+    mutation_in_flight: bool,
+    watcher: Option<RecommendedWatcher>,
+    watch_events: Option<Receiver<()>>,
     store: RecentRepositoryStore,
     diagnostics: String,
     subscriptions: Vec<Subscription>,
@@ -182,6 +204,17 @@ impl GitronimoApp {
             working_copy: None,
             selected_paths: Vec::new(),
             context_path: None,
+            loaded_diff: None,
+            selected_diff: None,
+            pending_discard: None,
+            commit_subject: String::new(),
+            commit_body: String::new(),
+            commit_amend: false,
+            commit_sign_off: false,
+            author_identity: "Loading author identity…".into(),
+            mutation_in_flight: false,
+            watcher: None,
+            watch_events: None,
             store,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
@@ -238,6 +271,17 @@ impl GitronimoApp {
             working_copy: None,
             selected_paths: Vec::new(),
             context_path: None,
+            loaded_diff: None,
+            selected_diff: None,
+            pending_discard: None,
+            commit_subject: String::new(),
+            commit_body: String::new(),
+            commit_amend: false,
+            commit_sign_off: false,
+            author_identity: "Loading author identity…".into(),
+            mutation_in_flight: false,
+            watcher: None,
+            watch_events: None,
             store,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
@@ -246,7 +290,11 @@ impl GitronimoApp {
         app.observe_window_geometry(window, cx);
         Self::load_diagnostics(cx);
         if let ShellState::Repository(repository) = &app.state {
+            let repository = repository.clone();
             app.load_working_copy(repository.clone(), cx);
+            Self::load_author_identity(repository.clone(), cx);
+            app.start_watcher(&repository);
+            Self::schedule_poll(repository, cx);
         }
         app
     }
@@ -304,8 +352,19 @@ impl GitronimoApp {
                 self.working_copy = None;
                 self.selected_paths.clear();
                 self.context_path = None;
+                self.loaded_diff = None;
+                self.selected_diff = None;
+                self.pending_discard = None;
+                self.commit_subject.clear();
+                self.commit_body.clear();
+                self.commit_amend = false;
+                self.commit_sign_off = false;
                 if let ShellState::Repository(repository) = &self.state {
+                    let repository = repository.clone();
                     self.load_working_copy(repository.clone(), cx);
+                    Self::load_author_identity(repository.clone(), cx);
+                    self.start_watcher(&repository);
+                    Self::schedule_poll(repository, cx);
                 }
             }
             Err(error) => {
@@ -324,6 +383,10 @@ impl GitronimoApp {
             self.activity = "Open a repository before refreshing its working copy.".into();
         }
         cx.notify();
+    }
+
+    fn focus_composer(&mut self, _: &FocusComposer, _: &mut Window, cx: &mut Context<Self>) {
+        self.edit_commit_subject(cx);
     }
 
     fn toggle_appearance(
@@ -373,6 +436,7 @@ impl GitronimoApp {
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.state = ShellState::Loading(path.clone());
+        self.stop_watcher();
         self.activity = "Opening repository…".into();
         let store = RecentRepositoryStore::new(preferences_path());
         cx.spawn_in(window, async move |this, cx| {
@@ -420,7 +484,86 @@ impl GitronimoApp {
         .detach();
     }
 
-    fn select_status_path(&mut self, path: GitPath, additive: bool, cx: &mut Context<Self>) {
+    fn load_author_identity(repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        cx.spawn(async move |this, cx| {
+            let identity = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .ok()?
+                        .author_identity(&repository)
+                        .ok()
+                        .flatten()
+                        .map(|identity| format!("{} <{}>", identity.name, identity.email))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root) {
+                    app.author_identity = identity.unwrap_or_else(|| {
+                        "Author identity missing: set user.name and user.email in Git.".into()
+                    });
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn schedule_poll(repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        cx.spawn(async move |this, cx| {
+            cx.background_spawn(async move {
+                std::thread::sleep(Duration::from_secs(2));
+            })
+            .await;
+            let _ = this.update(cx, |app, cx| {
+                let ShellState::Repository(current) = &app.state else {
+                    return;
+                };
+                if current.worktree_root == root {
+                    let changed = app
+                        .watch_events
+                        .as_ref()
+                        .is_none_or(|events| events.try_iter().next().is_some());
+                    if changed {
+                        app.load_working_copy(repository.clone(), cx);
+                    }
+                    Self::schedule_poll(repository, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn start_watcher(&mut self, repository: &WorktreeRepository) {
+        self.stop_watcher();
+        let (sender, receiver) = mpsc::channel();
+        let Ok(mut watcher) = notify::recommended_watcher(move |_| {
+            let _ = sender.send(());
+        }) else {
+            return;
+        };
+        if watcher
+            .watch(&repository.worktree_root, RecursiveMode::Recursive)
+            .is_ok()
+        {
+            self.watcher = Some(watcher);
+            self.watch_events = Some(receiver);
+        }
+    }
+
+    fn stop_watcher(&mut self) {
+        self.watcher = None;
+        self.watch_events = None;
+    }
+
+    fn select_status_path(
+        &mut self,
+        path: GitPath,
+        additive: bool,
+        staged: bool,
+        cx: &mut Context<Self>,
+    ) {
         if additive {
             if let Some(index) = self
                 .selected_paths
@@ -434,13 +577,356 @@ impl GitronimoApp {
         } else {
             self.selected_paths = vec![path];
         }
+        if !additive && let ShellState::Repository(repository) = &self.state {
+            self.selected_diff = Some((self.selected_paths[0].clone(), staged));
+            Self::load_diff(
+                repository.clone(),
+                self.selected_paths[0].clone(),
+                staged,
+                git_cli::MAX_DISPLAY_DIFF_BYTES,
+                cx,
+            );
+        }
         cx.notify();
+    }
+
+    fn load_diff(
+        repository: WorktreeRepository,
+        path: GitPath,
+        staged: bool,
+        limit: usize,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            let diff = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .file_diff_with_limit(&repository, &path, staged, limit)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Ok(diff) = diff {
+                    app.loaded_diff = Some(diff);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn show_status_context_menu(&mut self, path: GitPath, cx: &mut Context<Self>) {
         self.context_path = Some(path);
         cx.notify();
     }
+
+    fn load_full_diff(&mut self, cx: &mut Context<Self>) {
+        let Some((path, staged)) = self.selected_diff.clone() else {
+            return;
+        };
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        self.activity = "Loading full diff…".into();
+        Self::load_diff(repository.clone(), path, staged, usize::MAX, cx);
+        cx.notify();
+    }
+
+    fn copy_context_path(&mut self, repository: &WorktreeRepository, cx: &mut Context<Self>) {
+        let Some(path) = self.context_path.as_ref() else {
+            return;
+        };
+        let path = repository
+            .worktree_root
+            .join(OsString::from_vec(path.0.clone()));
+        cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
+        self.activity = "Path copied.".into();
+        cx.notify();
+    }
+
+    fn open_context_path(
+        &mut self,
+        repository: &WorktreeRepository,
+        reveal: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(path) = self.context_path.as_ref() else {
+            return;
+        };
+        let path = repository
+            .worktree_root
+            .join(OsString::from_vec(path.0.clone()));
+        self.activity = if reveal {
+            "Revealing file in Finder…"
+        } else {
+            "Opening file…"
+        }
+        .into();
+        cx.background_spawn(async move {
+            let mut command = Command::new("open");
+            if reveal {
+                command.arg("-R");
+            }
+            let _ = command.arg(path).status();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn mutate(&mut self, operation: Mutation, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(_) = &self.state else {
+            return;
+        };
+        let paths = self.selected_paths.clone();
+        if operation.needs_paths() && paths.is_empty() {
+            self.activity = "Select at least one file first.".into();
+            cx.notify();
+            return;
+        }
+        if operation == Mutation::DiscardSelected && self.pending_discard.as_ref() != Some(&paths) {
+            self.pending_discard = Some(paths);
+            self.activity = "Review the discard consequences, then confirm.".into();
+            cx.notify();
+            return;
+        }
+        self.run_mutation(operation, paths, cx);
+    }
+
+    fn confirm_discard(&mut self, cx: &mut Context<Self>) {
+        let Some(paths) = self.pending_discard.take() else {
+            return;
+        };
+        self.run_mutation(Mutation::DiscardSelected, paths, cx);
+    }
+
+    fn edit_commit_subject(&mut self, cx: &mut Context<Self>) {
+        self.prompt_commit_text(true, cx);
+    }
+    fn edit_commit_body(&mut self, cx: &mut Context<Self>) {
+        self.prompt_commit_text(false, cx);
+    }
+    fn toggle_commit_amend(&mut self, cx: &mut Context<Self>) {
+        self.commit_amend = !self.commit_amend;
+        cx.notify();
+    }
+    fn toggle_commit_sign_off(&mut self, cx: &mut Context<Self>) {
+        self.commit_sign_off = !self.commit_sign_off;
+        cx.notify();
+    }
+
+    fn prompt_commit_text(&mut self, subject: bool, cx: &mut Context<Self>) {
+        self.activity = if subject {
+            "Enter commit subject…"
+        } else {
+            "Enter commit body…"
+        }
+        .into();
+        cx.spawn(async move |this, cx| {
+            let text = cx
+                .background_spawn(async move {
+                    let label = if subject {
+                        "Commit subject"
+                    } else {
+                        "Commit body"
+                    };
+                    Command::new("osascript")
+                        .args([
+                            "-e",
+                            &format!(
+                                "text returned of (display dialog \"{label}\" default answer \"\")"
+                            ),
+                        ])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| {
+                            String::from_utf8_lossy(&output.stdout)
+                                .trim_end()
+                                .to_owned()
+                        })
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(text) = text {
+                    if subject {
+                        app.commit_subject = text;
+                    } else {
+                        app.commit_body = text;
+                    }
+                    app.activity = "Commit draft updated.".into();
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn commit_draft(&mut self, cx: &mut Context<Self>) {
+        if self.mutation_in_flight
+            || self.commit_subject.trim().is_empty()
+            || self.status_groups().staged.is_empty()
+        {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let request = CommitRequest {
+            subject: self.commit_subject.clone(),
+            body: self.commit_body.clone(),
+            amend: self.commit_amend,
+            sign_off: self.commit_sign_off,
+        };
+        self.mutation_in_flight = true;
+        self.activity = "Committing…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .commit(&worker_repository, &request)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.commit_subject.clear();
+                        app.commit_body.clear();
+                        app.activity = "Commit complete.".into();
+                        app.load_working_copy(repository, cx);
+                    }
+                    Err(error) => app.activity = format!("Commit failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn run_mutation(&mut self, operation: Mutation, paths: Vec<GitPath>, cx: &mut Context<Self>) {
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        self.mutation_in_flight = true;
+        self.activity = format!("{}…", operation.label());
+        let worker_repository = repository.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    match operation {
+                        Mutation::StageSelected => git.stage_paths(&worker_repository, &paths),
+                        Mutation::UnstageSelected => git.unstage_paths(&worker_repository, &paths),
+                        Mutation::StageAll => git.stage_all(&worker_repository),
+                        Mutation::UnstageAll => git.unstage_all(&worker_repository),
+                        Mutation::DiscardSelected => {
+                            discard_selected(&git, &worker_repository, &paths)
+                        }
+                    }
+                    .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.selected_paths.clear();
+                        app.loaded_diff = None;
+                        app.selected_diff = None;
+                        app.activity = format!("{} complete.", operation.label());
+                        app.load_working_copy(repository, cx);
+                    }
+                    Err(error) => app.activity = format!("{} failed: {error}", operation.label()),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mutation {
+    StageSelected,
+    UnstageSelected,
+    StageAll,
+    UnstageAll,
+    DiscardSelected,
+}
+
+impl Mutation {
+    fn needs_paths(self) -> bool {
+        matches!(
+            self,
+            Self::StageSelected | Self::UnstageSelected | Self::DiscardSelected
+        )
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::StageSelected => "Stage selected",
+            Self::UnstageSelected => "Unstage selected",
+            Self::StageAll => "Stage all",
+            Self::UnstageAll => "Unstage all",
+            Self::DiscardSelected => "Discard selected",
+        }
+    }
+}
+
+fn discard_selected(
+    git: &GitExecutable,
+    repository: &WorktreeRepository,
+    paths: &[GitPath],
+) -> Result<(), GitStatusError> {
+    for path in paths {
+        match git.discard_tracked_paths(repository, std::slice::from_ref(path)) {
+            Ok(()) => {}
+            Err(GitStatusError::UntrackedDeletionRefused) => {
+                move_to_trash(&repository.worktree_root, path).map_err(GitStatusError::Io)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn move_to_trash(root: &Path, path: &GitPath) -> std::io::Result<()> {
+    let target = eligible_trash_path(root, path)?;
+    let output = Command::new("osascript")
+        .args([
+            "-e",
+            "on run argv\ntell application \"Finder\" to delete POSIX file (item 1 of argv)\nend run",
+        ])
+        .arg(target)
+        .output()?;
+    output.status.success().then_some(()).ok_or_else(|| {
+        std::io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_owned())
+    })
+}
+
+fn eligible_trash_path(root: &Path, path: &GitPath) -> std::io::Result<PathBuf> {
+    if path.0.starts_with(b"/")
+        || path.0.split(|byte| *byte == b'/').any(|part| part == b"..")
+        || std::str::from_utf8(&path.0).is_err()
+    {
+        return Err(std::io::Error::other("unsupported path for Finder Trash"));
+    }
+    let target = root.join(OsString::from_vec(path.0.clone()));
+    let metadata = fs::symlink_metadata(&target)?;
+    if metadata.file_type().is_symlink() || (metadata.is_dir() && target.join(".git").exists()) {
+        return Err(std::io::Error::other(
+            "refusing symlink or nested repository",
+        ));
+    }
+    Ok(target)
 }
 
 fn appearance_from_window(appearance: WindowAppearance) -> Appearance {
@@ -472,6 +958,7 @@ impl Render for GitronimoApp {
             .text_color(colors.text_primary)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::refresh))
+            .on_action(cx.listener(Self::focus_composer))
             .on_action(cx.listener(Self::toggle_appearance))
             .on_action(cx.listener(Self::widen_sidebar))
             .on_action(cx.listener(Self::widen_inspector))
@@ -525,22 +1012,10 @@ impl GitronimoApp {
             .border_color(colors.border)
             .child("Workspace")
             .child("Working Copy")
-            .child(status_badge("Staged", groups.staged_entries.len(), colors))
-            .child(status_badge(
-                "Unstaged",
-                groups.unstaged_entries.len(),
-                colors,
-            ))
-            .child(status_badge(
-                "Untracked",
-                groups.untracked_entries.len(),
-                colors,
-            ))
-            .child(status_badge(
-                "Conflicts",
-                groups.conflict_entries.len(),
-                colors,
-            ))
+            .child(status_badge("Staged", groups.staged.len(), colors))
+            .child(status_badge("Unstaged", groups.unstaged.len(), colors))
+            .child(status_badge("Untracked", groups.untracked.len(), colors))
+            .child(status_badge("Conflicts", groups.conflicts.len(), colors))
             .child("History")
     }
 
@@ -557,11 +1032,15 @@ impl GitronimoApp {
             .gap_4()
             .child(div().text_xl().child("Working Copy"))
             .child(repository.worktree_root.display().to_string())
-            .children(self.context_menu_view(colors))
-            .child(self.status_group_view("Staged", &groups.staged_entries, colors, cx))
-            .child(self.status_group_view("Unstaged", &groups.unstaged_entries, colors, cx))
-            .child(self.status_group_view("Untracked", &groups.untracked_entries, colors, cx))
-            .child(self.status_group_view("Conflicts", &groups.conflict_entries, colors, cx))
+            .child(self.mutation_controls(colors, cx))
+            .children(self.discard_confirmation_view(colors, cx))
+            .child(self.commit_composer_view(colors, cx))
+            .children(self.context_menu_view(repository, colors, cx))
+            .child(self.status_group_view("Staged", &groups.staged, true, colors, cx))
+            .child(self.status_group_view("Unstaged", &groups.unstaged, false, colors, cx))
+            .child(self.status_group_view("Untracked", &groups.untracked, false, colors, cx))
+            .child(self.status_group_view("Conflicts", &groups.conflicts, false, colors, cx))
+            .children(self.diff_view(colors, cx))
     }
 
     fn status_groups(&self) -> StatusGroups<'_> {
@@ -571,15 +1050,15 @@ impl GitronimoApp {
         };
         for entry in &status.entries {
             match entry {
-                StatusEntry::Unmerged { .. } => groups.conflict_entries.push(entry),
-                StatusEntry::Untracked(_) => groups.untracked_entries.push(entry),
+                StatusEntry::Unmerged { .. } => groups.conflicts.push(entry),
+                StatusEntry::Untracked(_) => groups.untracked.push(entry),
                 StatusEntry::Ignored(_) => {}
                 StatusEntry::Ordinary { status, .. } | StatusEntry::Renamed { status, .. } => {
                     if status.0[0] != b'.' {
-                        groups.staged_entries.push(entry);
+                        groups.staged.push(entry);
                     }
                     if status.0[1] != b'.' {
-                        groups.unstaged_entries.push(entry);
+                        groups.unstaged.push(entry);
                     }
                 }
             }
@@ -587,8 +1066,140 @@ impl GitronimoApp {
         groups
     }
 
-    fn context_menu_view(&self, colors: &ui_kit::ThemeColors) -> Option<gpui::AnyElement> {
+    fn mutation_controls(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let disabled = self.mutation_in_flight;
+        div().flex().gap_2().children([
+            mutation_button(
+                "Stage selected",
+                disabled,
+                Mutation::StageSelected,
+                colors,
+                cx,
+            ),
+            mutation_button(
+                "Unstage selected",
+                disabled,
+                Mutation::UnstageSelected,
+                colors,
+                cx,
+            ),
+            mutation_button("Stage all", disabled, Mutation::StageAll, colors, cx),
+            mutation_button("Unstage all", disabled, Mutation::UnstageAll, colors, cx),
+            mutation_button(
+                "Discard selected",
+                disabled,
+                Mutation::DiscardSelected,
+                colors,
+                cx,
+            ),
+        ])
+    }
+
+    fn discard_confirmation_view(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        self.pending_discard.as_ref().map(|paths| {
+            div()
+                .p_2()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child(format!(
+                    "Discard {} path(s)? Tracked changes restore from HEAD; untracked files move to Trash.",
+                    paths.len()
+                ))
+                .child(file_action_button("Confirm discard", colors, cx, |app, cx| {
+                    app.confirm_discard(cx);
+                }))
+                .into_any_element()
+        })
+    }
+
+    fn commit_composer_view(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let enabled = !self.mutation_in_flight
+            && !self.commit_subject.trim().is_empty()
+            && !self.status_groups().staged.is_empty();
+        div()
+            .p_2()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .bg(colors.panel_background)
+            .border_1()
+            .border_color(colors.border)
+            .child("Commit")
+            .child(format!(
+                "Subject: {}",
+                if self.commit_subject.is_empty() {
+                    "(required)"
+                } else {
+                    &self.commit_subject
+                }
+            ))
+            .child(file_action_button("Edit subject", colors, cx, |app, cx| {
+                app.edit_commit_subject(cx);
+            }))
+            .child(format!(
+                "Body: {}",
+                if self.commit_body.is_empty() {
+                    "(optional)"
+                } else {
+                    &self.commit_body
+                }
+            ))
+            .child(file_action_button("Edit body", colors, cx, |app, cx| {
+                app.edit_commit_body(cx);
+            }))
+            .child(format!(
+                "Amend: {}",
+                if self.commit_amend { "on" } else { "off" }
+            ))
+            .child(file_action_button("Toggle amend", colors, cx, |app, cx| {
+                app.toggle_commit_amend(cx);
+            }))
+            .child(format!(
+                "Sign-off: {}",
+                if self.commit_sign_off { "on" } else { "off" }
+            ))
+            .child(file_action_button(
+                "Toggle sign-off",
+                colors,
+                cx,
+                GitronimoApp::toggle_commit_sign_off,
+            ))
+            .child(format!("Author: {}", self.author_identity))
+            .child(file_action_button(
+                "Commit staged changes",
+                colors,
+                cx,
+                move |app, cx| {
+                    if enabled {
+                        app.commit_draft(cx);
+                    }
+                },
+            ))
+    }
+
+    fn context_menu_view(
+        &self,
+        repository: &WorktreeRepository,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
         self.context_path.as_ref().map(|path| {
+            let copy_repository = repository.clone();
+            let reveal_repository = repository.clone();
+            let open_repository = repository.clone();
             div()
                 .p_2()
                 .bg(colors.raised_background)
@@ -598,7 +1209,35 @@ impl GitronimoApp {
                     "File actions: {}",
                     String::from_utf8_lossy(&path.0)
                 ))
-                .child("Copy path  ·  Reveal in Finder  ·  Open in editor")
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(file_action_button(
+                            "Copy path",
+                            colors,
+                            cx,
+                            move |app, cx| {
+                                app.copy_context_path(&copy_repository, cx);
+                            },
+                        ))
+                        .child(file_action_button(
+                            "Reveal in Finder",
+                            colors,
+                            cx,
+                            move |app, cx| {
+                                app.open_context_path(&reveal_repository, true, cx);
+                            },
+                        ))
+                        .child(file_action_button(
+                            "Open in editor",
+                            colors,
+                            cx,
+                            move |app, cx| {
+                                app.open_context_path(&open_repository, false, cx);
+                            },
+                        )),
+                )
                 .into_any_element()
         })
     }
@@ -607,6 +1246,7 @@ impl GitronimoApp {
         &self,
         title: &'static str,
         entries: &[&StatusEntry],
+        staged: bool,
         colors: &ui_kit::ThemeColors,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -640,6 +1280,7 @@ impl GitronimoApp {
                             app.select_status_path(
                                 path.clone(),
                                 event.modifiers().secondary() || event.modifiers().shift,
+                                staged,
                                 cx,
                             );
                         }))
@@ -654,6 +1295,53 @@ impl GitronimoApp {
                 .into_any_element()
         };
         div().flex().flex_col().gap_1().child(title).child(rows)
+    }
+
+    fn diff_view(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        self.loaded_diff.as_ref().map(|loaded| {
+            let mut text = String::new();
+            for file in &loaded.diff.files {
+                for hunk in &file.hunks {
+                    text.push_str(&String::from_utf8_lossy(&hunk.header));
+                    text.push('\n');
+                    for line in &hunk.lines {
+                        let prefix = match line.kind {
+                            git_domain::DiffLineKind::Context => ' ',
+                            git_domain::DiffLineKind::Addition => '+',
+                            git_domain::DiffLineKind::Removal => '-',
+                        };
+                        text.push(prefix);
+                        text.push_str(&String::from_utf8_lossy(&line.content));
+                        text.push('\n');
+                    }
+                }
+            }
+            div()
+                .p_2()
+                .bg(colors.panel_background)
+                .border_1()
+                .border_color(colors.border)
+                .child(if loaded.diff.files.iter().any(|file| file.binary) {
+                    "Binary file changed".to_owned()
+                } else {
+                    text
+                })
+                .children(loaded.truncated.then(|| {
+                    div().child("Diff truncated.").child(file_action_button(
+                        "Load full diff",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.load_full_diff(cx);
+                        },
+                    ))
+                }))
+                .into_any_element()
+        })
     }
 
     fn welcome_view(
@@ -707,31 +1395,76 @@ impl GitronimoApp {
 
 #[derive(Default)]
 struct StatusGroups<'a> {
-    staged_entries: Vec<&'a StatusEntry>,
-    unstaged_entries: Vec<&'a StatusEntry>,
-    untracked_entries: Vec<&'a StatusEntry>,
-    conflict_entries: Vec<&'a StatusEntry>,
+    staged: Vec<&'a StatusEntry>,
+    unstaged: Vec<&'a StatusEntry>,
+    untracked: Vec<&'a StatusEntry>,
+    conflicts: Vec<&'a StatusEntry>,
 }
 
 fn status_badge(
     label: &'static str,
     count: usize,
     colors: &ui_kit::ThemeColors,
-) -> impl IntoElement {
+) -> gpui::AnyElement {
     div()
         .flex()
         .justify_between()
         .text_color(colors.text_secondary)
         .child(label)
         .child(count.to_string())
+        .into_any_element()
+}
+
+fn mutation_button(
+    label: &'static str,
+    disabled: bool,
+    operation: Mutation,
+    colors: &ui_kit::ThemeColors,
+    cx: &mut Context<GitronimoApp>,
+) -> gpui::AnyElement {
+    div()
+        .id(label)
+        .px_2()
+        .py_1()
+        .bg(colors.raised_background)
+        .border_1()
+        .border_color(colors.border)
+        .cursor_pointer()
+        .on_click(cx.listener(move |app, _, _, cx| {
+            if !disabled {
+                app.mutate(operation, cx);
+            }
+        }))
+        .child(label)
+        .into_any_element()
+}
+
+fn file_action_button(
+    label: &'static str,
+    colors: &ui_kit::ThemeColors,
+    cx: &mut Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut Context<GitronimoApp>) + 'static,
+) -> gpui::AnyElement {
+    div()
+        .id(label)
+        .px_2()
+        .py_1()
+        .bg(colors.panel_background)
+        .border_1()
+        .border_color(colors.border)
+        .cursor_pointer()
+        .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)))
+        .child(label)
+        .into_any_element()
 }
 
 fn status_path(entry: &StatusEntry) -> &GitPath {
     match entry {
         StatusEntry::Ordinary { path, .. }
         | StatusEntry::Renamed { path, .. }
-        | StatusEntry::Unmerged { path, .. } => path,
-        StatusEntry::Untracked(path) | StatusEntry::Ignored(path) => path,
+        | StatusEntry::Unmerged { path, .. }
+        | StatusEntry::Untracked(path)
+        | StatusEntry::Ignored(path) => path,
     }
 }
 
@@ -789,8 +1522,8 @@ fn resize_width(width: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, ShellState, keymap,
-        resize_width, window_options,
+        GitPath, GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, ShellState,
+        eligible_trash_path, keymap, resize_width, window_options,
     };
     use app_core::RecentRepositoryStore;
     use gpui::{AppContext, Keystroke, TestAppContext};
@@ -858,5 +1591,20 @@ mod tests {
             ShellState::Error("message".into()),
             ShellState::Error(_)
         ));
+    }
+
+    #[test]
+    fn trash_refuses_unsafe_paths_symlinks_and_nested_repositories() {
+        let root =
+            std::env::temp_dir().join(format!("gitronimo-trash-test-{}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("temporary root should exist");
+        let nested = root.join("nested");
+        std::fs::create_dir_all(nested.join(".git"))
+            .expect("nested repository marker should exist");
+        std::os::unix::fs::symlink(&nested, root.join("link")).expect("symlink should exist");
+        assert!(eligible_trash_path(&root, &GitPath(b"../outside".to_vec())).is_err());
+        assert!(eligible_trash_path(&root, &GitPath(b"link".to_vec())).is_err());
+        assert!(eligible_trash_path(&root, &GitPath(b"nested".to_vec())).is_err());
+        std::fs::remove_dir_all(root).expect("temporary root should be removed");
     }
 }

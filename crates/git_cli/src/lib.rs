@@ -2,10 +2,13 @@
 
 use std::{
     env,
-    ffi::OsStr,
-    io,
+    ffi::{OsStr, OsString},
+    fs,
+    io::{self, Write},
+    os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
     process::{Child, ChildStderr, Command, ExitStatus, Output, Stdio},
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use app_core::{RepositoryDiscoverer, RepositoryOpenError};
@@ -16,6 +19,22 @@ use git_domain::{
 };
 
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
+pub const MAX_DISPLAY_DIFF_BYTES: usize = 1_000_000;
+static MESSAGE_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitRequest {
+    pub subject: String,
+    pub body: String,
+    pub amend: bool,
+    pub sign_off: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorIdentity {
+    pub name: String,
+    pub email: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitExecutable(PathBuf);
@@ -95,13 +114,13 @@ impl GitExecutable {
         }
         let output = self.run(&repository.worktree_root, args)?;
         if !output.status.success() {
-            return Err(GitStatusError::CommandFailed);
+            return Err(command_error(&output));
         }
         let mut status = parse_porcelain_v2_z(&output.stdout)?;
 
         let stashes = self.run(&repository.worktree_root, ["stash", "list", "-z"])?;
         if !stashes.status.success() {
-            return Err(GitStatusError::CommandFailed);
+            return Err(command_error(&stashes));
         }
         status.stash_count = stashes
             .stdout
@@ -111,6 +130,191 @@ impl GitExecutable {
             .try_into()
             .map_err(|_| GitStatusError::TooManyStashes)?;
         Ok(status)
+    }
+
+    /// Loads one staged or unstaged file diff for display.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Git cannot run or rejects the diff request.
+    pub fn file_diff(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        staged: bool,
+    ) -> Result<LoadedDiff, GitStatusError> {
+        self.file_diff_with_limit(repository, path, staged, MAX_DISPLAY_DIFF_BYTES)
+    }
+
+    /// Loads one staged or unstaged file diff with a caller-selected display limit.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Git cannot run or rejects the diff request.
+    pub fn file_diff_with_limit(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        staged: bool,
+        limit: usize,
+    ) -> Result<LoadedDiff, GitStatusError> {
+        let mut args = vec![
+            OsString::from("diff"),
+            OsString::from("--no-ext-diff"),
+            OsString::from("--no-textconv"),
+            OsString::from("--binary"),
+        ];
+        if staged {
+            args.push(OsString::from("--cached"));
+        }
+        args.push(OsString::from("--"));
+        args.push(OsString::from_vec(path.0.clone()));
+        let output = self.run(&repository.worktree_root, args)?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        let truncated = output.stdout.len() > limit;
+        let bytes = &output.stdout[..output.stdout.len().min(limit)];
+        Ok(LoadedDiff {
+            diff: parse_unified_diff(bytes),
+            truncated,
+        })
+    }
+
+    /// Stages the supplied repository-relative paths.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects the staging request.
+    pub fn stage_paths(
+        &self,
+        repository: &WorktreeRepository,
+        paths: &[GitPath],
+    ) -> Result<(), GitStatusError> {
+        self.mutate_paths(repository, "add", paths)
+    }
+
+    /// Stages all working-copy changes, including deletions.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects the staging request.
+    pub fn stage_all(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["add", "-A"])
+    }
+
+    /// Unstages the supplied paths, including in an unborn repository.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects the unstaging request.
+    pub fn unstage_paths(
+        &self,
+        repository: &WorktreeRepository,
+        paths: &[GitPath],
+    ) -> Result<(), GitStatusError> {
+        if self.has_head(repository)? {
+            self.mutate_paths(repository, "reset", paths)
+        } else {
+            self.remove_from_index(repository, paths)
+        }
+    }
+
+    /// Unstages every index entry, including in an unborn repository.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects the unstaging request.
+    pub fn unstage_all(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        if self.has_head(repository)? {
+            self.mutate(repository, ["reset"])
+        } else {
+            self.mutate(repository, ["rm", "--cached", "-r", "."])
+        }
+    }
+
+    /// Returns the identity Git will use for commits, if it is configured.
+    ///
+    /// # Errors
+    /// Returns an error when Git cannot read repository configuration.
+    pub fn author_identity(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<Option<AuthorIdentity>, GitStatusError> {
+        let name = self.run(&repository.worktree_root, ["config", "--get", "user.name"])?;
+        let email = self.run(&repository.worktree_root, ["config", "--get", "user.email"])?;
+        if !name.status.success() || !email.status.success() {
+            return Ok(None);
+        }
+        let name = String::from_utf8_lossy(&name.stdout).trim().to_owned();
+        let email = String::from_utf8_lossy(&email.stdout).trim().to_owned();
+        (!name.is_empty() && !email.is_empty())
+            .then_some(AuthorIdentity { name, email })
+            .ok_or(GitStatusError::MissingIdentity)
+            .map(Some)
+    }
+
+    /// Commits the staged index using a temporary message file.
+    ///
+    /// # Errors
+    /// Returns an error for an invalid message, missing identity, or rejected commit.
+    pub fn commit(
+        &self,
+        repository: &WorktreeRepository,
+        request: &CommitRequest,
+    ) -> Result<(), GitStatusError> {
+        if request.subject.trim().is_empty() {
+            return Err(GitStatusError::InvalidCommitMessage);
+        }
+        if self.author_identity(repository)?.is_none() {
+            return Err(GitStatusError::MissingIdentity);
+        }
+        let message_path = write_commit_message(&request.subject, &request.body)?;
+        let mut args = vec![
+            OsString::from("commit"),
+            OsString::from("--cleanup=verbatim"),
+            OsString::from("-F"),
+            message_path.clone().into_os_string(),
+        ];
+        if request.amend {
+            args.push(OsString::from("--amend"));
+        }
+        if request.sign_off {
+            args.push(OsString::from("--signoff"));
+        }
+        let result = self.mutate(repository, args);
+        let _ = fs::remove_file(message_path);
+        result
+    }
+
+    /// Discards only tracked paths by restoring their HEAD version.
+    ///
+    /// # Errors
+    /// Returns an error for unsafe, untracked, or unsupported paths.
+    pub fn discard_tracked_paths(
+        &self,
+        repository: &WorktreeRepository,
+        paths: &[GitPath],
+    ) -> Result<(), GitStatusError> {
+        if !self.has_head(repository)? {
+            return Err(GitStatusError::UnsupportedDiscard);
+        }
+        for path in paths {
+            if path.0.starts_with(b"/")
+                || path.0.split(|byte| *byte == b'/').any(|part| part == b"..")
+            {
+                return Err(GitStatusError::UnsafePath);
+            }
+            let output = self.run(
+                &repository.worktree_root,
+                [
+                    OsString::from("ls-files"),
+                    OsString::from("--error-unmatch"),
+                    OsString::from("--"),
+                    OsString::from_vec(path.0.clone()),
+                ],
+            )?;
+            if !output.status.success() {
+                return Err(GitStatusError::UntrackedDeletionRefused);
+            }
+        }
+        self.mutate_paths(repository, "restore", paths)
     }
 
     /// Classifies a selected directory using Git's canonical worktree and Git-dir paths.
@@ -196,6 +400,78 @@ impl GitExecutable {
         command.current_dir(directory).args(args);
         command
     }
+
+    fn mutate<I, S>(&self, repository: &WorktreeRepository, args: I) -> Result<(), GitStatusError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let output = self.run(&repository.worktree_root, args)?;
+        output
+            .status
+            .success()
+            .then_some(())
+            .ok_or_else(|| command_error(&output))
+    }
+
+    fn mutate_paths(
+        &self,
+        repository: &WorktreeRepository,
+        command: &str,
+        paths: &[GitPath],
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![OsString::from(command)];
+        if command == "reset" {
+            args.push(OsString::from("HEAD"));
+        }
+        if command == "restore" {
+            args.extend([
+                OsString::from("--worktree"),
+                OsString::from("--source=HEAD"),
+            ]);
+        }
+        args.push(OsString::from("--"));
+        args.extend(paths.iter().map(|path| OsString::from_vec(path.0.clone())));
+        self.mutate(repository, args)
+    }
+
+    fn remove_from_index(
+        &self,
+        repository: &WorktreeRepository,
+        paths: &[GitPath],
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![
+            OsString::from("rm"),
+            OsString::from("--cached"),
+            OsString::from("--"),
+        ];
+        args.extend(paths.iter().map(|path| OsString::from_vec(path.0.clone())));
+        self.mutate(repository, args)
+    }
+
+    fn has_head(&self, repository: &WorktreeRepository) -> Result<bool, GitStatusError> {
+        Ok(self
+            .run(&repository.worktree_root, ["rev-parse", "--verify", "HEAD"])?
+            .status
+            .success())
+    }
+}
+
+fn write_commit_message(subject: &str, body: &str) -> Result<PathBuf, GitStatusError> {
+    let path = std::env::temp_dir().join(format!(
+        "gitronimo-commit-{}-{}.txt",
+        std::process::id(),
+        MESSAGE_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    writeln!(file, "{subject}")?;
+    if !body.is_empty() {
+        writeln!(file, "\n{body}")?;
+    }
+    Ok(path)
 }
 
 impl RepositoryDiscoverer for GitExecutable {
@@ -234,9 +510,30 @@ impl GitChild {
 #[derive(Debug)]
 pub enum GitStatusError {
     Io(io::Error),
-    CommandFailed,
+    CommandFailed(String),
     Parse(PorcelainParseError),
     TooManyStashes,
+    MissingIdentity,
+    InvalidCommitMessage,
+    UntrackedDeletionRefused,
+    UnsafePath,
+    UnsupportedDiscard,
+}
+
+fn command_error(output: &Output) -> GitStatusError {
+    let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let message = if message.is_empty() {
+        "Git command failed without an error message.".into()
+    } else {
+        message
+    };
+    GitStatusError::CommandFailed(message)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoadedDiff {
+    pub diff: UnifiedDiff,
+    pub truncated: bool,
 }
 
 impl From<io::Error> for GitStatusError {
@@ -446,10 +743,10 @@ pub fn parse_unified_diff(bytes: &[u8]) -> UnifiedDiff {
                 lines: Vec::new(),
             });
         } else if line == b"\\ No newline at end of file" {
-            if let Some(hunk) = file.hunks.last_mut() {
-                if let Some(last_line) = hunk.lines.last_mut() {
-                    last_line.missing_final_newline = true;
-                }
+            if let Some(hunk) = file.hunks.last_mut()
+                && let Some(last_line) = hunk.lines.last_mut()
+            {
+                last_line.missing_final_newline = true;
             }
         } else if let Some(hunk) = file.hunks.last_mut() {
             let (kind, content) = match line {
@@ -472,11 +769,11 @@ pub fn parse_unified_diff(bytes: &[u8]) -> UnifiedDiff {
 }
 
 fn strip_diff_prefix(path: &[u8]) -> Option<&[u8]> {
-    match path {
-        b"/dev/null" => None,
-        [b'a', b'/', path @ ..] | [b'b', b'/', path @ ..] => Some(path),
-        path => Some(path),
-    }
+    (path != b"/dev/null").then(|| {
+        path.strip_prefix(b"a/")
+            .or_else(|| path.strip_prefix(b"b/"))
+            .unwrap_or(path)
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -530,13 +827,14 @@ mod tests {
     use std::{
         fs,
         io::Read,
+        os::unix::fs::PermissionsExt,
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
     };
 
     use super::{
-        GitExecutable, RenameKind, git_candidates, parse_commit_records, parse_porcelain_v2_z,
-        parse_unified_diff,
+        CommitRequest, GitExecutable, GitStatusError, RenameKind, git_candidates,
+        parse_commit_records, parse_porcelain_v2_z, parse_unified_diff,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
@@ -750,6 +1048,180 @@ Binary files a/image.png and b/image.png differ\n",
                 .entries
                 .contains(&StatusEntry::Ignored(GitPath(b"ignored.txt".to_vec())))
         );
+    }
+
+    #[test]
+    fn loads_staged_and_unstaged_file_diffs() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("fixture.txt"), "staged").expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let staged = repository
+            .git
+            .file_diff(&worktree, &GitPath(b"fixture.txt".to_vec()), true)
+            .expect("staged diff should load");
+        assert_eq!(staged.diff.files.len(), 1);
+        fs::write(repository.path.join("fixture.txt"), "unstaged").expect("fixture should write");
+        let unstaged = repository
+            .git
+            .file_diff(&worktree, &GitPath(b"fixture.txt".to_vec()), false)
+            .expect("unstaged diff should load");
+        assert_eq!(unstaged.diff.files.len(), 1);
+    }
+
+    #[test]
+    fn stages_and_unstages_paths_and_all_changes() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("one.txt"), "one").expect("fixture should write");
+        fs::write(repository.path.join("two.txt"), "two").expect("fixture should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let paths = [GitPath(b"one.txt".to_vec()), GitPath(b"two.txt".to_vec())];
+        repository
+            .git
+            .stage_paths(&worktree, &paths)
+            .expect("paths should stage");
+        assert_eq!(
+            repository
+                .git
+                .worktree_status(&worktree, false)
+                .expect("status should load")
+                .entries
+                .len(),
+            2
+        );
+        repository
+            .git
+            .unstage_paths(&worktree, &paths)
+            .expect("paths should unstage");
+        repository
+            .git
+            .stage_all(&worktree)
+            .expect("all should stage");
+        repository
+            .git
+            .unstage_all(&worktree)
+            .expect("all should unstage");
+    }
+
+    #[test]
+    fn commits_amends_signs_off_and_preserves_failure_path() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("fixture.txt"), "first").expect("fixture should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        repository
+            .git
+            .stage_all(&worktree)
+            .expect("fixture should stage");
+        repository
+            .git
+            .commit(
+                &worktree,
+                &CommitRequest {
+                    subject: "first".into(),
+                    body: "body".into(),
+                    amend: false,
+                    sign_off: true,
+                },
+            )
+            .expect("commit should succeed");
+        let log = repository
+            .git
+            .run(&repository.path, ["log", "-1", "--format=%B"])
+            .expect("log should run");
+        assert!(String::from_utf8_lossy(&log.stdout).contains("Signed-off-by:"));
+        fs::write(repository.path.join("fixture.txt"), "amended").expect("fixture should write");
+        repository
+            .git
+            .stage_all(&worktree)
+            .expect("fixture should stage");
+        repository
+            .git
+            .commit(
+                &worktree,
+                &CommitRequest {
+                    subject: "amended".into(),
+                    body: String::new(),
+                    amend: true,
+                    sign_off: false,
+                },
+            )
+            .expect("amend should succeed");
+        let hook = repository.path.join(".git/hooks/pre-commit");
+        fs::write(&hook, "#!/bin/sh\nexit 1\n").expect("hook should write");
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755))
+            .expect("hook should be executable");
+        fs::write(repository.path.join("fixture.txt"), "rejected").expect("fixture should write");
+        repository
+            .git
+            .stage_all(&worktree)
+            .expect("fixture should stage");
+        assert!(matches!(
+            repository.git.commit(
+                &worktree,
+                &CommitRequest {
+                    subject: "rejected".into(),
+                    body: String::new(),
+                    amend: false,
+                    sign_off: false
+                }
+            ),
+            Err(GitStatusError::CommandFailed(message)) if !message.is_empty()
+        ));
+    }
+
+    #[test]
+    fn discards_tracked_paths_and_refuses_untracked_or_unsafe_ones() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("fixture.txt"), "changed").expect("fixture should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        repository
+            .git
+            .discard_tracked_paths(&worktree, &[GitPath(b"fixture.txt".to_vec())])
+            .expect("tracked path should restore");
+        assert_eq!(
+            fs::read_to_string(repository.path.join("fixture.txt")).expect("fixture should read"),
+            "initial"
+        );
+        fs::write(repository.path.join("untracked.txt"), "keep").expect("fixture should write");
+        assert!(matches!(
+            repository
+                .git
+                .discard_tracked_paths(&worktree, &[GitPath(b"untracked.txt".to_vec())]),
+            Err(GitStatusError::UntrackedDeletionRefused)
+        ));
+        assert!(matches!(
+            repository
+                .git
+                .discard_tracked_paths(&worktree, &[GitPath(b"../outside".to_vec())]),
+            Err(GitStatusError::UnsafePath)
+        ));
     }
 
     #[test]

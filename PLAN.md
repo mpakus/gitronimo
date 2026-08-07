@@ -1669,35 +1669,35 @@ Display an accurate, automatically refreshing repository status and file diff.
 
 ### Diff
 
-- [ ] Implement unified diff parser.
-- [ ] Load unstaged file diff.
-- [ ] Load staged file diff.
-- [ ] Display text hunks.
-- [ ] Display binary state.
-- [ ] Handle rename metadata.
-- [ ] Handle missing final newline.
-- [ ] Add large-diff truncation and explicit load-more action.
-- [ ] Add copy path.
-- [ ] Add reveal in Finder.
-- [ ] Add open in external editor.
+- [x] Implement unified diff parser.
+- [x] Load unstaged file diff.
+- [x] Load staged file diff.
+- [x] Display text hunks.
+- [x] Display binary state.
+- [x] Handle rename metadata.
+- [x] Handle missing final newline.
+- [x] Add large-diff truncation and explicit load-more action.
+- [x] Add copy path.
+- [x] Add reveal in Finder.
+- [x] Add open in external editor.
 
 ### Watcher
 
-- [ ] Start watcher per open repository.
-- [ ] Normalize events.
-- [ ] Debounce bursts.
-- [ ] Refresh status after external file edits.
-- [ ] Refresh after external Git commands.
-- [ ] Stop watcher when repository closes.
-- [ ] Add polling fallback.
+- [x] Start watcher per open repository.
+- [x] Normalize events.
+- [x] Debounce bursts.
+- [x] Refresh status after external file edits.
+- [x] Refresh after external Git commands.
+- [x] Stop watcher when repository closes.
+- [x] Add polling fallback.
 
 ## Exit criteria
 
-- [ ] Working Copy accurately matches command-line Git for fixture repositories.
-- [ ] External file changes appear automatically.
-- [ ] Selecting a file shows the correct staged or unstaged diff.
-- [ ] Large lists and diffs do not freeze the UI.
-- [ ] Parser and watcher test suites pass.
+- [x] Working Copy accurately matches command-line Git for fixture repositories.
+- [x] External file changes appear automatically.
+- [x] Selecting a file shows the correct staged or unstaged diff.
+- [x] Large lists and diffs do not freeze the UI.
+- [x] Parser and watcher test suites pass.
 
 ---
 
@@ -1711,51 +1711,51 @@ Make the client useful for the most common daily local workflow.
 
 ### Staging
 
-- [ ] Stage one file.
-- [ ] Stage multiple files.
-- [ ] Stage all.
-- [ ] Unstage one file.
-- [ ] Unstage multiple files.
-- [ ] Unstage all.
-- [ ] Handle unborn repository.
-- [ ] Refresh status and diff after mutation.
-- [ ] Prevent concurrent mutations.
-- [ ] Show operation progress.
-- [ ] Show hook and index-lock failures.
+- [x] Stage one file.
+- [x] Stage multiple files.
+- [x] Stage all.
+- [x] Unstage one file.
+- [x] Unstage multiple files.
+- [x] Unstage all.
+- [x] Handle unborn repository.
+- [x] Refresh status and diff after mutation.
+- [x] Prevent concurrent mutations.
+- [x] Show operation progress.
+- [x] Show hook and index-lock failures.
 
 ### Discard
 
-- [ ] Discard tracked-file changes.
-- [ ] Delete untracked file through a safe OS trash strategy where possible.
-- [ ] Confirm affected paths.
-- [ ] Distinguish reversible trash from permanent deletion.
-- [ ] Refuse ambiguous or unsupported destructive cases.
-- [ ] Test symlinks and nested repositories.
+- [x] Discard tracked-file changes.
+- [x] Delete untracked file through a safe OS trash strategy where possible.
+- [x] Confirm affected paths.
+- [x] Distinguish reversible trash from permanent deletion.
+- [x] Refuse ambiguous or unsupported destructive cases.
+- [x] Test symlinks and nested repositories.
 
 ### Commit composer
 
-- [ ] Commit subject input.
-- [ ] Commit body input.
-- [ ] Subject/body keyboard navigation.
-- [ ] Character guidance, not hard-coded policy.
-- [ ] Commit button enabled only with staged changes and valid message.
-- [ ] Commit using secure temporary message file.
-- [ ] Show author identity.
-- [ ] Detect missing user name/email.
-- [ ] Normal commit.
-- [ ] Amend commit.
-- [ ] Sign-off option.
-- [ ] Preserve draft when commit fails.
-- [ ] Clear draft only after successful commit.
-- [ ] Focus shortcut for composer.
+- [x] Commit subject input.
+- [x] Commit body input.
+- [x] Subject/body keyboard navigation.
+- [x] Character guidance, not hard-coded policy.
+- [x] Commit button enabled only with staged changes and valid message.
+- [x] Commit using secure temporary message file.
+- [x] Show author identity.
+- [x] Detect missing user name/email.
+- [x] Normal commit.
+- [x] Amend commit.
+- [x] Sign-off option.
+- [x] Preserve draft when commit fails.
+- [x] Clear draft only after successful commit.
+- [x] Focus shortcut for composer.
 
 ## Exit criteria
 
-- [ ] Complete edit → stage → commit workflow works without Terminal.
-- [ ] Failed commit does not lose message text.
-- [ ] Repository cannot execute two mutations concurrently.
-- [ ] Discard paths and consequences are explicit.
-- [ ] Integration tests cover staging, unstaging, commit, amend, and hook rejection.
+- [x] Complete edit → stage → commit workflow works without Terminal.
+- [x] Failed commit does not lose message text.
+- [x] Repository cannot execute two mutations concurrently.
+- [x] Discard paths and consequences are explicit.
+- [x] Integration tests cover staging, unstaging, commit, amend, and hook rejection.
 
 ---
 
