@@ -1,5 +1,35 @@
 # Implementation work log
 
+## 2026-08-07 — Phase 2 / porcelain status model
+
+**Intent:** add the smallest UI-independent, byte-safe working-copy status model and parser needed to represent Git porcelain-v2 output accurately.
+
+**Files:** `crates/git_domain/src/lib.rs`, `crates/git_cli/src/lib.rs`, and this work log.
+
+**Acceptance checks:** a typed Git command reads porcelain-v2 with branch data and optional ignored files; parser tests cover headers, detached HEAD, upstream divergence, ordinary, rename/copy, unmerged, untracked, ignored, submodule, and non-UTF-8 paths; temporary-repository integration proves the command and stash count.
+
+**Deferred:** sidebar, working-copy groups, diff rendering, mutations, and watcher lifecycle remain separate Phase 2 checklist groups.
+
+**Verification:** the `git_cli` focused suite passes seven tests, including a temporary repository status/stash integration and raw parser fixtures for every porcelain-v2 record class. The desktop focused suite renders the status shell and passes all four tests. Both checks are run with the pinned Rust 1.97.1 toolchain; Cargo reports the existing upstream future-incompatibility warning for `block 0.1.6` and `proc-macro-error2 2.0.1`.
+
+## 2026-08-07 — Phase 2 / working-copy shell
+
+**Intent:** present status data without blocking rendering, with sidebar counts and selectable Working Copy groups.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** opening or refreshing a repository requests status in GPUI's background executor; staged, unstaged, untracked, and conflict groups have sidebar counts; rows support normal and additive selection; a right-click exposes the owned contextual action surface.
+
+**Deferred:** the contextual actions themselves are implemented with their copy/Finder/editor checklist items, while diff rendering and filesystem watching remain separate groups.
+
+## 2026-08-07 — Phase 2 / unified diff model
+
+**Intent:** define and test the smallest pure model that retains unified-diff file metadata, text hunks, binary state, and missing-final-newline markers.
+
+**Files:** `crates/git_domain/src/lib.rs`, `crates/git_cli/src/lib.rs`, and this work log.
+
+**Acceptance checks:** parser fixtures cover text hunks, rename metadata, binary files, and no-final-newline markers without decoding path bytes; command/UI integration and large-output truncation remain separate diff checklist items.
+
 ## 2026-08-06 — Phase 0 / issue 1: initialize workspace and CI
 
 **Intent:** create the reproducible Rust workspace and quality gates required before the GPUI window spike.

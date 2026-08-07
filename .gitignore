@@ -4,3 +4,5 @@
 
 .DS_Store
 docs/screens/*
+/crates/app_core/.DS_Store
+/crates/git_domain/.DS_Store

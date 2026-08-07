@@ -1639,33 +1639,33 @@ Display an accurate, automatically refreshing repository status and file diff.
 
 ### Status
 
-- [ ] Implement porcelain-v2 parser.
-- [ ] Parse branch OID and name.
-- [ ] Parse detached HEAD.
-- [ ] Parse upstream.
-- [ ] Parse ahead/behind.
-- [ ] Parse stash count.
-- [ ] Parse ordinary changes.
-- [ ] Parse renames and copies.
-- [ ] Parse unmerged entries.
-- [ ] Parse untracked files.
-- [ ] Parse ignored files only on demand.
-- [ ] Parse submodule state.
-- [ ] Preserve non-UTF-8 paths safely.
+- [x] Implement porcelain-v2 parser.
+- [x] Parse branch OID and name.
+- [x] Parse detached HEAD.
+- [x] Parse upstream.
+- [x] Parse ahead/behind.
+- [x] Parse stash count.
+- [x] Parse ordinary changes.
+- [x] Parse renames and copies.
+- [x] Parse unmerged entries.
+- [x] Parse untracked files.
+- [x] Parse ignored files only on demand.
+- [x] Parse submodule state.
+- [x] Preserve non-UTF-8 paths safely.
 
 ### UI
 
-- [ ] Add sidebar shell.
-- [ ] Add Working Copy navigation item.
-- [ ] Add staged group.
-- [ ] Add unstaged group.
-- [ ] Add untracked group.
-- [ ] Add conflicts group.
-- [ ] Add status badges.
-- [ ] Add file selection.
-- [ ] Add multi-selection.
-- [ ] Add context menus.
-- [ ] Add refresh action.
+- [x] Add sidebar shell.
+- [x] Add Working Copy navigation item.
+- [x] Add staged group.
+- [x] Add unstaged group.
+- [x] Add untracked group.
+- [x] Add conflicts group.
+- [x] Add status badges.
+- [x] Add file selection.
+- [x] Add multi-selection.
+- [x] Add context menus.
+- [x] Add refresh action.
 
 ### Diff
 

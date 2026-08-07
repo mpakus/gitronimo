@@ -8,11 +8,11 @@ mod menus;
 
 use app_core::{RecentRepositoryStore, RepositoryOpenError, WindowGeometry, open_repository};
 use git_cli::GitExecutable;
-use git_domain::WorktreeRepository;
+use git_domain::{GitPath, StatusEntry, WorktreeRepository, WorktreeStatus};
 use gpui::{
-    App, Application, Bounds, Context, ExternalPaths, FocusHandle, IntoElement, PathPromptOptions,
-    Render, Subscription, Window, WindowAppearance, WindowBounds, WindowOptions, div, point,
-    prelude::*, px, size,
+    App, Application, Bounds, ClickEvent, Context, ExternalPaths, FocusHandle, IntoElement,
+    MouseButton, PathPromptOptions, Render, Subscription, Window, WindowAppearance, WindowBounds,
+    WindowOptions, div, point, prelude::*, px, size,
 };
 use ui_kit::{Appearance, Theme};
 
@@ -154,6 +154,9 @@ struct GitronimoApp {
     state: ShellState,
     recents: Vec<PathBuf>,
     activity: String,
+    working_copy: Option<WorktreeStatus>,
+    selected_paths: Vec<GitPath>,
+    context_path: Option<GitPath>,
     store: RecentRepositoryStore,
     diagnostics: String,
     subscriptions: Vec<Subscription>,
@@ -176,6 +179,9 @@ impl GitronimoApp {
             state: ShellState::Welcome,
             recents,
             activity: "Choose a repository to begin.".into(),
+            working_copy: None,
+            selected_paths: Vec::new(),
+            context_path: None,
             store,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
@@ -229,6 +235,9 @@ impl GitronimoApp {
             state,
             recents,
             activity,
+            working_copy: None,
+            selected_paths: Vec::new(),
+            context_path: None,
             store,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
@@ -236,6 +245,9 @@ impl GitronimoApp {
         app.observe_system_appearance(window, cx);
         app.observe_window_geometry(window, cx);
         Self::load_diagnostics(cx);
+        if let ShellState::Repository(repository) = &app.state {
+            app.load_working_copy(repository.clone(), cx);
+        }
         app
     }
 
@@ -289,6 +301,12 @@ impl GitronimoApp {
                 self.state = ShellState::Repository(opened.repository);
                 self.recents = opened.recents;
                 self.activity = "Repository opened.".into();
+                self.working_copy = None;
+                self.selected_paths.clear();
+                self.context_path = None;
+                if let ShellState::Repository(repository) = &self.state {
+                    self.load_working_copy(repository.clone(), cx);
+                }
             }
             Err(error) => {
                 self.state = ShellState::Error(error.to_string());
@@ -300,7 +318,11 @@ impl GitronimoApp {
 
     fn refresh(&mut self, _: &Refresh, _: &mut Window, cx: &mut Context<Self>) {
         self.last_action = Some(LastAction::Refresh);
-        self.activity = "Refresh is available when working-copy data lands in Phase 2.".into();
+        if let ShellState::Repository(repository) = &self.state {
+            self.load_working_copy(repository.clone(), cx);
+        } else {
+            self.activity = "Open a repository before refreshing its working copy.".into();
+        }
         cx.notify();
     }
 
@@ -362,6 +384,63 @@ impl GitronimoApp {
         .detach();
         cx.notify();
     }
+
+    fn load_working_copy(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        self.activity = "Refreshing working copy…".into();
+        cx.spawn(async move |this, cx| {
+            let status = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .worktree_status(&repository, false)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                let ShellState::Repository(current) = &app.state else {
+                    return;
+                };
+                if current.worktree_root != root {
+                    return;
+                }
+                match status {
+                    Ok(status) => {
+                        app.activity = format!(
+                            "Working copy refreshed: {} change(s).",
+                            status.entries.len()
+                        );
+                        app.working_copy = Some(status);
+                    }
+                    Err(error) => app.activity = format!("Working copy refresh failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn select_status_path(&mut self, path: GitPath, additive: bool, cx: &mut Context<Self>) {
+        if additive {
+            if let Some(index) = self
+                .selected_paths
+                .iter()
+                .position(|selected| selected == &path)
+            {
+                self.selected_paths.remove(index);
+            } else {
+                self.selected_paths.push(path);
+            }
+        } else {
+            self.selected_paths = vec![path];
+        }
+        cx.notify();
+    }
+
+    fn show_status_context_menu(&mut self, path: GitPath, cx: &mut Context<Self>) {
+        self.context_path = Some(path);
+        cx.notify();
+    }
 }
 
 fn appearance_from_window(appearance: WindowAppearance) -> Appearance {
@@ -379,9 +458,9 @@ impl Render for GitronimoApp {
         let content = match &self.state {
             ShellState::Welcome => self.welcome_view(&colors, cx).into_any_element(),
             ShellState::Loading(path) => loading_view(path, &colors).into_any_element(),
-            ShellState::Repository(repository) => {
-                repository_view(repository, &colors).into_any_element()
-            }
+            ShellState::Repository(repository) => self
+                .repository_view(repository, &colors, cx)
+                .into_any_element(),
             ShellState::Error(message) => error_view(message, &colors).into_any_element(),
         };
 
@@ -401,18 +480,7 @@ impl Render for GitronimoApp {
                 div()
                     .flex_1()
                     .flex()
-                    .child(
-                        div()
-                            .w(px(sidebar_width))
-                            .h_full()
-                            .p_4()
-                            .bg(colors.sidebar_background)
-                            .border_r_1()
-                            .border_color(colors.border)
-                            .child("Workspace")
-                            .child("Working Copy")
-                            .child("History"),
-                    )
+                    .child(self.sidebar_view(sidebar_width, &colors))
                     .child(div().flex_1().h_full().p_6().child(content))
                     .child(
                         div()
@@ -443,6 +511,151 @@ impl Render for GitronimoApp {
 }
 
 impl GitronimoApp {
+    fn sidebar_view(&self, width: f32, colors: &ui_kit::ThemeColors) -> impl IntoElement {
+        let groups = self.status_groups();
+        div()
+            .w(px(width))
+            .h_full()
+            .p_4()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .bg(colors.sidebar_background)
+            .border_r_1()
+            .border_color(colors.border)
+            .child("Workspace")
+            .child("Working Copy")
+            .child(status_badge("Staged", groups.staged_entries.len(), colors))
+            .child(status_badge(
+                "Unstaged",
+                groups.unstaged_entries.len(),
+                colors,
+            ))
+            .child(status_badge(
+                "Untracked",
+                groups.untracked_entries.len(),
+                colors,
+            ))
+            .child(status_badge(
+                "Conflicts",
+                groups.conflict_entries.len(),
+                colors,
+            ))
+            .child("History")
+    }
+
+    fn repository_view(
+        &self,
+        repository: &WorktreeRepository,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let groups = self.status_groups();
+        div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(div().text_xl().child("Working Copy"))
+            .child(repository.worktree_root.display().to_string())
+            .children(self.context_menu_view(colors))
+            .child(self.status_group_view("Staged", &groups.staged_entries, colors, cx))
+            .child(self.status_group_view("Unstaged", &groups.unstaged_entries, colors, cx))
+            .child(self.status_group_view("Untracked", &groups.untracked_entries, colors, cx))
+            .child(self.status_group_view("Conflicts", &groups.conflict_entries, colors, cx))
+    }
+
+    fn status_groups(&self) -> StatusGroups<'_> {
+        let mut groups = StatusGroups::default();
+        let Some(status) = &self.working_copy else {
+            return groups;
+        };
+        for entry in &status.entries {
+            match entry {
+                StatusEntry::Unmerged { .. } => groups.conflict_entries.push(entry),
+                StatusEntry::Untracked(_) => groups.untracked_entries.push(entry),
+                StatusEntry::Ignored(_) => {}
+                StatusEntry::Ordinary { status, .. } | StatusEntry::Renamed { status, .. } => {
+                    if status.0[0] != b'.' {
+                        groups.staged_entries.push(entry);
+                    }
+                    if status.0[1] != b'.' {
+                        groups.unstaged_entries.push(entry);
+                    }
+                }
+            }
+        }
+        groups
+    }
+
+    fn context_menu_view(&self, colors: &ui_kit::ThemeColors) -> Option<gpui::AnyElement> {
+        self.context_path.as_ref().map(|path| {
+            div()
+                .p_2()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child(format!(
+                    "File actions: {}",
+                    String::from_utf8_lossy(&path.0)
+                ))
+                .child("Copy path  ·  Reveal in Finder  ·  Open in editor")
+                .into_any_element()
+        })
+    }
+
+    fn status_group_view(
+        &self,
+        title: &'static str,
+        entries: &[&StatusEntry],
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let rows = if entries.is_empty() {
+            div()
+                .text_color(colors.text_muted)
+                .child("None")
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .children(entries.iter().enumerate().map(|(index, entry)| {
+                    let path = status_path(entry).clone();
+                    let context_path = path.clone();
+                    let selected = self.selected_paths.contains(&path);
+                    div()
+                        .id((title, index))
+                        .px_2()
+                        .py_1()
+                        .bg(if selected {
+                            colors.raised_background
+                        } else {
+                            colors.panel_background
+                        })
+                        .border_1()
+                        .border_color(colors.border)
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |app, event: &ClickEvent, _, cx| {
+                            app.select_status_path(
+                                path.clone(),
+                                event.modifiers().secondary() || event.modifiers().shift,
+                                cx,
+                            );
+                        }))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |app, _, _, cx| {
+                                app.show_status_context_menu(context_path.clone(), cx);
+                            }),
+                        )
+                        .child(status_label(entry))
+                }))
+                .into_any_element()
+        };
+        div().flex().flex_col().gap_1().child(title).child(rows)
+    }
+
     fn welcome_view(
         &self,
         colors: &ui_kit::ThemeColors,
@@ -492,23 +705,55 @@ impl GitronimoApp {
     }
 }
 
-fn repository_view(
-    repository: &WorktreeRepository,
+#[derive(Default)]
+struct StatusGroups<'a> {
+    staged_entries: Vec<&'a StatusEntry>,
+    unstaged_entries: Vec<&'a StatusEntry>,
+    untracked_entries: Vec<&'a StatusEntry>,
+    conflict_entries: Vec<&'a StatusEntry>,
+}
+
+fn status_badge(
+    label: &'static str,
+    count: usize,
     colors: &ui_kit::ThemeColors,
 ) -> impl IntoElement {
     div()
         .flex()
-        .flex_col()
-        .gap_4()
-        .child(div().text_xl().child("Repository opened"))
-        .child(repository.worktree_root.display().to_string())
-        .child(
-            div()
-                .text_sm()
-                .text_color(colors.text_secondary)
-                .child(format!("Git directory: {}", repository.git_dir.display())),
-        )
-        .child("Working Copy, History, and Diff data arrive in later phases.")
+        .justify_between()
+        .text_color(colors.text_secondary)
+        .child(label)
+        .child(count.to_string())
+}
+
+fn status_path(entry: &StatusEntry) -> &GitPath {
+    match entry {
+        StatusEntry::Ordinary { path, .. }
+        | StatusEntry::Renamed { path, .. }
+        | StatusEntry::Unmerged { path, .. } => path,
+        StatusEntry::Untracked(path) | StatusEntry::Ignored(path) => path,
+    }
+}
+
+fn status_label(entry: &StatusEntry) -> String {
+    let path = String::from_utf8_lossy(&status_path(entry).0);
+    match entry {
+        StatusEntry::Ordinary { status, .. } => {
+            format!("{}  {path}", String::from_utf8_lossy(&status.0))
+        }
+        StatusEntry::Renamed {
+            status,
+            source_path,
+            ..
+        } => format!(
+            "{}  {} → {path}",
+            String::from_utf8_lossy(&status.0),
+            String::from_utf8_lossy(&source_path.0)
+        ),
+        StatusEntry::Unmerged { .. } => format!("UU  {path}"),
+        StatusEntry::Untracked(_) => format!("??  {path}"),
+        StatusEntry::Ignored(_) => format!("!!  {path}"),
+    }
 }
 
 fn loading_view(path: &Path, colors: &ui_kit::ThemeColors) -> impl IntoElement {

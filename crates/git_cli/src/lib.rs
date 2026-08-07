@@ -9,7 +9,11 @@ use std::{
 };
 
 use app_core::{RepositoryDiscoverer, RepositoryOpenError};
-use git_domain::{RepositoryLocation, WorktreeRepository};
+use git_domain::{
+    BranchStatus, DiffFile, DiffHunk, DiffLine, DiffLineKind, FileStatus, GitPath, HeadStatus,
+    RenameKind, RepositoryLocation, StatusEntry, SubmoduleState, UnifiedDiff, WorktreeRepository,
+    WorktreeStatus,
+};
 
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
 
@@ -73,6 +77,40 @@ impl GitExecutable {
         S: AsRef<OsStr>,
     {
         self.command(directory, args).output()
+    }
+
+    /// Reads the working-copy state using porcelain-v2 without decoding paths.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Git cannot run, rejects the request, or produces malformed porcelain.
+    pub fn worktree_status(
+        &self,
+        repository: &WorktreeRepository,
+        include_ignored: bool,
+    ) -> Result<WorktreeStatus, GitStatusError> {
+        let mut args = vec!["status", "--porcelain=v2", "--branch", "-z"];
+        if include_ignored {
+            args.push("--ignored=matching");
+        }
+        let output = self.run(&repository.worktree_root, args)?;
+        if !output.status.success() {
+            return Err(GitStatusError::CommandFailed);
+        }
+        let mut status = parse_porcelain_v2_z(&output.stdout)?;
+
+        let stashes = self.run(&repository.worktree_root, ["stash", "list", "-z"])?;
+        if !stashes.status.success() {
+            return Err(GitStatusError::CommandFailed);
+        }
+        status.stash_count = stashes
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|entry| !entry.is_empty())
+            .count()
+            .try_into()
+            .map_err(|_| GitStatusError::TooManyStashes)?;
+        Ok(status)
     }
 
     /// Classifies a selected directory using Git's canonical worktree and Git-dir paths.
@@ -193,38 +231,252 @@ impl GitChild {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PorcelainStatus {
-    pub headers: Vec<Vec<u8>>,
-    pub entries: Vec<StatusEntry>,
+#[derive(Debug)]
+pub enum GitStatusError {
+    Io(io::Error),
+    CommandFailed,
+    Parse(PorcelainParseError),
+    TooManyStashes,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StatusEntry {
-    Untracked(Vec<u8>),
-    Ignored(Vec<u8>),
-    Tracked(Vec<u8>),
+impl From<io::Error> for GitStatusError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
 }
 
-#[must_use]
-pub fn parse_porcelain_v2_z(bytes: &[u8]) -> PorcelainStatus {
-    let mut status = PorcelainStatus {
-        headers: Vec::new(),
-        entries: Vec::new(),
-    };
+impl From<PorcelainParseError> for GitStatusError {
+    fn from(error: PorcelainParseError) -> Self {
+        Self::Parse(error)
+    }
+}
 
-    for record in bytes
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PorcelainParseError {
+    MalformedHeader,
+    MalformedEntry,
+    MissingRenameSource,
+}
+
+/// Parses NUL-delimited porcelain-v2 output without decoding repository paths.
+///
+/// # Errors
+///
+/// Returns an error when Git's stable porcelain record layout is malformed.
+pub fn parse_porcelain_v2_z(bytes: &[u8]) -> Result<WorktreeStatus, PorcelainParseError> {
+    let mut status = WorktreeStatus::default();
+    let mut records = bytes
         .split(|byte| *byte == 0)
-        .filter(|record| !record.is_empty())
-    {
+        .filter(|record| !record.is_empty());
+
+    while let Some(record) = records.next() {
         match record {
-            [b'#', b' ', ..] => status.headers.push(record.to_vec()),
-            [b'?', b' ', path @ ..] => status.entries.push(StatusEntry::Untracked(path.to_vec())),
-            [b'!', b' ', path @ ..] => status.entries.push(StatusEntry::Ignored(path.to_vec())),
-            _ => status.entries.push(StatusEntry::Tracked(record.to_vec())),
+            [b'#', b' ', header @ ..] => parse_branch_header(header, &mut status.branch)?,
+            [b'1', b' ', ..] => status.entries.push(parse_ordinary(record)?),
+            [b'2', b' ', ..] => {
+                let source_path = records
+                    .next()
+                    .ok_or(PorcelainParseError::MissingRenameSource)?;
+                status.entries.push(parse_renamed(record, source_path)?);
+            }
+            [b'u', b' ', ..] => status.entries.push(parse_unmerged(record)?),
+            [b'?', b' ', path @ ..] => status
+                .entries
+                .push(StatusEntry::Untracked(GitPath(path.to_vec()))),
+            [b'!', b' ', path @ ..] => status
+                .entries
+                .push(StatusEntry::Ignored(GitPath(path.to_vec()))),
+            _ => return Err(PorcelainParseError::MalformedEntry),
         }
     }
-    status
+    Ok(status)
+}
+
+fn parse_branch_header(
+    header: &[u8],
+    branch: &mut BranchStatus,
+) -> Result<(), PorcelainParseError> {
+    let (key, value) = split_once(header, b' ').ok_or(PorcelainParseError::MalformedHeader)?;
+    match key {
+        b"branch.oid" => branch.oid = (value != b"(initial)").then(|| value.to_vec()),
+        b"branch.head" => {
+            branch.head = match value {
+                b"(detached)" => HeadStatus::Detached,
+                b"(initial)" => HeadStatus::Unborn,
+                b"(unknown)" => HeadStatus::Unknown,
+                _ => HeadStatus::Branch(GitPath(value.to_vec())),
+            };
+        }
+        b"branch.upstream" => branch.upstream = Some(GitPath(value.to_vec())),
+        b"branch.ab" => {
+            let (ahead, behind) =
+                split_once(value, b' ').ok_or(PorcelainParseError::MalformedHeader)?;
+            branch.ahead = parse_divergence(ahead, b'+')?;
+            branch.behind = parse_divergence(behind, b'-')?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn parse_ordinary(record: &[u8]) -> Result<StatusEntry, PorcelainParseError> {
+    let fields = fields(record, 9)?;
+    Ok(StatusEntry::Ordinary {
+        status: parse_status(fields[1])?,
+        submodule: parse_submodule(fields[2]),
+        path: GitPath(fields[8].to_vec()),
+    })
+}
+
+fn parse_renamed(record: &[u8], source_path: &[u8]) -> Result<StatusEntry, PorcelainParseError> {
+    let fields = fields(record, 10)?;
+    let score = fields[8];
+    let (&kind, score) = score
+        .split_first()
+        .ok_or(PorcelainParseError::MalformedEntry)?;
+    Ok(StatusEntry::Renamed {
+        status: parse_status(fields[1])?,
+        submodule: parse_submodule(fields[2]),
+        kind: match kind {
+            b'R' => RenameKind::Rename,
+            b'C' => RenameKind::Copy,
+            _ => return Err(PorcelainParseError::MalformedEntry),
+        },
+        score: std::str::from_utf8(score)
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .ok_or(PorcelainParseError::MalformedEntry)?,
+        path: GitPath(fields[9].to_vec()),
+        source_path: GitPath(source_path.to_vec()),
+    })
+}
+
+fn parse_unmerged(record: &[u8]) -> Result<StatusEntry, PorcelainParseError> {
+    let fields = fields(record, 11)?;
+    Ok(StatusEntry::Unmerged {
+        status: parse_status(fields[1])?,
+        submodule: parse_submodule(fields[2]),
+        path: GitPath(fields[10].to_vec()),
+    })
+}
+
+fn fields(record: &[u8], count: usize) -> Result<Vec<&[u8]>, PorcelainParseError> {
+    let fields = record
+        .splitn(count, |byte| *byte == b' ')
+        .collect::<Vec<_>>();
+    (fields.len() == count)
+        .then_some(fields)
+        .ok_or(PorcelainParseError::MalformedEntry)
+}
+
+fn parse_status(value: &[u8]) -> Result<FileStatus, PorcelainParseError> {
+    let [index, worktree] = *value else {
+        return Err(PorcelainParseError::MalformedEntry);
+    };
+    Ok(FileStatus([index, worktree]))
+}
+
+fn parse_submodule(value: &[u8]) -> SubmoduleState {
+    match value {
+        b"N..." => SubmoduleState::NotSubmodule,
+        [b'S', commit, modified, untracked] => SubmoduleState::Changed {
+            commit: *commit != b'.',
+            modified: *modified != b'.',
+            untracked: *untracked != b'.',
+        },
+        _ => SubmoduleState::Unknown(value.to_vec()),
+    }
+}
+
+fn split_once(bytes: &[u8], delimiter: u8) -> Option<(&[u8], &[u8])> {
+    let index = bytes.iter().position(|byte| *byte == delimiter)?;
+    Some((&bytes[..index], &bytes[index + 1..]))
+}
+
+fn parse_divergence(value: &[u8], sign: u8) -> Result<u32, PorcelainParseError> {
+    if value.first() != Some(&sign) {
+        return Err(PorcelainParseError::MalformedHeader);
+    }
+    std::str::from_utf8(&value[1..])
+        .ok()
+        .and_then(|number| number.parse().ok())
+        .ok_or(PorcelainParseError::MalformedHeader)
+}
+
+/// Parses Git's unified diff text without decoding file paths or line content.
+#[must_use]
+pub fn parse_unified_diff(bytes: &[u8]) -> UnifiedDiff {
+    let mut diff = UnifiedDiff::default();
+    let mut current: Option<DiffFile> = None;
+
+    for line in bytes.split_inclusive(|byte| *byte == b'\n') {
+        let line = line.strip_suffix(b"\n").unwrap_or(line);
+        if let Some(paths) = line.strip_prefix(b"diff --git ") {
+            if let Some(file) = current.take() {
+                diff.files.push(file);
+            }
+            let paths = split_once(paths, b' ');
+            current = Some(DiffFile {
+                old_path: paths
+                    .and_then(|(old_path, _)| strip_diff_prefix(old_path))
+                    .map(|path| GitPath(path.to_vec())),
+                new_path: paths
+                    .and_then(|(_, new_path)| strip_diff_prefix(new_path))
+                    .map(|path| GitPath(path.to_vec())),
+                ..Default::default()
+            });
+            continue;
+        }
+        let Some(file) = current.as_mut() else {
+            continue;
+        };
+        if let Some(path) = line.strip_prefix(b"--- ") {
+            file.old_path = strip_diff_prefix(path).map(|path| GitPath(path.to_vec()));
+        } else if let Some(path) = line.strip_prefix(b"+++ ") {
+            file.new_path = strip_diff_prefix(path).map(|path| GitPath(path.to_vec()));
+        } else if let Some(path) = line.strip_prefix(b"rename from ") {
+            file.old_path = Some(GitPath(path.to_vec()));
+        } else if let Some(path) = line.strip_prefix(b"rename to ") {
+            file.new_path = Some(GitPath(path.to_vec()));
+        } else if line.starts_with(b"Binary files ") || line == b"GIT binary patch" {
+            file.binary = true;
+        } else if line.starts_with(b"@@ ") {
+            file.hunks.push(DiffHunk {
+                header: line.to_vec(),
+                lines: Vec::new(),
+            });
+        } else if line == b"\\ No newline at end of file" {
+            if let Some(hunk) = file.hunks.last_mut() {
+                if let Some(last_line) = hunk.lines.last_mut() {
+                    last_line.missing_final_newline = true;
+                }
+            }
+        } else if let Some(hunk) = file.hunks.last_mut() {
+            let (kind, content) = match line {
+                [b' ', content @ ..] => (DiffLineKind::Context, content),
+                [b'+', content @ ..] => (DiffLineKind::Addition, content),
+                [b'-', content @ ..] => (DiffLineKind::Removal, content),
+                _ => continue,
+            };
+            hunk.lines.push(DiffLine {
+                kind,
+                content: content.to_vec(),
+                missing_final_newline: false,
+            });
+        }
+    }
+    if let Some(file) = current {
+        diff.files.push(file);
+    }
+    diff
+}
+
+fn strip_diff_prefix(path: &[u8]) -> Option<&[u8]> {
+    match path {
+        b"/dev/null" => None,
+        [b'a', b'/', path @ ..] | [b'b', b'/', path @ ..] => Some(path),
+        path => Some(path),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -283,10 +535,13 @@ mod tests {
     };
 
     use super::{
-        GitExecutable, StatusEntry, git_candidates, parse_commit_records, parse_porcelain_v2_z,
+        GitExecutable, RenameKind, git_candidates, parse_commit_records, parse_porcelain_v2_z,
+        parse_unified_diff,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
-    use git_domain::RepositoryLocation;
+    use git_domain::{
+        DiffLineKind, GitPath, HeadStatus, RepositoryLocation, StatusEntry, SubmoduleState,
+    };
 
     static NEXT_REPOSITORY: AtomicUsize = AtomicUsize::new(0);
 
@@ -352,29 +607,148 @@ mod tests {
     }
 
     #[test]
-    fn parses_porcelain_v2_with_unusual_filenames() {
+    fn reads_status_with_unusual_filenames() {
         let repository = Repository::new();
         let filename = "sp ace\tand\nunicode-é.txt";
         fs::write(repository.path.join(filename), "untracked")
             .expect("unusual filename should write");
-        let output = repository
+        let worktree = repository
             .git
-            .run(
-                &repository.path,
-                ["status", "--porcelain=v2", "--branch", "-z"],
-            )
-            .expect("status should run");
-        let status = parse_porcelain_v2_z(&output.stdout);
-        assert!(
-            status
-                .headers
-                .iter()
-                .any(|header| header.starts_with(b"# branch."))
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree");
+        let RepositoryLocation::Worktree(worktree) = worktree else {
+            panic!("fixture should be a working tree");
+        };
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should parse");
+        assert!(matches!(status.branch.head, HeadStatus::Branch(_)));
+        assert!(status.entries.contains(&StatusEntry::Untracked(GitPath(
+            filename.as_bytes().to_vec()
+        ))));
+    }
+
+    #[test]
+    fn parses_every_porcelain_v2_status_record() {
+        let output = b"# branch.oid abcdef\0# branch.head main\0# branch.upstream origin/main\0# branch.ab +3 -2\0\
+1 M. N... 100644 100644 100644 abc def ordinary.txt\0\
+2 R. SCMU 100644 100644 100644 abc def R087 renamed.txt\0original.txt\0\
+2 C. N... 100644 100644 100644 abc def C100 copied.txt\0source.txt\0\
+u UU N... 100644 100644 100644 100644 abc def 123 conflict.txt\0\
+? untracked\xff.txt\0! ignored.txt\0";
+        let status = parse_porcelain_v2_z(output).expect("fixture should parse");
+
+        assert_eq!(status.branch.oid, Some(b"abcdef".to_vec()));
+        assert_eq!(
+            status.branch.head,
+            HeadStatus::Branch(GitPath(b"main".to_vec()))
         );
+        assert_eq!(
+            status.branch.upstream,
+            Some(GitPath(b"origin/main".to_vec()))
+        );
+        assert_eq!((status.branch.ahead, status.branch.behind), (3, 2));
+        assert_eq!(status.entries.len(), 6);
+        assert!(matches!(
+            &status.entries[0],
+            StatusEntry::Ordinary { path, .. } if path == &GitPath(b"ordinary.txt".to_vec())
+        ));
+        assert!(matches!(
+            &status.entries[1],
+            StatusEntry::Renamed {
+                kind: RenameKind::Rename,
+                score: 87,
+                submodule: SubmoduleState::Changed { commit: true, modified: true, untracked: true },
+                path,
+                source_path,
+                ..
+            } if path == &GitPath(b"renamed.txt".to_vec()) && source_path == &GitPath(b"original.txt".to_vec())
+        ));
+        assert!(matches!(
+            &status.entries[2],
+            StatusEntry::Renamed {
+                kind: RenameKind::Copy,
+                score: 100,
+                ..
+            }
+        ));
+        assert!(matches!(&status.entries[3], StatusEntry::Unmerged { .. }));
+        assert!(status.entries.contains(&StatusEntry::Untracked(GitPath(
+            b"untracked\xff.txt".to_vec()
+        ))));
         assert!(
             status
                 .entries
-                .contains(&StatusEntry::Untracked(filename.as_bytes().to_vec()))
+                .contains(&StatusEntry::Ignored(GitPath(b"ignored.txt".to_vec())))
+        );
+    }
+
+    #[test]
+    fn parses_unified_text_rename_binary_and_missing_newline() {
+        let diff = parse_unified_diff(
+            b"diff --git a/old.txt b/new.txt\n\
+similarity index 100%\n\
+rename from old.txt\n\
+rename to new.txt\n\
+@@ -1 +1 @@\n\
+-old\n\
+\\ No newline at end of file\n\
++new\n\
+\\ No newline at end of file\n\
+diff --git a/image.png b/image.png\n\
+Binary files a/image.png and b/image.png differ\n",
+        );
+        assert_eq!(diff.files.len(), 2);
+        assert_eq!(diff.files[0].old_path, Some(GitPath(b"old.txt".to_vec())));
+        assert_eq!(diff.files[0].new_path, Some(GitPath(b"new.txt".to_vec())));
+        assert_eq!(diff.files[0].hunks[0].lines[0].kind, DiffLineKind::Removal);
+        assert!(diff.files[0].hunks[0].lines[0].missing_final_newline);
+        assert_eq!(diff.files[0].hunks[0].lines[1].kind, DiffLineKind::Addition);
+        assert!(diff.files[0].hunks[0].lines[1].missing_final_newline);
+        assert!(diff.files[1].binary);
+    }
+
+    #[test]
+    fn parses_detached_head_and_counts_stashes() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("fixture.txt"), "stash me").expect("fixture should write");
+        repository.success(["stash", "push", "-m", "fixture"]);
+        repository.success(["checkout", "--detach"]);
+        fs::write(repository.path.join(".gitignore"), "ignored.txt\n")
+            .expect("ignore file should write");
+        fs::write(repository.path.join("ignored.txt"), "ignored")
+            .expect("ignored file should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let without_ignored = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should parse");
+        assert_eq!(without_ignored.stash_count, 1);
+        assert_eq!(without_ignored.branch.head, HeadStatus::Detached);
+        assert!(
+            !without_ignored
+                .entries
+                .iter()
+                .any(|entry| matches!(entry, StatusEntry::Ignored(_)))
+        );
+
+        let with_ignored = repository
+            .git
+            .worktree_status(&worktree, true)
+            .expect("ignored status should parse");
+        assert!(
+            with_ignored
+                .entries
+                .contains(&StatusEntry::Ignored(GitPath(b"ignored.txt".to_vec())))
         );
     }
 
