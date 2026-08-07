@@ -1586,7 +1586,7 @@ Prove that GPUI, packaging, virtualization, Git process execution, and the propo
 
 - [x] All spikes compile from a clean checkout.
 - [x] GPUI version and component decision are recorded.
-- [ ] 100,000-row synthetic list remains responsive.
+- [x] 100,000-row synthetic list remains responsive.
 - [x] Git status fixture with unusual filenames parses correctly.
 - [x] `.app` launches outside `cargo run`.
 - [x] Architecture boundaries are represented by actual crates.

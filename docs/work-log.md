@@ -159,3 +159,13 @@
 **Acceptance checks:** the commit contains `Cargo.lock` and every required Phase 0 implementation file, and its detached worktree passes the workspace build and test suite.
 
 **Verification:** commit `65998ae` contains the Phase 0 implementation and `Cargo.lock`, without the Tower screenshots or `.DS_Store` files. A detached worktree at that exact commit passed `cargo build --workspace --all-targets` and the full workspace unit and doc test suite under the pinned Rust 1.97.1 Cargo/Rustc/Rustdoc executables.
+
+## 2026-08-06 — Phase 0 / virtual-history interaction check
+
+**Intent:** verify GPUI can render and jump through the 100,000-row virtual history without operating-system input permissions.
+
+**Files:** desktop root view and this work log.
+
+**Acceptance checks:** the root view retains a `UniformListScrollHandle`; a GPUI visual test draws the same 100,000-row uniform-list configuration, requests item 99,999, redraws, and observes only the final visible range.
+
+**Verification:** the visual test jumps strictly to item 99,999 and confirms the rendered range ends at 100,000 while its length remains smaller than the full list. GPUI 0.2.2's `logical_scroll_top_index` test helper is not used because it tracks retained child bounds, which virtual lists intentionally omit for off-screen rows.

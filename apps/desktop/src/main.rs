@@ -7,8 +7,8 @@ mod keymap;
 mod menus;
 
 use gpui::{
-    App, Application, Bounds, Context, FocusHandle, PathBuilder, Render, Window, WindowBounds,
-    WindowOptions, canvas, div, point, prelude::*, px, size, uniform_list,
+    App, Application, Bounds, Context, FocusHandle, PathBuilder, Render, UniformListScrollHandle,
+    Window, WindowBounds, WindowOptions, canvas, div, point, prelude::*, px, size, uniform_list,
 };
 
 use actions::{OpenRepository, Refresh, ToggleAppearance, WidenInspector, WidenSidebar};
@@ -63,6 +63,7 @@ struct GitronimoApp {
     appearance: Appearance,
     sidebar_width: f32,
     inspector_width: f32,
+    history_scroll_handle: UniformListScrollHandle,
 }
 
 impl GitronimoApp {
@@ -73,6 +74,7 @@ impl GitronimoApp {
             appearance: Appearance::Dark,
             sidebar_width: 220.0,
             inspector_width: 320.0,
+            history_scroll_handle: UniformListScrollHandle::new(),
         }
     }
 
@@ -179,6 +181,7 @@ impl Render for GitronimoApp {
                                 .collect::<Vec<_>>()
                         }),
                     )
+                    .track_scroll(self.history_scroll_handle.clone())
                     .size_full(),
                 ),
             )
@@ -201,11 +204,40 @@ fn resize_width(width: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::RefCell, ops::Range, rc::Rc};
+
     use super::{
-        GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, keymap, resize_width,
-        window_options,
+        GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, SYNTHETIC_COMMIT_COUNT,
+        keymap, resize_width, window_options,
     };
-    use gpui::{AppContext, Keystroke, TestAppContext};
+    use gpui::{
+        AppContext, Context, IntoElement, Keystroke, Render, ScrollStrategy, TestAppContext,
+        UniformListScrollHandle, Window, div, point, prelude::*, px, size, uniform_list,
+    };
+
+    struct VirtualHistoryView {
+        scroll_handle: UniformListScrollHandle,
+        rendered_ranges: Rc<RefCell<Vec<Range<usize>>>>,
+    }
+
+    impl Render for VirtualHistoryView {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let rendered_ranges = self.rendered_ranges.clone();
+
+            uniform_list(
+                "synthetic-history-test",
+                SYNTHETIC_COMMIT_COUNT,
+                cx.processor(move |_, range: Range<usize>, _, _| {
+                    rendered_ranges.borrow_mut().push(range.clone());
+                    range
+                        .map(|index| div().id(index).h(px(26.0)))
+                        .collect::<Vec<_>>()
+                }),
+            )
+            .track_scroll(self.scroll_handle.clone())
+            .size_full()
+        }
+    }
 
     #[gpui::test]
     fn opens_the_initial_window(cx: &mut TestAppContext) {
@@ -245,6 +277,40 @@ mod tests {
                 assert_eq!(app.last_action, Some(LastAction::Refresh));
             })
             .expect("the test window should remain open");
+    }
+
+    #[gpui::test]
+    fn virtual_history_jumps_to_the_last_synthetic_commit(cx: &mut TestAppContext) {
+        let visual = cx.add_empty_window();
+        let scroll_handle = UniformListScrollHandle::new();
+        let rendered_ranges = Rc::new(RefCell::new(Vec::<Range<usize>>::new()));
+
+        let view = visual.update(|_, cx| {
+            cx.new(|_| VirtualHistoryView {
+                scroll_handle: scroll_handle.clone(),
+                rendered_ranges: rendered_ranges.clone(),
+            })
+        });
+        let draw_history = |visual: &mut gpui::VisualTestContext| {
+            visual.draw(
+                point(px(0.0), px(0.0)),
+                size(px(660.0), px(800.0)),
+                |_, _| view.clone(),
+            );
+        };
+
+        draw_history(visual);
+        rendered_ranges.borrow_mut().clear();
+        scroll_handle.scroll_to_item_strict(SYNTHETIC_COMMIT_COUNT - 1, ScrollStrategy::Top);
+        draw_history(visual);
+
+        let rendered_range = rendered_ranges
+            .borrow()
+            .last()
+            .cloned()
+            .expect("the virtual list should render its requested range");
+        assert_eq!(rendered_range.end, SYNTHETIC_COMMIT_COUNT);
+        assert!(rendered_range.len() < SYNTHETIC_COMMIT_COUNT);
     }
 
     #[test]
