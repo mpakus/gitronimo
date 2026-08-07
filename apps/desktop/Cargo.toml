@@ -1,0 +1,18 @@
+[package]
+name = "gitronimo-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+app_core = { path = "../../crates/app_core" }
+git_cli = { path = "../../crates/git_cli" }
+git_domain = { path = "../../crates/git_domain" }
+ui_kit = { path = "../../crates/ui_kit" }
+
+[lints]
+workspace = true
+
