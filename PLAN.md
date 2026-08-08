@@ -1967,7 +1967,7 @@ Expand local Git capability without compromising repository safety.
 - [x] Stage hunk.
 - [x] Unstage hunk.
 - [x] Stage selected lines.
-- [ ] Discard hunk.
+- [x] Discard hunk.
 - [x] Discard selected lines.
 - [x] Create stash.
 - [x] Include untracked option.

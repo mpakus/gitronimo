@@ -740,6 +740,32 @@ impl GitExecutable {
             .ok_or_else(|| command_error(&output))
     }
 
+    /// Discards one unstaged text hunk from the working tree, restoring the index
+    /// content for that hunk's lines without touching any other hunk or the index.
+    ///
+    /// # Errors
+    /// Returns an error when the path has no requested text hunk or Git rejects the patch.
+    pub fn discard_hunk(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        hunk_index: usize,
+    ) -> Result<(), GitStatusError> {
+        let diff = self.unstaged_diff_for(path, repository)?;
+        let hunk_patch = single_hunk_patch(&diff.stdout, hunk_index)
+            .ok_or(GitStatusError::PatchHunkUnavailable)?;
+        let output = self.run_with_stdin(
+            &repository.worktree_root,
+            ["apply", "--reverse", "--recount", "--whitespace=nowarn"],
+            &hunk_patch,
+        )?;
+        output
+            .status
+            .success()
+            .then_some(())
+            .ok_or_else(|| command_error(&output))
+    }
+
     fn unstaged_diff_for(
         &self,
         path: &GitPath,
@@ -2122,6 +2148,50 @@ index 1111111..2222222 100644\n\
         let unstaged_text = diff_text(&unstaged.diff);
         assert!(unstaged_text.contains("first changed"));
         assert!(unstaged_text.contains("tenth changed"));
+    }
+
+    #[test]
+    fn discards_only_the_requested_unstaged_hunk() {
+        let repository = Repository::new();
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "first\nsecond\nthird\nfourth\nfifth\nsixth\nseventh\neighth\nninth\ntenth\n",
+        )
+        .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "initial"]);
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "first changed\nsecond\nthird\nfourth\nfifth\nsixth\nseventh\neighth\nninth\ntenth changed\n",
+        )
+        .expect("fixture should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let path = GitPath(b"fixture.txt".to_vec());
+
+        repository
+            .git
+            .discard_hunk(&worktree, &path, 0)
+            .expect("first hunk should discard");
+
+        let remaining =
+            fs::read_to_string(repository.path.join("fixture.txt")).expect("fixture should read");
+        assert!(!remaining.contains("first changed"));
+        assert!(remaining.contains("tenth changed"));
+        assert!(remaining.starts_with("first\n"));
+        let staged = repository
+            .git
+            .file_diff(&worktree, &path, true)
+            .expect("staged diff should load");
+        assert!(
+            staged.diff.files.is_empty(),
+            "the index must stay untouched"
+        );
     }
 
     fn selection_for(diff: &git_domain::UnifiedDiff, content: &[u8]) -> (usize, usize) {

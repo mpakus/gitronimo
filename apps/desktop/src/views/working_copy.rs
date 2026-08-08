@@ -175,6 +175,7 @@ impl GitronimoApp {
             .child(self.mutation_controls(colors, cx))
             .children(self.discard_confirmation_view(colors, cx))
             .children(self.line_discard_confirmation_view(colors, cx))
+            .children(self.hunk_discard_confirmation_view(colors, cx))
             .children(self.stash_pop_confirmation_view(colors, cx))
             .children(self.stash_drop_confirmation_view(colors, cx))
             .children(self.branch_delete_confirmation_view(colors, cx))
@@ -434,6 +435,40 @@ impl GitronimoApp {
                 ))
                 .into_any_element()
         })
+    }
+
+    pub(crate) fn hunk_discard_confirmation_view(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        self.pending_hunk_discard
+            .as_ref()
+            .map(|(path, hunk_index)| {
+                div()
+                .p_2()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child(format!(
+                    "Discard hunk {} in {}? Its working-copy changes are restored from the index.",
+                    hunk_index + 1,
+                    String::from_utf8_lossy(&path.0)
+                ))
+                .child(file_action_button(
+                    "Confirm hunk discard",
+                    colors,
+                    cx,
+                    GitronimoApp::confirm_hunk_discard,
+                ))
+                .child(file_action_button(
+                    "Cancel hunk discard",
+                    colors,
+                    cx,
+                    GitronimoApp::cancel_hunk_discard,
+                ))
+                .into_any_element()
+            })
     }
 
     pub(crate) fn stash_pop_confirmation_view(

@@ -217,6 +217,7 @@ impl GitronimoApp {
             selected_diff: None,
             selected_diff_lines: Vec::new(),
             pending_line_discard: None,
+            pending_hunk_discard: None,
             pending_discard: None,
             pending_stash_action: None,
             pending_branch_delete: None,
@@ -315,6 +316,7 @@ impl GitronimoApp {
             selected_diff: None,
             selected_diff_lines: Vec::new(),
             pending_line_discard: None,
+            pending_hunk_discard: None,
             pending_discard: None,
             pending_stash_action: None,
             pending_branch_delete: None,
@@ -422,6 +424,7 @@ impl GitronimoApp {
                 self.selected_diff = None;
                 self.selected_diff_lines.clear();
                 self.pending_line_discard = None;
+                self.pending_hunk_discard = None;
                 self.pending_discard = None;
                 self.pending_branch_delete = None;
                 self.force_push_state = ForcePushState::Idle;
@@ -1559,6 +1562,7 @@ impl GitronimoApp {
                     app.loaded_diff = Some(diff);
                     app.selected_diff_lines.clear();
                     app.pending_line_discard = None;
+                    app.pending_hunk_discard = None;
                 }
                 cx.notify();
             });
@@ -1886,6 +1890,70 @@ impl GitronimoApp {
                     Err(error) => {
                         app.activity = git_failure_message("Discard selected lines", &error);
                     }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn request_hunk_discard(&mut self, hunk_index: usize, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let Some((path, false)) = self.selected_diff.clone() else {
+            return;
+        };
+        self.pending_hunk_discard = Some((path, hunk_index));
+        self.activity = "Review the hunk discard consequences, then confirm.".into();
+        cx.notify();
+    }
+
+    fn cancel_hunk_discard(&mut self, cx: &mut Context<Self>) {
+        self.pending_hunk_discard = None;
+        self.activity = "Hunk discard cancelled.".into();
+        cx.notify();
+    }
+
+    fn confirm_hunk_discard(&mut self, cx: &mut Context<Self>) {
+        let Some((path, hunk_index)) = self.pending_hunk_discard.take() else {
+            return;
+        };
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let worker_path = path.clone();
+        self.mutation_in_flight = true;
+        self.activity = "Discarding hunk…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .discard_hunk(&worker_repository, &worker_path, hunk_index)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = "Hunk discarded.".into();
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_diff(
+                            repository,
+                            path,
+                            false,
+                            git_cli::MAX_DISPLAY_DIFF_BYTES,
+                            cx,
+                        );
+                    }
+                    Err(error) => app.activity = git_failure_message("Discard hunk", &error),
                 }
                 cx.notify();
             });

@@ -33,33 +33,10 @@ impl GitronimoApp {
                 .bg(colors.panel_background)
                 .border_1()
                 .border_color(colors.border)
-                .children((can_mutate_hunks && hunk_count > 0).then(|| {
-                    div()
-                        .flex()
-                        .gap_2()
-                        .children((0..hunk_count).map(|hunk_index| {
-                            div()
-                                .id(("diff-hunk", hunk_index))
-                                .px_2()
-                                .py_1()
-                                .bg(colors.raised_background)
-                                .border_1()
-                                .border_color(colors.border)
-                                .cursor_pointer()
-                                .on_click(cx.listener(move |app, _, _, cx| {
-                                    if staged_diff {
-                                        app.unstage_diff_hunk(hunk_index, cx);
-                                    } else {
-                                        app.stage_diff_hunk(hunk_index, cx);
-                                    }
-                                }))
-                                .child(format!(
-                                    "{} hunk {}",
-                                    if staged_diff { "Unstage" } else { "Stage" },
-                                    hunk_index + 1
-                                ))
-                        }))
-                }))
+                .children(
+                    (can_mutate_hunks && hunk_count > 0)
+                        .then(|| Self::hunk_controls_row(hunk_count, staged_diff, colors, cx)),
+                )
                 .children((can_select_lines && selection_count > 0).then(|| {
                     div()
                         .flex()
@@ -102,6 +79,60 @@ impl GitronimoApp {
                 }))
                 .into_any_element()
         })
+    }
+
+    fn hunk_controls_row(
+        hunk_count: usize,
+        staged_diff: bool,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .children((0..hunk_count).map(|hunk_index| {
+                let mut row = div().flex().gap_1().child(
+                    div()
+                        .id(("diff-hunk", hunk_index))
+                        .px_2()
+                        .py_1()
+                        .bg(colors.raised_background)
+                        .border_1()
+                        .border_color(colors.border)
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |app, _, _, cx| {
+                            if staged_diff {
+                                app.unstage_diff_hunk(hunk_index, cx);
+                            } else {
+                                app.stage_diff_hunk(hunk_index, cx);
+                            }
+                        }))
+                        .child(format!(
+                            "{} hunk {}",
+                            if staged_diff { "Unstage" } else { "Stage" },
+                            hunk_index + 1
+                        )),
+                );
+                if !staged_diff {
+                    row = row.child(
+                        div()
+                            .id(("discard-hunk", hunk_index))
+                            .px_2()
+                            .py_1()
+                            .bg(colors.raised_background)
+                            .border_1()
+                            .border_color(colors.border)
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |app, _, _, cx| {
+                                app.request_hunk_discard(hunk_index, cx);
+                            }))
+                            .child(format!("Discard hunk {}", hunk_index + 1)),
+                    );
+                }
+                row.into_any_element()
+            }))
+            .into_any_element()
     }
 
     fn diff_code_rows(

@@ -269,3 +269,41 @@ fn line_discard_requires_confirmation_and_cancellation_is_a_no_op(cx: &mut TestA
         })
         .expect("window should remain open");
 }
+
+#[gpui::test]
+fn hunk_discard_requires_confirmation_and_cancellation_is_a_no_op(cx: &mut TestAppContext) {
+    let window = cx.update(|cx| {
+        cx.open_window(window_options(cx, None), |window, cx| {
+            cx.new(|cx| {
+                GitronimoApp::welcome(
+                    Vec::new(),
+                    RecentRepositoryStore::new(
+                        std::env::temp_dir().join("gitronimo-test-recents.json"),
+                    ),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .expect("the test window should open")
+    });
+    window
+        .update(cx, |app, _, cx| {
+            app.loaded_diff = Some(sample_loaded_diff());
+            app.selected_diff = Some((GitPath(b"notes.txt".to_vec()), false));
+            app.request_hunk_discard(1, cx);
+            assert_eq!(
+                app.pending_hunk_discard,
+                Some((GitPath(b"notes.txt".to_vec()), 1))
+            );
+            app.cancel_hunk_discard(cx);
+            assert!(app.pending_hunk_discard.is_none());
+            app.selected_diff = Some((GitPath(b"notes.txt".to_vec()), true));
+            app.request_hunk_discard(0, cx);
+            assert!(
+                app.pending_hunk_discard.is_none(),
+                "staged diffs refuse hunk discard"
+            );
+        })
+        .expect("window should remain open");
+}

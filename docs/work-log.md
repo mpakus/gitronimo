@@ -1,5 +1,28 @@
 # Implementation work log
 
+## 2026-08-08 — Phase 7 / discard a single unstaged hunk
+
+**Intent:** complete the `Discard hunk` checklist item by letting the user discard one unstaged text hunk back to the index content, mirroring the tested `stage_hunk`/`unstage_hunk` foundation and the confirmed discard posture of the file- and line-level discards.
+
+**Design:** `GitExecutable::discard_hunk` re-runs `git diff` for the selected path at apply time, extracts the requested hunk with the existing `single_hunk_patch` helper (reusing the raw file header), and pipes it to `git apply --reverse --recount --whitespace=nowarn`, restoring the index content for that hunk's lines in the working tree. Because discarding is destructive, the desktop flow reuses the confirmation pattern: `pending_hunk_discard: Option<(GitPath, usize)>` is set by `request_hunk_discard`, cleared by `cancel_hunk_discard`, and executed by `confirm_hunk_discard` through the same background lifecycle as `stage_diff_hunk`. The diff viewer gains a per-hunk "Discard hunk N" button on unstaged text diffs.
+
+**Files (planned):**
+- `crates/git_cli/src/lib.rs` — add `discard_hunk` and a temporary-repository integration test proving one hunk discards while a second hunk and the index remain untouched.
+- `apps/desktop/src/app_state.rs` — `pending_hunk_discard: Option<(GitPath, usize)>` state.
+- `apps/desktop/src/main.rs` — `request_hunk_discard`, `cancel_hunk_discard`, `confirm_hunk_discard`; initialize the field in both constructors and clear it on repository change and whenever the loaded diff is replaced.
+- `apps/desktop/src/views/diff_viewer.rs` — per-hunk "Discard hunk N" control next to the existing Stage/Unstage control, shown only for unstaged, complete, text diffs.
+- `apps/desktop/src/views/working_copy.rs` — `hunk_discard_confirmation_view` shown in the repository view.
+- `apps/desktop/src/tests.rs` — a test that requesting a hunk discard sets the pending state and cancelling is a no-op.
+- `PLAN.md`, `docs/work-log.md` — mark `Discard hunk` complete.
+
+**Acceptance checks:**
+- A temporary repository proves `discard_hunk` restores only the requested hunk to index content while another hunk's change remains in the working tree and the index stays unchanged.
+- The confirmation flow requires a request before any Git command runs; cancellation is a no-op.
+- The hunk discard control is available only for an unstaged, complete, text diff, and only when no mutation is in flight.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass. `git_cli::discard_hunk` reuses `single_hunk_patch` against a fresh `git diff` and pipes it to `git apply --reverse --recount --whitespace=nowarn`; the new `discards_only_the_requested_unstaged_hunk` fixture proves only hunk 0 returns to index content while hunk 1's change survives and the staged diff stays empty. The desktop app gains `pending_hunk_discard`, `request_hunk_discard`/`cancel_hunk_discard`/`confirm_hunk_discard`, a per-hunk "Discard hunk N" control next to Stage/Unstage (unstaged diffs only), a `hunk_discard_confirmation_view` card, and a GPUI test covering request/cancel/staged-refusal. The workspace suite totals 57 tests (28 git_cli, 14 desktop, 8 git_domain, 5 app_core, 2 ui_kit); the earlier single-suite failure did not reproduce across repeated runs.
+
 ## 2026-08-08 — Phase 7 / line-level partial staging and discard
 
 **Intent:** let the user stage only the added lines they select in an unstaged diff, and discard selected lines back toward the index, each through Git's own patch validation. This implements the `Stage selected lines` and `Discard selected lines` checklist items and reuses the single-hunk patch foundation.
