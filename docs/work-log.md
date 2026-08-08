@@ -1,5 +1,93 @@
 # Implementation work log
 
+## 2026-08-07 — Phase 6 / context-sensitive action validation
+
+**Intent:** make branch and remote controls visibly unavailable when the current repository state cannot support them.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** controls explain missing branches, remotes, upstreams, or an attached branch before a click can start an operation; enabled controls keep their existing background lifecycle; validation helpers have focused tests for detached, branch-only, and upstream states.
+
+## 2026-08-07 — Phase 6 / workspace navigation history
+
+**Intent:** add predictable back and forward navigation between the Working Copy and History views without reloading repository state.
+
+**Files:** `apps/desktop/src/actions.rs`, `apps/desktop/src/keymap.rs`, `apps/desktop/src/menus.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** explicit view changes enter a small in-memory history; back and forward preserve the active repository and loaded history; a new navigation clears forward history; shortcuts and menu labels expose the actions; pure navigation tests cover the state transitions.
+
+## 2026-08-07 — Phase 6 / cancellation and temporary-file verification
+
+**Intent:** lock in existing cancellation behavior and prove commit-message temporary files are removed after both successful and rejected commits.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the existing child-process fixture proves cancellation exits unsuccessfully; the commit fixture compares process-specific temporary-message files before and after success and hook rejection; no cleanup path removes user data.
+
+## 2026-08-07 — Phase 6 / bounded Git process output
+
+**Intent:** cap captured Git stdout and stderr through the CLI boundary so a malformed or hostile repository cannot consume unbounded application memory.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** regular Git commands drain stdout and stderr concurrently with a fixed byte cap; an oversized stream returns a clear I/O error; the desktop network path uses the same bounded stderr reader; parser and local-remote integration tests remain intact.
+
+## 2026-08-07 — Phase 6 / public-beta documentation
+
+**Intent:** align public onboarding, architecture, troubleshooting, contribution, security, trademark, notices, and issue templates with the implemented local-first macOS beta.
+
+**Files:** `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `TRADEMARKS.md`, `docs/architecture.md`, `docs/troubleshooting.md`, `docs/third-party-notices.md`, `.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/feature_request.md`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** documentation distinguishes implemented workflows from planned scope and unsigned development bundles from a notarized release; no credential or telemetry claim overreaches; contribution and issue flows preserve reproducible Git safety reports; document links resolve locally.
+
+## 2026-08-07 — Phase 6 / local crash reports
+
+**Intent:** retain a minimal local crash report for beta diagnosis without network access, automatic upload, or panic payload capture.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** application startup installs one panic hook; a report contains the timestamp and source location only; the report location is under Gitronimo application support; helper tests prove no panic payload or upload instruction is written.
+
+## 2026-08-07 — Phase 6 / repository-loss and stale-lock recovery
+
+**Intent:** safely stop using repositories that disappear while open and turn index-lock failures into clear, non-destructive recovery instructions.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** polling detects a missing worktree or Git directory before another refresh; the shell switches to an actionable error state and stops watching; failures mentioning `index.lock` instruct the user to verify no Git process is running and never delete the lock; focused unit tests cover availability and lock guidance.
+
+## 2026-08-07 — Phase 6 / corrupt-preferences recovery
+
+**Intent:** quarantine malformed preferences and recreate an empty, valid document so startup and subsequent preference writes remain usable.
+
+**Files:** `crates/app_core/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** malformed JSON is renamed to a non-destructive backup beside the preferences file; a fresh versioned document replaces it; newer schemas are still rejected without modification; tests prove the backup and recovered document behavior.
+
+## 2026-08-07 — Phase 6 / commit-draft protection
+
+**Intent:** prevent an unsaved commit subject or body from silently disappearing when a different repository is opened.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** changing repositories with a draft requires a native explicit discard decision; cancellation leaves the current repository and draft untouched; confirmed discard clears both draft fields before opening; title draft marking uses the same predicate.
+
+## 2026-08-07 — Phase 6 / keyboard discovery and repository state
+
+**Intent:** make core actions discoverable from a native command palette and shortcut reference, while reflecting the active repository and unsaved commit draft in the window title.
+
+**Files:** `apps/desktop/src/actions.rs`, `apps/desktop/src/keymap.rs`, `apps/desktop/src/menus.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** Command-Shift-P opens a keyboard-accessible native command picker; every listed action routes through existing app methods; the title identifies the opened repository and draft state; the shortcut reference describes current bindings; unit tests cover title derivation and binding registration.
+
+## 2026-08-07 — Phase 6 / stateful workspace polish
+
+**Intent:** make the first-use, loading, empty, and failure states self-explanatory and visually distinct without adding a component dependency.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** opening and failure surfaces name the next action; working-copy sections distinguish loading from an empty repository; activity status has a visible state cue in both themes; the desktop test suite continues to create welcome and error shells successfully.
+
 ## 2026-08-07 — Phase 5 / interactive hierarchical ref browser
 
 **Intent:** render slash-separated refs as expandable sidebar groups, retain expansion choices across launches, and expose safe context actions for local refs, remote refs, tags, and remotes.
@@ -481,3 +569,185 @@
 **Acceptance checks:** the store preserves recents while recording optional bounds; invalid or newer data remains untouched; startup uses stored bounds only when they meet the minimum window size; resize observations save the next restore geometry.
 
 **Verification:** the repository-opening boundary has five real-Git tests for nested working trees, bare repositories, invalid directories, `-z` porcelain paths, bounded history, and process cancellation. The app-core store tests verify recents survive restart, unknown schemas are left untouched, and geometry coexists with recents. The desktop tests render the welcome shell and verify core keyboard actions. Native folder selection and external folder drops use GPUI's platform paths; repository discovery and diagnostics execute on the background executor. The model is one window per selected repository, with the originating window reused for recent and dropped paths.
+
+## 2026-08-07 — Phase 6 / action discoverability and narrow windows
+
+**Intent:** add native hover tooltips to the existing text-labelled action controls and prevent diagnostic chrome from crowding the main content at the minimum supported window width.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** every reusable action and mutation control exposes its label on hover; the inspector is omitted below its viable layout width; desktop tests continue to pass.
+
+## 2026-08-07 — Phase 6 / Git executable rediscovery
+
+**Intent:** refresh the visible Git diagnostic through the same fresh discovery path already used by every operation, so an install, upgrade, or removal is reflected without restarting the app.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** Refresh re-runs Git discovery and the focused desktop checks remain green.
+
+## 2026-08-07 — Phase 6 / theme contrast review
+
+**Intent:** bring muted light-mode text above the WCAG AA 4.5:1 normal-text threshold on its raised background while preserving the existing semantic token system.
+
+**Files:** `crates/ui_kit/src/theme.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** measured primary, secondary, accent, and muted foreground pairs meet their applicable contrast targets in both light and dark appearances; UI-kit tests remain green.
+
+**Verification:** `cargo fmt --all -- --check`, `cargo test -p ui_kit -p gitronimo-desktop --all-features` (13 tests), `cargo clippy -p ui_kit -p gitronimo-desktop --all-targets --all-features -- -D warnings`, and `git diff --check` passed. The only output was Cargo's upstream future-incompatibility notice for `block` and `proc-macro-error2`; it was not a project warning or test failure.
+
+## 2026-08-07 — Phase 6 / initial keyboard focus
+
+**Intent:** focus the root application view immediately after each window is created so global shortcuts work before the user first clicks the window content.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** both welcome and repository windows focus the existing root focus handle on creation; the GPUI shortcut test dispatches without manually focusing it first.
+
+## 2026-08-07 — Phase 6 / safe executable-discovery timeout
+
+**Intent:** time out only the side-effect-free `git --version` probe used to discover an installed executable; mutations and network operations remain explicitly cancellable rather than being forcibly killed.
+
+**Files:** `crates/git_cli/src/lib.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** a stalled version probe returns a timed-out I/O error; normal Git discovery still works; no mutating Git path receives a hard timeout.
+
+**Verification:** `cargo fmt --all -- --check`, `cargo test -p git_cli` (20 tests), and `cargo clippy -p git_cli --all-targets --all-features -- -D warnings` passed.
+
+## 2026-08-07 — Phase 6 / local release metadata verification
+
+**Intent:** verify the configured application identifier, name, icon, and native Apple Silicon architecture from a freshly packaged local `.app` without claiming Developer ID signing or notarization.
+
+**Files:** `PLAN.md` and this work log.
+
+**Acceptance checks:** the generated Info.plist matches the package metadata, the app reports arm64, and the bundle launches locally.
+
+**Verification:** a fresh `cargo packager --release --formats app --manifest-path apps/desktop/Cargo.toml --out-dir target/release` generated `Gitronimo.app` with `CFBundleIdentifier=com.gitronimo.desktop`, display name `Gitronimo`, icon `gitronimo.icns`, and an arm64 executable. The freshly packaged app launched as PID 169. It remains ad-hoc signed, so Developer ID, notarization, Gatekeeper, and distributable artifact checks are deliberately still open.
+
+**Intel verification:** `cargo build --release -p gitronimo-desktop --target x86_64-apple-darwin` completed successfully; `lipo -archs target/x86_64-apple-darwin/release/gitronimo-desktop` reported `x86_64`. The packaged local app remains arm64, so a separately packaged Intel or universal distributable artifact is still required.
+
+**Universal verification:** the cross-compiled binary was packaged with `--target x86_64-apple-darwin --binaries-dir target/x86_64-apple-darwin/release`; `lipo -create` then produced a universal executable reporting `x86_64 arm64`. A local ZIP and `SHA256SUMS.txt` were produced under ignored `target/release-universal/`. They are intentionally unsigned and unnotarized local artifacts, not release uploads.
+
+**Full gate:** `cargo fmt --all -- --check`, workspace Clippy with warnings denied, `cargo test --workspace --all-features` (39 unit tests), `cargo deny check`, and `git diff --check` passed. Cargo printed upstream future-incompatibility and duplicate-lock-entry notices, while `cargo deny` reported advisories, bans, licenses, and sources all OK.
+
+## 2026-08-07 — Phase 6 / verified README screenshot
+
+**Intent:** capture and publish a Gitronimo-owned welcome-state screenshot without including unrelated desktop content or repository data.
+
+**Files:** `.gitignore`, `README.md`, `docs/screens/gitronimo-welcome.png`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the screenshot is captured by Gitronimo's Core Graphics window ID, visually inspected, unignored for source control, and rendered from the README.
+
+**Verification:** the running Gitronimo window was identified as Core Graphics window ID 57643 and captured with `screencapture -l`; visual inspection confirmed the image contains only the Gitronimo welcome state. The README link resolves, the image is no longer ignored, and `git diff --check` passed.
+
+## 2026-08-07 — Phase 6 / accessibility-label audit
+
+**Intent:** audit visible action names and the pinned GPUI accessibility surface, then document any framework limitation honestly with the available keyboard alternatives.
+
+**Files:** `docs/troubleshooting.md`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** every shared action control retains a visible label and matching tooltip; the documented keyboard alternatives remain accurate; unsupported VoiceOver semantics are disclosed rather than claimed.
+
+**Verification:** inspection found text labels on all reusable action and mutation controls, with native tooltips from the shared helpers. `Command-Shift-P` and `Command-/` match the keymap. A source search found no accessibility-role or programmatic-label API in pinned GPUI 0.2.2, so the documented limitation is accurate. Documentation target checks and `git diff --check` passed.
+
+## 2026-08-07 — Phase 6 / release-note preparation
+
+**Intent:** prepare concise, accurate 0.1.0 beta release notes for later publishing without claiming that an unsigned local artifact has been released.
+
+**Files:** `CHANGELOG.md`, `README.md`, and this work log.
+
+**Acceptance checks:** the notes state the shipped workflows, the safety/reliability behavior, and the known limitations consistently with the README and Phase 6 checklist.
+
+**Verification:** the new changelog identifies version 0.1.0 beta, matches the README's scope and limitations, links to the documented accessibility limitation, and is linked from the README. Target checks and `git diff --check` passed.
+
+## 2026-08-07 — Phase 6 / protected release workflow
+
+**Intent:** make the credentialed release path reproducible in protected CI without adding a certificate, password, or notarization credential to the repository.
+
+**Files:** `.github/workflows/release.yml`, `docs/packaging.md`, and this work log.
+
+**Acceptance checks:** a `v*` tag triggers arm64 and x86_64 builds, creates a universal app, signs, notarizes, staples, Gatekeeper-assesses, checksums, and publishes the ZIP with the prepared changelog; all credentials enter only through named GitHub secrets.
+
+**Verification:** Ruby's YAML parser accepted the workflow. Inspection confirms the workflow uses only the documented secret names, the same explicit Intel binary directory required by the local package build, universal `lipo` creation, `codesign`, `notarytool`, `stapler`, `spctl`, `shasum`, and `gh release create`. A local arm64 package simulation proved the required absolute output and binary paths create `target/release-arm/Gitronimo.app`; relative paths were corrected because cargo-packager resolves them from the desktop manifest. `actionlint` is not installed locally; a protected tag run remains required to prove the credentialed path.
+
+## 2026-08-07 — Phase 6 / original workspace visual hierarchy
+
+**Intent:** replace the sparse shell with a denser, original Gitronimo workspace hierarchy: product chrome, a purposeful welcome state, clearer sidebar grouping, and controls that expose the existing open and command-palette paths.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the welcome state provides an obvious primary open action, quick keyboard discovery, recent-repository cards, and useful product guidance; shared chrome makes the repository state and primary actions legible without copying the reference product's assets, copy, or layout.
+
+## 2026-08-07 — Phase 6 / working-copy action grouping
+
+**Intent:** replace the linear working-copy action wall with compact, named branch and sync shelves, then give change groups and the commit composer a stronger shared surface hierarchy.
+
+**Files:** `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** branch and network actions remain context-validated, working-copy mutations remain available, and status/commit/diff panels are easier to scan without adding a dependency or copying the reference application.
+
+**Verification:** `cargo fmt --check`, `cargo test -p gitronimo-desktop --all-features` (11 tests), and `cargo clippy -p gitronimo-desktop --all-targets --all-features -- -D warnings` passed. A freshly built and packaged app was opened against the local Gitronimo checkout and visually inspected: the working copy has compact Branch, Sync, Changes, and Commit sections; unavailable upstream operations remain compact and explain themselves by tooltip. A fresh application-window capture was inspected and replaces Gitronimo's own welcome screenshot. The running packaged app was then reopened on the same local checkout.
+
+**Full gate:** `cargo fmt --all -- --check`, workspace Clippy with warnings denied, `cargo test --workspace --all-features` (39 tests), `cargo deny check`, and `git diff --check` passed. Cargo and `cargo deny` reported upstream future-incompatibility and duplicate-lock-entry warnings only; dependency policy checks reported advisories, bans, licenses, and sources all OK.
+
+## 2026-08-07 — Phase 7 / safe single-hunk staging foundation
+
+**Intent:** add the smallest repository-scoped Git operation needed to stage one unstaged hunk, retaining Git's own patch validation and avoiding an interactive shell or a custom patch engine.
+
+**Files:** `crates/git_cli/src/lib.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the operation targets a repository-relative path with typed arguments, stages only the requested hunk in a temporary repository, and rejects unavailable/binary patch targets without altering the index.
+
+**Verification:** `cargo fmt --check`, `cargo test -p git_cli` (21 tests), `cargo clippy -p git_cli --all-targets --all-features -- -D warnings`, and `git diff --check` passed. The integration test starts from two separated edits, stages only the first hunk, and proves that the other remains unstaged.
+
+**UI verification:** the diff view provides one visible `Stage hunk N` control for each complete, unstaged text hunk. Controls are intentionally absent for staged, binary, truncated, or in-flight diffs, so unavailable operations cannot be triggered. `cargo test -p gitronimo-desktop --all-features` (11 tests) and desktop Clippy with warnings denied passed.
+
+## 2026-08-07 — Phase 7 / safe single-hunk unstaging
+
+**Intent:** mirror single-hunk staging with a staged-diff operation that reverses only the selected hunk in Git's index.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** one selected staged hunk becomes unstaged without modifying the working tree; the UI offers the control only for complete staged text diffs.
+
+**Verification:** the shared temporary-repository integration test stages the first of two separated hunks, then reverses that first hunk from the index and proves both changes are still present only in the working-tree diff. `cargo test -p git_cli stages_only_the_requested_unstaged_hunk`, desktop Clippy with warnings denied, and formatting passed.
+
+## 2026-08-07 — Phase 7 / explicit stash creation
+
+**Intent:** provide a small reversible working-copy escape hatch using Git's native stash command, with a separate include-untracked action rather than silently changing what is preserved.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** creating a stash refreshes status; include-untracked is explicit; a temporary-repository test proves tracked and untracked behavior separately.
+
+**Verification:** a temporary-repository integration test stashes tracked changes while retaining the untracked file, then explicitly stashes the remaining untracked file. `cargo test -p git_cli stashes_tracked_changes_and_optionally_untracked_files`, desktop Clippy with warnings denied, and formatting passed.
+
+## 2026-08-07 — Phase 7 / apply latest stash
+
+**Intent:** apply the latest stash with Git's native command while retaining the stash entry as the recovery path.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** applying restores the latest stash's working-copy change, retains the stash entry, refreshes status, and reports Git conflicts normally.
+
+**Verification:** the stash integration test applies the latest stash, confirms its untracked file returns to the working copy, and confirms both stash entries remain. Formatting and the focused test passed; the packaged app was rebuilt and launched.
+
+## 2026-08-08 — Phase 7 / confirmed latest-stash pop
+
+**Intent:** require explicit confirmation before applying and removing the latest stash recovery entry.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** the first action only presents the consequence; confirmation runs Git's pop command and refreshes status.
+
+**Verification:** the stash integration test confirms pop restores the tracked stash and removes its entry before testing the remaining include-untracked/apply path.
+
+## 2026-08-08 — Phase 7 / confirmed latest-stash drop
+
+**Intent:** require confirmation before permanently removing the latest stash recovery entry.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/main.rs`, `PLAN.md`, and this work log.
+
+**Acceptance checks:** drop is not executed by the first click; confirmation removes only the latest stash and refreshes status.
+
+**Verification:** the stash integration test creates a fresh latest stash and drops it, proving the final stash count is zero. Desktop tests, Clippy with warnings denied, and formatting passed.

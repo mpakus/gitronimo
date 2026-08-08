@@ -21,3 +21,16 @@ xcrun stapler staple target/release/Gitronimo.app
 ```
 
 Keep certificate material, team IDs, and notary credentials in the release environment or CI secrets; never in this repository.
+
+## Protected CI release
+
+Pushing a `v*` tag starts `.github/workflows/release.yml`. Configure these repository secrets before creating the tag:
+
+- `DEVELOPER_ID_APPLICATION`: the Developer ID Application signing identity name.
+- `MACOS_CERTIFICATE_BASE64`: the base64-encoded `.p12` certificate.
+- `MACOS_CERTIFICATE_PASSWORD`: the `.p12` password.
+- `KEYCHAIN_PASSWORD`: a unique temporary CI keychain password.
+- `APPLE_API_KEY_BASE64`: the base64-encoded App Store Connect API key `.p8` file.
+- `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`: the corresponding App Store Connect API key identifiers.
+
+The workflow builds arm64 and x86_64 bundles, creates a universal app, signs it with hardened runtime and a timestamp, notarizes and staples it, runs Gatekeeper assessment, writes `SHA256SUMS.txt`, and publishes the ZIP with `CHANGELOG.md` as the release notes.

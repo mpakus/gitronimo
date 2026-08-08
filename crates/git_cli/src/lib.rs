@@ -4,11 +4,13 @@ use std::{
     env,
     ffi::{OsStr, OsString},
     fs,
-    io::{self, Write},
+    io::{self, Read, Write},
     os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
     process::{Child, ChildStderr, Command, ExitStatus, Output, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
+    thread,
+    time::{Duration, Instant},
 };
 
 use app_core::{RepositoryDiscoverer, RepositoryOpenError};
@@ -21,6 +23,8 @@ use git_domain::{
 
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
 pub const MAX_DISPLAY_DIFF_BYTES: usize = 1_000_000;
+pub const MAX_PROCESS_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 static MESSAGE_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,12 +82,48 @@ impl GitExecutable {
     ///
     /// Returns an error when Git cannot start or rejects `--version`.
     pub fn version(&self) -> io::Result<String> {
-        let output = Command::new(&self.0).arg("--version").output()?;
+        let output = self.version_with_timeout(VERSION_PROBE_TIMEOUT)?;
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
         } else {
             Err(io::Error::other("Git did not accept --version"))
         }
+    }
+
+    fn version_with_timeout(&self, timeout: Duration) -> io::Result<Output> {
+        let mut child = self
+            .command(Path::new("."), ["--version"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let started = Instant::now();
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if started.elapsed() >= timeout {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "Git executable did not respond to --version in time",
+                ));
+            }
+            thread::sleep(Duration::from_millis(10));
+        };
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("Git did not expose stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| io::Error::other("Git did not expose stderr"))?;
+        Ok(Output {
+            status,
+            stdout: read_limited(stdout)?,
+            stderr: read_limited(stderr)?,
+        })
     }
 
     /// Runs Git in `directory` with individual, shell-free arguments.
@@ -96,7 +136,76 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        self.command(directory, args).output()
+        let mut child = self
+            .command(directory, args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("Git did not expose stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| io::Error::other("Git did not expose stderr"))?;
+        let stdout_reader = thread::spawn(move || read_limited(stdout));
+        let stderr = match read_limited(stderr) {
+            Ok(stderr) => stderr,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.join();
+                return Err(error);
+            }
+        };
+        let status = child.wait()?;
+        let stdout = stdout_reader
+            .join()
+            .map_err(|_| io::Error::other("Git stdout reader stopped unexpectedly"))??;
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+        })
+    }
+
+    fn run_with_stdin<I, S>(&self, directory: &Path, args: I, input: &[u8]) -> io::Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let mut child = self
+            .command(directory, args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("Git did not expose stdin"))?;
+        stdin.write_all(input)?;
+        drop(stdin);
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("Git did not expose stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| io::Error::other("Git did not expose stderr"))?;
+        let stdout_reader = thread::spawn(move || read_limited(stdout));
+        let stderr = read_limited(stderr)?;
+        let status = child.wait()?;
+        let stdout = stdout_reader
+            .join()
+            .map_err(|_| io::Error::other("Git stdout reader stopped unexpectedly"))??;
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+        })
     }
 
     /// Reads the working-copy state using porcelain-v2 without decoding paths.
@@ -493,6 +602,132 @@ impl GitExecutable {
         self.mutate(repository, ["add", "-A"])
     }
 
+    /// Stages one unstaged text hunk using Git's own patch validator.
+    ///
+    /// # Errors
+    /// Returns an error when the path has no requested text hunk or Git rejects the patch.
+    pub fn stage_hunk(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        hunk_index: usize,
+    ) -> Result<(), GitStatusError> {
+        let diff = self.run(
+            &repository.worktree_root,
+            [
+                OsString::from("diff"),
+                OsString::from("--no-ext-diff"),
+                OsString::from("--no-textconv"),
+                OsString::from("--binary"),
+                OsString::from("--"),
+                OsString::from_vec(path.0.clone()),
+            ],
+        )?;
+        if !diff.status.success() {
+            return Err(command_error(&diff));
+        }
+        let hunk_patch = single_hunk_patch(&diff.stdout, hunk_index)
+            .ok_or(GitStatusError::PatchHunkUnavailable)?;
+        let output = self.run_with_stdin(
+            &repository.worktree_root,
+            ["apply", "--cached", "--recount", "--whitespace=nowarn"],
+            &hunk_patch,
+        )?;
+        output
+            .status
+            .success()
+            .then_some(())
+            .ok_or_else(|| command_error(&output))
+    }
+
+    /// Unstages one staged text hunk without changing the working tree.
+    ///
+    /// # Errors
+    /// Returns an error when the path has no requested text hunk or Git rejects the patch.
+    pub fn unstage_hunk(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        hunk_index: usize,
+    ) -> Result<(), GitStatusError> {
+        let diff = self.run(
+            &repository.worktree_root,
+            [
+                OsString::from("diff"),
+                OsString::from("--cached"),
+                OsString::from("--no-ext-diff"),
+                OsString::from("--no-textconv"),
+                OsString::from("--binary"),
+                OsString::from("--"),
+                OsString::from_vec(path.0.clone()),
+            ],
+        )?;
+        if !diff.status.success() {
+            return Err(command_error(&diff));
+        }
+        let hunk_patch = single_hunk_patch(&diff.stdout, hunk_index)
+            .ok_or(GitStatusError::PatchHunkUnavailable)?;
+        let output = self.run_with_stdin(
+            &repository.worktree_root,
+            [
+                "apply",
+                "--cached",
+                "--reverse",
+                "--recount",
+                "--whitespace=nowarn",
+            ],
+            &hunk_patch,
+        )?;
+        output
+            .status
+            .success()
+            .then_some(())
+            .ok_or_else(|| command_error(&output))
+    }
+
+    /// Stashes tracked changes, optionally including untracked files.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when there are no storable changes or the stash fails.
+    pub fn create_stash(
+        &self,
+        repository: &WorktreeRepository,
+        include_untracked: bool,
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![OsString::from("stash"), OsString::from("push")];
+        if include_untracked {
+            args.push(OsString::from("--include-untracked"));
+        }
+        self.mutate(repository, args)
+    }
+
+    /// Applies the latest stash while retaining its recovery entry.
+    ///
+    /// # Errors
+    /// Returns Git's conflict or missing-stash failure.
+    pub fn apply_latest_stash(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["stash", "apply", "stash@{0}"])
+    }
+
+    /// Applies and removes the latest stash after caller confirmation.
+    ///
+    /// # Errors
+    /// Returns Git's conflict or missing-stash failure.
+    pub fn pop_latest_stash(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["stash", "pop", "stash@{0}"])
+    }
+
+    /// Removes the latest stash after caller confirmation.
+    ///
+    /// # Errors
+    /// Returns Git's missing-stash failure.
+    pub fn drop_latest_stash(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["stash", "drop", "stash@{0}"])
+    }
+
     /// Unstages the supplied paths, including in an unborn repository.
     ///
     /// # Errors
@@ -664,7 +899,7 @@ impl GitExecutable {
         }
     }
 
-    /// Starts Git with piped standard streams for progress and cancellation.
+    /// Starts Git with piped standard input and error streams for progress and cancellation.
     ///
     /// # Errors
     ///
@@ -677,7 +912,7 @@ impl GitExecutable {
         let child = self
             .command(directory, args)
             .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
+            .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()?;
         Ok(GitChild(child))
@@ -799,6 +1034,33 @@ impl GitChild {
     }
 }
 
+/// Reads Git progress without allowing it to consume unbounded memory.
+///
+/// # Errors
+///
+/// Returns an error when the stream exceeds [`MAX_PROCESS_OUTPUT_BYTES`] or cannot be read.
+pub fn read_stderr_limited(stderr: ChildStderr) -> io::Result<String> {
+    Ok(String::from_utf8_lossy(&read_limited(stderr)?).into_owned())
+}
+
+fn read_limited(mut reader: impl Read) -> io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            return Ok(output);
+        }
+        if output.len().saturating_add(read) > MAX_PROCESS_OUTPUT_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::FileTooLarge,
+                "Git process output exceeded the safety limit",
+            ));
+        }
+        output.extend_from_slice(&buffer[..read]);
+    }
+}
+
 #[derive(Debug)]
 pub enum GitStatusError {
     Io(io::Error),
@@ -810,6 +1072,7 @@ pub enum GitStatusError {
     UntrackedDeletionRefused,
     UnsafePath,
     UnsupportedDiscard,
+    PatchHunkUnavailable,
     ParseHistory,
     ParseHistoryFields,
     ParseHistoryTimestamp,
@@ -1063,6 +1326,34 @@ pub fn parse_unified_diff(bytes: &[u8]) -> UnifiedDiff {
     diff
 }
 
+fn single_hunk_patch(diff: &[u8], wanted_index: usize) -> Option<Vec<u8>> {
+    let mut header = Vec::new();
+    let mut patch = Vec::new();
+    let mut hunk_index = 0;
+    let mut in_wanted_hunk = false;
+    let mut saw_hunk = false;
+
+    for line in diff.split_inclusive(|byte| *byte == b'\n') {
+        if line.starts_with(b"@@ ") {
+            if in_wanted_hunk {
+                break;
+            }
+            saw_hunk = true;
+            in_wanted_hunk = hunk_index == wanted_index;
+            hunk_index += 1;
+            if in_wanted_hunk {
+                patch.extend_from_slice(&header);
+            }
+        }
+        if !saw_hunk {
+            header.extend_from_slice(line);
+        } else if in_wanted_hunk {
+            patch.extend_from_slice(line);
+        }
+    }
+    in_wanted_hunk.then_some(patch)
+}
+
 fn strip_diff_prefix(path: &[u8]) -> Option<&[u8]> {
     (path != b"/dev/null").then(|| {
         path.strip_prefix(b"a/")
@@ -1235,15 +1526,16 @@ fn git_candidates() -> Vec<PathBuf> {
 mod tests {
     use std::{
         fs,
-        io::Read,
+        io::{Cursor, Read},
         os::unix::fs::PermissionsExt,
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
     };
 
     use super::{
-        CommitRequest, GitExecutable, GitStatusError, RenameKind, git_candidates,
-        parse_commit_records, parse_porcelain_v2_z, parse_unified_diff,
+        CommitRequest, GitExecutable, GitStatusError, MAX_PROCESS_OUTPUT_BYTES, RenameKind,
+        git_candidates, parse_commit_records, parse_porcelain_v2_z, parse_unified_diff,
+        read_limited,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
@@ -1252,6 +1544,43 @@ mod tests {
     };
 
     static NEXT_REPOSITORY: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn process_output_reader_rejects_oversized_streams() {
+        let output = vec![b'x'; MAX_PROCESS_OUTPUT_BYTES + 1];
+        let error = read_limited(Cursor::new(output)).expect_err("output should be bounded");
+        assert_eq!(error.kind(), std::io::ErrorKind::FileTooLarge);
+    }
+
+    #[test]
+    fn version_probe_times_out_without_running_a_mutation() {
+        let path =
+            std::env::temp_dir().join(format!("gitronimo-slow-version-{}", std::process::id()));
+        fs::write(&path, "#!/bin/sh\nsleep 1\n").expect("probe fixture should write");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+            .expect("probe fixture should be executable");
+        let error = GitExecutable(path.clone())
+            .version_with_timeout(Duration::ZERO)
+            .expect_err("stalled version probe should time out");
+        let _ = fs::remove_file(path);
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    fn temporary_commit_messages() -> Vec<std::path::PathBuf> {
+        let prefix = format!("gitronimo-commit-{}-", std::process::id());
+        let mut paths = fs::read_dir(std::env::temp_dir())
+            .expect("temporary directory should read")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&prefix))
+            })
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths
+    }
 
     struct Repository {
         path: std::path::PathBuf,
@@ -1305,6 +1634,16 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+
+    fn diff_text(diff: &git_domain::UnifiedDiff) -> String {
+        diff.files
+            .iter()
+            .flat_map(|file| file.hunks.iter())
+            .flat_map(|hunk| hunk.lines.iter())
+            .map(|line| String::from_utf8_lossy(&line.content).into_owned())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     #[test]
@@ -1537,8 +1876,146 @@ Binary files a/image.png and b/image.png differ\n",
     }
 
     #[test]
+    fn stages_only_the_requested_unstaged_hunk() {
+        let repository = Repository::new();
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "first\nsecond\nthird\nfourth\nfifth\nsixth\nseventh\neighth\nninth\ntenth\n",
+        )
+        .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "initial"]);
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "first changed\nsecond\nthird\nfourth\nfifth\nsixth\nseventh\neighth\nninth\ntenth changed\n",
+        )
+        .expect("fixture should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        repository
+            .git
+            .stage_hunk(&worktree, &GitPath(b"fixture.txt".to_vec()), 0)
+            .expect("first hunk should stage");
+
+        let staged = repository
+            .git
+            .file_diff(&worktree, &GitPath(b"fixture.txt".to_vec()), true)
+            .expect("staged diff should load");
+        let unstaged = repository
+            .git
+            .file_diff(&worktree, &GitPath(b"fixture.txt".to_vec()), false)
+            .expect("unstaged diff should load");
+        let staged_text = diff_text(&staged.diff);
+        let unstaged_text = diff_text(&unstaged.diff);
+        assert!(staged_text.contains("first changed"));
+        assert!(!staged_text.contains("tenth changed"));
+        assert!(!unstaged_text.contains("first changed"));
+        assert!(unstaged_text.contains("tenth changed"));
+
+        repository
+            .git
+            .unstage_hunk(&worktree, &GitPath(b"fixture.txt".to_vec()), 0)
+            .expect("first staged hunk should unstage");
+        let staged = repository
+            .git
+            .file_diff(&worktree, &GitPath(b"fixture.txt".to_vec()), true)
+            .expect("staged diff should load");
+        let unstaged = repository
+            .git
+            .file_diff(&worktree, &GitPath(b"fixture.txt".to_vec()), false)
+            .expect("unstaged diff should load");
+        assert!(staged.diff.files.is_empty());
+        let unstaged_text = diff_text(&unstaged.diff);
+        assert!(unstaged_text.contains("first changed"));
+        assert!(unstaged_text.contains("tenth changed"));
+    }
+
+    #[test]
+    fn stashes_tracked_changes_and_optionally_untracked_files() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("fixture.txt"), "tracked change")
+            .expect("fixture should write");
+        fs::write(repository.path.join("untracked.txt"), "untracked change")
+            .expect("fixture should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        repository
+            .git
+            .create_stash(&worktree, false)
+            .expect("tracked changes should stash");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(status.stash_count, 1);
+        assert!(status.entries.iter().any(
+            |entry| matches!(entry, StatusEntry::Untracked(path) if path.0 == b"untracked.txt")
+        ));
+        repository
+            .git
+            .pop_latest_stash(&worktree)
+            .expect("latest stash should pop");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(status.stash_count, 0);
+        repository
+            .git
+            .create_stash(&worktree, true)
+            .expect("untracked changes should stash when requested");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(status.stash_count, 1);
+        assert!(status.entries.is_empty());
+        repository
+            .git
+            .apply_latest_stash(&worktree)
+            .expect("latest stash should apply");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(status.stash_count, 1);
+        assert!(status.entries.iter().any(
+            |entry| matches!(entry, StatusEntry::Untracked(path) if path.0 == b"untracked.txt")
+        ));
+        repository
+            .git
+            .create_stash(&worktree, true)
+            .expect("fixture should stash");
+        repository
+            .git
+            .drop_latest_stash(&worktree)
+            .expect("latest stash should drop");
+        assert_eq!(
+            repository
+                .git
+                .worktree_status(&worktree, false)
+                .expect("status should load")
+                .stash_count,
+            0
+        );
+    }
+
+    #[test]
     fn commits_amends_signs_off_and_preserves_failure_path() {
         let repository = Repository::new();
+        let messages_before = temporary_commit_messages();
         fs::write(repository.path.join("fixture.txt"), "first").expect("fixture should write");
         let RepositoryLocation::Worktree(worktree) = repository
             .git
@@ -1606,6 +2083,7 @@ Binary files a/image.png and b/image.png differ\n",
             ),
             Err(GitStatusError::CommandFailed(message)) if !message.is_empty()
         ));
+        assert_eq!(temporary_commit_messages(), messages_before);
     }
 
     #[test]

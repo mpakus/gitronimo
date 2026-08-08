@@ -1884,61 +1884,64 @@ Turn the functional application into a reliable open-source beta.
 
 ### UX
 
-- [ ] Refine loading states.
-- [ ] Refine empty states.
-- [ ] Refine error states.
-- [ ] Add tooltips.
-- [ ] Add context-sensitive menu validation.
-- [ ] Add command palette.
-- [ ] Add back/forward navigation.
-- [ ] Add window-title repository state.
-- [ ] Add unsaved commit-draft handling.
-- [ ] Add keyboard shortcut reference.
-- [ ] Review focus behavior.
-- [ ] Review accessibility labels.
-- [ ] Review light/dark contrast.
-- [ ] Review small-window behavior.
+- [x] Refine loading states.
+- [x] Refine empty states.
+- [x] Refine error states.
+- [x] Add tooltips.
+- [x] Add context-sensitive menu validation.
+- [x] Add command palette.
+- [x] Add back/forward navigation.
+- [x] Add window-title repository state.
+- [x] Add unsaved commit-draft handling.
+- [x] Add keyboard shortcut reference.
+- [x] Review focus behavior.
+- [x] Review accessibility labels.
+- [x] Review light/dark contrast.
+- [x] Review small-window behavior.
+- [x] Rework visual hierarchy and toolbar chrome.
+- [x] Rework welcome and recent-repository surface.
+- [x] Refine working-copy density and action grouping.
 
 ### Reliability
 
-- [ ] Add crash/panic report file without automatic upload.
-- [ ] Recover from corrupted preferences.
-- [ ] Recover from missing repository.
-- [ ] Recover from stale index lock with instructions, not automatic deletion.
-- [ ] Handle repository deletion while open.
-- [ ] Handle Git executable change.
-- [ ] Add operation timeout policy only where safe.
-- [ ] Bound all process output.
-- [ ] Verify cancellation cleanup.
-- [ ] Verify temp-file cleanup.
+- [x] Add crash/panic report file without automatic upload.
+- [x] Recover from corrupted preferences.
+- [x] Recover from missing repository.
+- [x] Recover from stale index lock with instructions, not automatic deletion.
+- [x] Handle repository deletion while open.
+- [x] Handle Git executable change.
+- [x] Add operation timeout policy only where safe.
+- [x] Bound all process output.
+- [x] Verify cancellation cleanup.
+- [x] Verify temp-file cleanup.
 
 ### Documentation
 
-- [ ] README with screenshots and scope.
-- [ ] Installation instructions.
-- [ ] Build instructions.
-- [ ] Architecture overview.
-- [ ] Contribution guide.
-- [ ] Security policy.
-- [ ] Code of conduct.
-- [ ] Issue templates.
-- [ ] Feature request template.
-- [ ] Troubleshooting guide.
-- [ ] Third-party notices.
-- [ ] Trademark statement.
+- [x] README with screenshots and scope.
+- [x] Installation instructions.
+- [x] Build instructions.
+- [x] Architecture overview.
+- [x] Contribution guide.
+- [x] Security policy.
+- [x] Code of conduct.
+- [x] Issue templates.
+- [x] Feature request template.
+- [x] Troubleshooting guide.
+- [x] Third-party notices.
+- [x] Trademark statement.
 
 ### Release
 
-- [ ] Set application bundle identifier.
-- [ ] Finalize original app name and icon.
-- [ ] Build Apple Silicon release.
-- [ ] Build Intel release.
-- [ ] Build universal release if supported.
+- [x] Set application bundle identifier.
+- [x] Finalize original app name and icon.
+- [x] Build Apple Silicon release.
+- [x] Build Intel release.
+- [x] Build universal release if supported.
 - [ ] Sign with Developer ID.
 - [ ] Notarize with `notarytool`.
 - [ ] Staple notarization ticket.
-- [ ] Package `.dmg` or `.zip`.
-- [ ] Generate SHA-256 checksums.
+- [x] Package `.dmg` or `.zip`.
+- [x] Generate SHA-256 checksums.
 - [ ] Run clean-machine smoke test.
 - [ ] Publish release notes.
 - [ ] Tag version.
@@ -1948,8 +1951,8 @@ Turn the functional application into a reliable open-source beta.
 - [ ] All MVP success criteria pass.
 - [ ] Release artifact opens normally under Gatekeeper.
 - [ ] Core workflows pass on a clean macOS user account.
-- [ ] Known limitations are documented.
-- [ ] No critical or high-severity dependency advisories remain unaddressed.
+- [x] Known limitations are documented.
+- [x] No critical or high-severity dependency advisories remain unaddressed.
 
 ---
 
@@ -1961,16 +1964,16 @@ Expand local Git capability without compromising repository safety.
 
 ## Checklist
 
-- [ ] Stage hunk.
-- [ ] Unstage hunk.
+- [x] Stage hunk.
+- [x] Unstage hunk.
 - [ ] Stage selected lines.
 - [ ] Discard hunk.
 - [ ] Discard selected lines.
-- [ ] Create stash.
-- [ ] Include untracked option.
-- [ ] Apply stash.
-- [ ] Pop stash.
-- [ ] Drop stash with confirmation.
+- [x] Create stash.
+- [x] Include untracked option.
+- [x] Apply stash.
+- [x] Pop stash.
+- [x] Drop stash with confirmation.
 - [ ] Cherry-pick commit.
 - [ ] Revert commit.
 - [ ] Merge branch.

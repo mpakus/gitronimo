@@ -83,6 +83,28 @@ impl RecentRepositoryStore {
         Self { path }
     }
 
+    /// Moves malformed preferences aside and restores an empty versioned document.
+    ///
+    /// # Errors
+    /// Returns an error for unreadable preferences, an unavailable backup location, or a newer schema.
+    pub fn recover_corrupted_preferences(&self) -> Result<bool, RecentRepositoryStoreError> {
+        match self.load_document() {
+            Ok(_) => Ok(false),
+            Err(RecentRepositoryStoreError::InvalidJson(_)) => {
+                let mut backup = self.path.with_extension("corrupt");
+                let mut attempt = 1_u32;
+                while backup.exists() {
+                    backup = self.path.with_extension(format!("corrupt-{attempt}"));
+                    attempt = attempt.saturating_add(1);
+                }
+                fs::rename(&self.path, backup).map_err(RecentRepositoryStoreError::Io)?;
+                self.save(&RecentRepositoryDocument::default())?;
+                Ok(true)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// Loads recents without creating a file on a first launch.
     ///
     /// # Errors
@@ -286,6 +308,31 @@ mod tests {
                 .load_expanded_ref_groups()
                 .expect("groups should reload"),
             groups
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn malformed_preferences_are_quarantined_and_recreated() {
+        let (directory, store) = temporary_store();
+        let store_path = directory.join("recents.json");
+        fs::create_dir_all(&directory).expect("store directory should create");
+        fs::write(&store_path, b"not valid json").expect("malformed preferences should write");
+
+        assert!(
+            store
+                .recover_corrupted_preferences()
+                .expect("malformed preferences should recover")
+        );
+        assert_eq!(
+            fs::read(directory.join("recents.corrupt")).expect("backup should remain"),
+            b"not valid json"
+        );
+        assert!(
+            store
+                .load()
+                .expect("fresh preferences should load")
+                .is_empty()
         );
         let _ = fs::remove_dir_all(directory);
     }

@@ -57,7 +57,7 @@ impl Theme {
                 separator: rgb(0xdd_e4_ec),
                 text_primary: rgb(0x1a_24_30),
                 text_secondary: rgb(0x4b_5d_70),
-                text_muted: rgb(0x70_80_91),
+                text_muted: rgb(0x5e_6e_7e),
                 accent: rgb(0x00_68_cc),
                 selection: rgb(0xcf_e5_ff),
                 focus_ring: rgb(0x00_7a_eb),

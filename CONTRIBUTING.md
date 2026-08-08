@@ -1,6 +1,27 @@
-# Contributing
+# Contributing to Gitronimo
 
-Read `PLAN.md` and `AGENTS.md` before starting. Work on one checked-list group at a time, keep Git operations safe and typed, and add focused tests with each behavior change.
+Read [PLAN.md](PLAN.md) and [AGENTS.md](AGENTS.md) before coding. Keep each change tied to one checklist group and record its intended files and acceptance checks in `docs/work-log.md`.
 
-Run the repository verification commands in `AGENTS.md` before opening a pull request. Do not include credentials, real repositories, or copied third-party product assets in issues, fixtures, snapshots, or commits.
+## Development rules
 
+- Use typed `std::process::Command` arguments for Git; never build shell command strings.
+- Keep Git and domain logic outside GPUI rendering.
+- Add temporary-repository tests for every Git parser or mutation.
+- Do not add dependencies, unsafe code, credentials, real repositories, or copied third-party product assets without the required project justification.
+
+## Verification
+
+Run the full gate before opening a pull request:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+cargo deny check
+```
+
+Describe the user-visible behavior, verification run, and any remaining manual macOS checks. Never attach repository contents, remotes containing credentials, or unredacted Git output to an issue or pull request.
+
+## Conduct and security
+
+Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md). Report vulnerabilities through the process in [SECURITY.md](SECURITY.md), not a public issue.

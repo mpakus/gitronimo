@@ -8,6 +8,10 @@ actions!(
         FocusComposer,
         HistoryPrevious,
         HistoryNext,
+        NavigateBack,
+        NavigateForward,
+        CommandPalette,
+        ShortcutReference,
         ToggleAppearance,
         WidenSidebar,
         WidenInspector

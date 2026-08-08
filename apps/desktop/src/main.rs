@@ -11,7 +11,7 @@ use std::{
         Arc, Mutex,
         mpsc::{self, Receiver},
     },
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 mod actions;
@@ -19,7 +19,7 @@ mod keymap;
 mod menus;
 
 use app_core::{RecentRepositoryStore, RepositoryOpenError, WindowGeometry, open_repository};
-use git_cli::{CommitRequest, GitExecutable, GitStatusError, LoadedDiff};
+use git_cli::{CommitRequest, GitExecutable, GitStatusError, LoadedDiff, read_stderr_limited};
 use git_domain::{
     GitPath, GraphRow, GraphState, HeadStatus, HistoryCommit, HistoryPage, HistoryReference,
     HistoryRequest, NamedRef, RefDecoration, RefSnapshot, StatusEntry, WorktreeRepository,
@@ -35,14 +35,15 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use ui_kit::{Appearance, Theme};
 
 use actions::{
-    FocusComposer, HistoryNext, HistoryPrevious, OpenRepository, Refresh, ToggleAppearance,
-    WidenInspector, WidenSidebar,
+    CommandPalette, FocusComposer, HistoryNext, HistoryPrevious, NavigateBack, NavigateForward,
+    OpenRepository, Refresh, ShortcutReference, ToggleAppearance, WidenInspector, WidenSidebar,
 };
 
 const INITIAL_WINDOW_SIZE: (f32, f32) = (1200.0, 800.0);
 const MINIMUM_WINDOW_SIZE: (f32, f32) = (800.0, 560.0);
 const MINIMUM_PANE_WIDTH: f32 = 180.0;
 const MAXIMUM_PANE_WIDTH: f32 = 440.0;
+const MINIMUM_CONTENT_WIDTH: f32 = 360.0;
 
 fn network_failure_message(label: &str, error: &str) -> String {
     let error = error.to_lowercase();
@@ -60,17 +61,42 @@ fn network_failure_message(label: &str, error: &str) -> String {
     }
 }
 
+fn git_failure_message(label: &str, error: &str) -> String {
+    if error.to_lowercase().contains("index.lock") {
+        format!(
+            "{label} could not run because Git's index is locked. Check that no Git process is still running; if none is, inspect .git/index.lock before removing it manually."
+        )
+    } else {
+        format!("{label} failed: {error}")
+    }
+}
+
+fn repository_is_available(repository: &WorktreeRepository) -> bool {
+    repository.worktree_root.is_dir() && repository.git_dir.is_dir()
+}
+
+fn repository_unavailable_message(repository: &WorktreeRepository) -> String {
+    format!(
+        "{} is no longer available. Restore the repository folder, then open it again.",
+        repository.worktree_root.display()
+    )
+}
+
 fn main() {
+    install_panic_reporter();
     Application::new().run(|cx: &mut App| {
         cx.bind_keys(keymap::bindings());
         cx.set_menus(menus::application_menus());
 
         let store = RecentRepositoryStore::new(preferences_path());
+        let _ = store.recover_corrupted_preferences();
         let recents = store.load().unwrap_or_default();
         let geometry = store.load_window_geometry().ok().flatten();
         install_folder_picker(cx, store.clone());
         if let Err(error) = cx.open_window(window_options(cx, geometry), |window, cx| {
-            cx.new(|cx| GitronimoApp::welcome(recents, store, window, cx))
+            let app = cx.new(|cx| GitronimoApp::welcome(recents, store, window, cx));
+            window.focus(&app.read(cx).focus_handle);
+            app
         }) {
             eprintln!("Unable to open the Gitronimo window: {error}");
             return;
@@ -106,7 +132,9 @@ fn install_folder_picker(cx: &mut App, store: RecentRepositoryStore) {
 
 fn open_result_window(cx: &mut App, outcome: Result<OpenedRepository, RepositoryOpenError>) {
     let _ = cx.open_window(window_options(cx, None), |window, cx| {
-        cx.new(|cx| GitronimoApp::from_open_outcome(outcome, window, cx))
+        let app = cx.new(|cx| GitronimoApp::from_open_outcome(outcome, window, cx));
+        window.focus(&app.read(cx).focus_handle);
+        app
     });
 }
 
@@ -114,6 +142,7 @@ fn discover_and_record(
     path: &Path,
     store: &RecentRepositoryStore,
 ) -> Result<OpenedRepository, RepositoryOpenError> {
+    let _ = store.recover_corrupted_preferences();
     let git = GitExecutable::discover().map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
     let repository = open_repository(&git, path)?;
     let recents = store
@@ -129,6 +158,39 @@ fn preferences_path() -> PathBuf {
     std::env::var_os("HOME")
         .map_or_else(std::env::temp_dir, PathBuf::from)
         .join("Library/Application Support/Gitronimo/recent-repositories.json")
+}
+
+fn install_panic_reporter() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let directory = preferences_path()
+            .parent()
+            .map_or_else(std::env::temp_dir, Path::to_path_buf)
+            .join("crash-reports");
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_millis());
+        let _ = fs::create_dir_all(&directory);
+        let _ = fs::write(
+            crash_report_path(&directory, timestamp),
+            crash_report_body(timestamp, info.location()),
+        );
+        previous(info);
+    }));
+}
+
+fn crash_report_path(directory: &Path, timestamp: u128) -> PathBuf {
+    directory.join(format!("gitronimo-crash-{timestamp}.txt"))
+}
+
+fn crash_report_body(timestamp: u128, location: Option<&std::panic::Location<'_>>) -> String {
+    let location = location.map_or_else(
+        || "unknown location".to_owned(),
+        |location| format!("{}:{}", location.file(), location.line()),
+    );
+    format!(
+        "Gitronimo stopped unexpectedly.\nTimestamp: {timestamp}\nLocation: {location}\n\nThis report stays on this Mac and is never uploaded automatically.\n"
+    )
 }
 
 fn window_options(cx: &App, geometry: Option<WindowGeometry>) -> WindowOptions {
@@ -181,7 +243,7 @@ enum ThemeMode {
     Dark,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RepositoryView {
     WorkingCopy,
     History,
@@ -196,6 +258,12 @@ struct NetworkOperation {
 enum ForcePushState {
     Idle,
     AwaitingConfirmation,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ShortcutReferenceState {
+    Hidden,
+    Visible,
 }
 
 #[derive(Clone)]
@@ -242,14 +310,18 @@ struct GitronimoApp {
     loaded_diff: Option<LoadedDiff>,
     selected_diff: Option<(GitPath, bool)>,
     pending_discard: Option<Vec<GitPath>>,
+    pending_stash_action: Option<StashAction>,
     pending_branch_delete: Option<String>,
     force_push_state: ForcePushState,
+    shortcut_reference_state: ShortcutReferenceState,
     commit_subject: String,
     commit_body: String,
     commit_amend: bool,
     commit_sign_off: bool,
     author_identity: String,
     repository_view: RepositoryView,
+    navigation_back: Vec<RepositoryView>,
+    navigation_forward: Vec<RepositoryView>,
     history: Vec<HistoryCommit>,
     history_rows: Vec<GraphRow>,
     history_state: GraphState,
@@ -273,6 +345,10 @@ struct GitronimoApp {
 }
 
 impl GitronimoApp {
+    fn has_commit_draft(&self) -> bool {
+        !self.commit_subject.trim().is_empty() || !self.commit_body.trim().is_empty()
+    }
+
     fn welcome(
         recents: Vec<PathBuf>,
         store: RecentRepositoryStore,
@@ -303,14 +379,18 @@ impl GitronimoApp {
             loaded_diff: None,
             selected_diff: None,
             pending_discard: None,
+            pending_stash_action: None,
             pending_branch_delete: None,
             force_push_state: ForcePushState::Idle,
+            shortcut_reference_state: ShortcutReferenceState::Hidden,
             commit_subject: String::new(),
             commit_body: String::new(),
             commit_amend: false,
             commit_sign_off: false,
             author_identity: "Loading author identity…".into(),
             repository_view: RepositoryView::WorkingCopy,
+            navigation_back: Vec::new(),
+            navigation_forward: Vec::new(),
             history: Vec::new(),
             history_rows: Vec::new(),
             history_state: GraphState::default(),
@@ -395,14 +475,18 @@ impl GitronimoApp {
             loaded_diff: None,
             selected_diff: None,
             pending_discard: None,
+            pending_stash_action: None,
             pending_branch_delete: None,
             force_push_state: ForcePushState::Idle,
+            shortcut_reference_state: ShortcutReferenceState::Hidden,
             commit_subject: String::new(),
             commit_body: String::new(),
             commit_amend: false,
             commit_sign_off: false,
             author_identity: "Loading author identity…".into(),
             repository_view: RepositoryView::WorkingCopy,
+            navigation_back: Vec::new(),
+            navigation_forward: Vec::new(),
             history: Vec::new(),
             history_rows: Vec::new(),
             history_state: GraphState::default(),
@@ -498,12 +582,15 @@ impl GitronimoApp {
                 self.pending_discard = None;
                 self.pending_branch_delete = None;
                 self.force_push_state = ForcePushState::Idle;
+                self.shortcut_reference_state = ShortcutReferenceState::Hidden;
                 self.network_operation = None;
                 self.commit_subject.clear();
                 self.commit_body.clear();
                 self.commit_amend = false;
                 self.commit_sign_off = false;
                 self.repository_view = RepositoryView::WorkingCopy;
+                self.navigation_back.clear();
+                self.navigation_forward.clear();
                 self.history.clear();
                 self.history_rows.clear();
                 self.history_state = GraphState::default();
@@ -536,6 +623,7 @@ impl GitronimoApp {
 
     fn refresh(&mut self, _: &Refresh, _: &mut Window, cx: &mut Context<Self>) {
         self.last_action = Some(LastAction::Refresh);
+        Self::load_diagnostics(cx);
         if let ShellState::Repository(repository) = &self.state {
             self.load_working_copy(repository.clone(), cx);
         } else {
@@ -548,12 +636,98 @@ impl GitronimoApp {
         self.edit_commit_subject(cx);
     }
 
+    fn show_command_palette(&mut self, _: &CommandPalette, _: &mut Window, cx: &mut Context<Self>) {
+        self.activity = "Choose a command from the palette.".into();
+        Self::prompt_command_palette(cx);
+        cx.notify();
+    }
+
+    fn toggle_shortcut_reference(
+        &mut self,
+        _: &ShortcutReference,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.shortcut_reference_state = match self.shortcut_reference_state {
+            ShortcutReferenceState::Hidden => ShortcutReferenceState::Visible,
+            ShortcutReferenceState::Visible => ShortcutReferenceState::Hidden,
+        };
+        cx.notify();
+    }
+
+    fn prompt_command_palette(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let command = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "choose from list {\"Refresh working copy\", \"Show history\", \"Show working copy\", \"Show keyboard shortcuts\"} with title \"Gitronimo commands\" with prompt \"Choose an action\""])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+                        .filter(|command| command != "false")
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| match command.as_deref() {
+                Some("Refresh working copy") => {
+                    if let ShellState::Repository(repository) = &app.state {
+                        app.load_working_copy(repository.clone(), cx);
+                    } else {
+                        app.activity = "Open a repository before refreshing its working copy.".into();
+                    }
+                    cx.notify();
+                }
+                Some("Show history") => {
+                    if let ShellState::Repository(repository) = &app.state {
+                        app.show_history(repository.clone(), cx);
+                    }
+                }
+                Some("Show working copy") => {
+                    app.navigate_to(RepositoryView::WorkingCopy, cx);
+                }
+                Some("Show keyboard shortcuts") => {
+                    app.shortcut_reference_state = ShortcutReferenceState::Visible;
+                    cx.notify();
+                }
+                _ => {}
+            });
+        })
+        .detach();
+    }
+
     fn history_previous(&mut self, _: &HistoryPrevious, _: &mut Window, cx: &mut Context<Self>) {
         self.move_history_selection(-1, cx);
     }
 
     fn history_next(&mut self, _: &HistoryNext, _: &mut Window, cx: &mut Context<Self>) {
         self.move_history_selection(1, cx);
+    }
+
+    fn navigate_back(&mut self, _: &NavigateBack, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.navigation_back.pop() else {
+            return;
+        };
+        self.navigation_forward.push(self.repository_view);
+        self.repository_view = view;
+        cx.notify();
+    }
+
+    fn navigate_forward(&mut self, _: &NavigateForward, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.navigation_forward.pop() else {
+            return;
+        };
+        self.navigation_back.push(self.repository_view);
+        self.repository_view = view;
+        cx.notify();
+    }
+
+    fn navigate_to(&mut self, view: RepositoryView, cx: &mut Context<Self>) {
+        if self.repository_view != view {
+            self.navigation_back.push(self.repository_view);
+            self.navigation_forward.clear();
+            self.repository_view = view;
+            cx.notify();
+        }
     }
 
     fn move_history_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -575,7 +749,7 @@ impl GitronimoApp {
     }
 
     fn show_history(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
-        self.repository_view = RepositoryView::History;
+        self.navigate_to(RepositoryView::History, cx);
         if self.history.is_empty() {
             self.load_history(repository, None, cx);
         }
@@ -685,6 +859,46 @@ impl GitronimoApp {
     }
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if self.has_commit_draft() {
+            self.confirm_draft_discard_before_open(path, window, cx);
+            return;
+        }
+        self.begin_open_path(path, window, cx);
+    }
+
+    fn confirm_draft_discard_before_open(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.activity =
+            "Discard the unsaved commit draft before opening another repository?".into();
+        cx.spawn_in(window, async move |this, cx| {
+            let confirmed = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "display dialog \"Discard the unsaved commit draft before opening another repository?\" buttons {\"Cancel\", \"Discard draft and open\"} default button \"Cancel\" cancel button \"Cancel\""])
+                        .output()
+                        .ok()
+                        .is_some_and(|output| output.status.success())
+                })
+                .await;
+            let _ = this.update_in(cx, |app, window, cx| {
+                if confirmed {
+                    app.commit_subject.clear();
+                    app.commit_body.clear();
+                    app.begin_open_path(path, window, cx);
+                } else {
+                    app.activity = "Kept the unsaved commit draft.".into();
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn begin_open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.state = ShellState::Loading(path.clone());
         self.stop_watcher();
         self.activity = "Opening repository…".into();
@@ -700,6 +914,14 @@ impl GitronimoApp {
     }
 
     fn load_working_copy(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        if !repository_is_available(&repository) {
+            self.stop_watcher();
+            self.state = ShellState::Error(repository_unavailable_message(&repository));
+            self.activity =
+                "Repository is no longer available. Choose it again when it returns.".into();
+            cx.notify();
+            return;
+        }
         let root = repository.worktree_root.clone();
         self.activity = "Refreshing working copy…".into();
         cx.spawn(async move |this, cx| {
@@ -940,6 +1162,18 @@ impl GitronimoApp {
             .and_then(|remote| String::from_utf8(remote.name.0.clone()).ok())
     }
 
+    fn has_upstream(&self) -> bool {
+        self.working_copy
+            .as_ref()
+            .is_some_and(|status| status.branch.upstream.is_some())
+    }
+
+    fn has_attached_branch(&self) -> bool {
+        self.working_copy
+            .as_ref()
+            .is_some_and(|status| matches!(status.branch.head, HeadStatus::Branch(_)))
+    }
+
     fn fetch_default_remote(&mut self, cx: &mut Context<Self>) {
         let Some(remote) = self.default_remote() else {
             self.activity = "No configured remote to fetch.".into();
@@ -1069,7 +1303,7 @@ impl GitronimoApp {
                     let mut child = git
                         .start(&worker_repository.worktree_root, args)
                         .map_err(|error| error.to_string())?;
-                    let mut stderr = child
+                    let stderr = child
                         .take_stderr()
                         .ok_or_else(|| "Git did not expose operation progress.".to_owned())?;
                     {
@@ -1081,9 +1315,8 @@ impl GitronimoApp {
                         }
                         operation.child = Some(child);
                     }
-                    let mut progress = String::new();
-                    std::io::Read::read_to_string(&mut stderr, &mut progress)
-                        .map_err(|error| error.to_string())?;
+                    let progress =
+                        read_stderr_limited(stderr).map_err(|error| error.to_string())?;
                     let mut operation = worker_operation
                         .lock()
                         .map_err(|_| "Network operation state was unavailable.".to_owned())?;
@@ -1182,7 +1415,7 @@ impl GitronimoApp {
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_refs(repository, cx);
                     }
-                    Err(error) => app.activity = format!("{label} failed: {error}"),
+                    Err(error) => app.activity = git_failure_message(&label, &error),
                 }
                 cx.notify();
             });
@@ -1235,8 +1468,9 @@ impl GitronimoApp {
         let ShellState::Repository(repository) = &self.state else {
             return;
         };
-        self.repository_view = RepositoryView::History;
-        self.change_history_reference(HistoryReference::Named(reference), repository.clone(), cx);
+        let repository = repository.clone();
+        self.navigate_to(RepositoryView::History, cx);
+        self.change_history_reference(HistoryReference::Named(reference), repository, cx);
     }
 
     fn prompt_history_search(cx: &mut Context<Self>) {
@@ -1383,6 +1617,15 @@ impl GitronimoApp {
                     return;
                 };
                 if current.worktree_root == root {
+                    if !repository_is_available(&repository) {
+                        app.stop_watcher();
+                        app.state = ShellState::Error(repository_unavailable_message(&repository));
+                        app.activity =
+                            "Repository is no longer available. Choose it again when it returns."
+                                .into();
+                        cx.notify();
+                        return;
+                    }
                     let changed = app
                         .watch_events
                         .as_ref()
@@ -1495,6 +1738,98 @@ impl GitronimoApp {
         cx.notify();
     }
 
+    fn stage_diff_hunk(&mut self, hunk_index: usize, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let Some((path, false)) = self.selected_diff.clone() else {
+            return;
+        };
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let worker_path = path.clone();
+        self.mutation_in_flight = true;
+        self.activity = "Staging hunk…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .stage_hunk(&worker_repository, &worker_path, hunk_index)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = "Hunk staged.".into();
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_diff(
+                            repository,
+                            path,
+                            false,
+                            git_cli::MAX_DISPLAY_DIFF_BYTES,
+                            cx,
+                        );
+                    }
+                    Err(error) => app.activity = git_failure_message("Stage hunk", &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn unstage_diff_hunk(&mut self, hunk_index: usize, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let Some((path, true)) = self.selected_diff.clone() else {
+            return;
+        };
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let worker_path = path.clone();
+        self.mutation_in_flight = true;
+        self.activity = "Unstaging hunk…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .unstage_hunk(&worker_repository, &worker_path, hunk_index)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = "Hunk unstaged.".into();
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_diff(
+                            repository,
+                            path,
+                            true,
+                            git_cli::MAX_DISPLAY_DIFF_BYTES,
+                            cx,
+                        );
+                    }
+                    Err(error) => app.activity = git_failure_message("Unstage hunk", &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn copy_context_path(&mut self, repository: &WorktreeRepository, cx: &mut Context<Self>) {
         let Some(path) = self.context_path.as_ref() else {
             return;
@@ -1563,6 +1898,141 @@ impl GitronimoApp {
             return;
         };
         self.run_mutation(Mutation::DiscardSelected, paths, cx);
+    }
+
+    fn create_stash(&mut self, include_untracked: bool, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        self.mutation_in_flight = true;
+        self.activity = "Creating stash…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .create_stash(&worker_repository, include_untracked)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = "Stash created.".into();
+                        app.load_working_copy(repository, cx);
+                    }
+                    Err(error) => app.activity = git_failure_message("Create stash", &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn apply_latest_stash(&mut self, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        self.mutation_in_flight = true;
+        self.activity = "Applying latest stash…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .apply_latest_stash(&worker_repository)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity =
+                            "Latest stash applied; it remains available for recovery.".into();
+                        app.load_working_copy(repository, cx);
+                    }
+                    Err(error) => app.activity = git_failure_message("Apply latest stash", &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn pop_latest_stash(&mut self, cx: &mut Context<Self>) {
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        self.pending_stash_action = None;
+        self.mutation_in_flight = true;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .pop_latest_stash(&worker_repository)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = "Latest stash applied and removed.".into();
+                        app.load_working_copy(repository, cx);
+                    }
+                    Err(error) => app.activity = git_failure_message("Pop latest stash", &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn drop_latest_stash(&mut self, cx: &mut Context<Self>) {
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        self.pending_stash_action = None;
+        self.mutation_in_flight = true;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .drop_latest_stash(&worker_repository)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = "Latest stash removed.".into();
+                        app.load_working_copy(repository, cx);
+                    }
+                    Err(error) => app.activity = git_failure_message("Drop latest stash", &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn edit_commit_subject(&mut self, cx: &mut Context<Self>) {
@@ -1665,7 +2135,7 @@ impl GitronimoApp {
                         app.activity = "Commit complete.".into();
                         app.load_working_copy(repository, cx);
                     }
-                    Err(error) => app.activity = format!("Commit failed: {error}"),
+                    Err(error) => app.activity = git_failure_message("Commit", &error),
                 }
                 cx.notify();
             });
@@ -1707,7 +2177,7 @@ impl GitronimoApp {
                         app.activity = format!("{} complete.", operation.label());
                         app.load_working_copy(repository, cx);
                     }
-                    Err(error) => app.activity = format!("{} failed: {error}", operation.label()),
+                    Err(error) => app.activity = git_failure_message(operation.label(), &error),
                 }
                 cx.notify();
             });
@@ -1723,6 +2193,12 @@ enum Mutation {
     StageAll,
     UnstageAll,
     DiscardSelected,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StashAction {
+    Pop,
+    Drop,
 }
 
 impl Mutation {
@@ -1798,11 +2274,39 @@ fn appearance_from_window(appearance: WindowAppearance) -> Appearance {
     }
 }
 
+fn window_title(state: &ShellState, has_commit_draft: bool) -> String {
+    let repository = match state {
+        ShellState::Repository(repository) => repository
+            .worktree_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Repository"),
+        ShellState::Loading(_) => "Opening repository",
+        ShellState::Error(_) => "Repository error",
+        ShellState::Welcome => return "Gitronimo".into(),
+    };
+    if matches!(state, ShellState::Repository(_)) {
+        format!(
+            "{repository} — Gitronimo{}",
+            if has_commit_draft { " • Draft" } else { "" }
+        )
+    } else {
+        format!("{repository} — Gitronimo")
+    }
+}
+
 impl Render for GitronimoApp {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        window.set_window_title(&window_title(&self.state, self.has_commit_draft()));
         let colors = Theme::for_appearance(self.appearance).colors;
         let sidebar_width = self.sidebar_width;
         let inspector_width = self.inspector_width;
+        let show_inspector = !matches!(self.state, ShellState::Welcome)
+            && shows_inspector(
+                f32::from(window.viewport_size().width),
+                sidebar_width,
+                inspector_width,
+            );
         let content = match &self.state {
             ShellState::Welcome => self.welcome_view(&colors, cx).into_any_element(),
             ShellState::Loading(path) => loading_view(path, &colors).into_any_element(),
@@ -1821,53 +2325,127 @@ impl Render for GitronimoApp {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::refresh))
             .on_action(cx.listener(Self::focus_composer))
+            .on_action(cx.listener(Self::show_command_palette))
+            .on_action(cx.listener(Self::toggle_shortcut_reference))
             .on_action(cx.listener(Self::history_previous))
             .on_action(cx.listener(Self::history_next))
+            .on_action(cx.listener(Self::navigate_back))
+            .on_action(cx.listener(Self::navigate_forward))
             .on_action(cx.listener(Self::toggle_appearance))
             .on_action(cx.listener(Self::widen_sidebar))
             .on_action(cx.listener(Self::widen_inspector))
             .on_drop(cx.listener(Self::dropped_paths))
+            .child(self.workspace_toolbar(&colors, cx))
             .child(
                 div()
                     .flex_1()
                     .flex()
                     .child(self.sidebar_view(sidebar_width, &colors, cx))
-                    .child(div().flex_1().h_full().p_6().child(content))
                     .child(
                         div()
-                            .w(px(inspector_width))
+                            .flex_1()
                             .h_full()
-                            .p_4()
-                            .bg(colors.panel_background)
-                            .border_l_1()
-                            .border_color(colors.border)
-                            .child("Diagnostics")
-                            .child(self.diagnostics.clone())
-                            .child("One repository window opens per selection."),
-                    ),
+                            .p_6()
+                            .child(content)
+                            .children(self.shortcut_reference_view(&colors, cx)),
+                    )
+                    .when(show_inspector, |this| {
+                        this.child(
+                            div()
+                                .w(px(inspector_width))
+                                .h_full()
+                                .p_4()
+                                .bg(colors.panel_background)
+                                .border_l_1()
+                                .border_color(colors.border)
+                                .child("Diagnostics")
+                                .child(self.diagnostics.clone())
+                                .child("One repository window opens per selection."),
+                        )
+                    }),
             )
             .child(
                 div()
-                    .h(px(30.0))
+                    .min_h(px(30.0))
                     .px_4()
                     .flex()
                     .items_center()
                     .bg(colors.raised_background)
                     .border_t_1()
                     .border_color(colors.border)
-                    .text_color(colors.text_secondary)
-                    .child(self.activity.clone()),
+                    .text_color(activity_color(&self.activity, &colors))
+                    .child(activity_label(&self.activity)),
             )
     }
 }
 
 impl GitronimoApp {
+    fn workspace_toolbar(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let context = match &self.state {
+            ShellState::Welcome => "Local Git workspace".to_owned(),
+            ShellState::Loading(_) => "Opening repository".to_owned(),
+            ShellState::Repository(repository) => repository
+                .worktree_root
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Repository")
+                .to_owned(),
+            ShellState::Error(_) => "Repository needs attention".to_owned(),
+        };
+        div()
+            .min_h(px(52.0))
+            .px_5()
+            .flex()
+            .items_center()
+            .justify_between()
+            .bg(colors.panel_background)
+            .border_b_1()
+            .border_color(colors.border)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(div().text_lg().child("Gitronimo"))
+                    .child(div().text_color(colors.text_secondary).child(context)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(window_action_button(
+                        "Command palette",
+                        colors,
+                        cx,
+                        |_, window, cx| {
+                            window.dispatch_action(Box::new(CommandPalette), cx);
+                        },
+                    ))
+                    .child(primary_window_action_button(
+                        "Open repository",
+                        colors,
+                        cx,
+                        |_, window, cx| {
+                            window.dispatch_action(Box::new(OpenRepository), cx);
+                        },
+                    )),
+            )
+    }
+
     fn sidebar_view(
         &self,
         width: f32,
         colors: &ui_kit::ThemeColors,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        if matches!(self.state, ShellState::Welcome) {
+            return welcome_sidebar_view(width, colors);
+        }
         let groups = self.status_groups();
         let branch = self.working_copy.as_ref().map_or_else(
             || "Branch: loading…".to_owned(),
@@ -1945,6 +2523,43 @@ impl GitronimoApp {
                         })
                     }),
             )
+            .into_any_element()
+    }
+
+    fn shortcut_reference_view(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        (self.shortcut_reference_state == ShortcutReferenceState::Visible).then(|| {
+            div()
+                .mt_4()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child("Keyboard shortcuts")
+                .child("Command-O  Open repository")
+                .child("Command-R  Refresh working copy")
+                .child("Command-Shift-C  Edit commit subject")
+                .child("Command-Shift-P  Command palette")
+                .child("Command-/  Show or hide this reference")
+                .child("Command-[ / Command-]  Back / Forward")
+                .child("Up / Down  Move through loaded history")
+                .child(file_action_button(
+                    "Hide shortcut reference",
+                    colors,
+                    cx,
+                    |app, cx| {
+                        app.shortcut_reference_state = ShortcutReferenceState::Hidden;
+                        cx.notify();
+                    },
+                ))
+                .into_any_element()
+        })
     }
 
     fn ref_rows(
@@ -2031,94 +2646,157 @@ impl GitronimoApp {
             return self.history_view(repository, colors, cx).into_any_element();
         }
         let groups = self.status_groups();
+        let has_local_branches = !self.refs.local_branches.is_empty();
+        let has_remotes = !self.refs.remotes.is_empty();
+        let has_upstream = self.has_upstream();
+        let has_attached_branch = self.has_attached_branch();
         div()
             .flex()
             .flex_col()
             .gap_4()
-            .child(div().text_xl().child("Working Copy"))
-            .child(file_action_button(
-                "Checkout branch…",
+            .child(
+                div()
+                    .p_4()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(div().text_xl().child("Working copy"))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .text_color(colors.text_secondary)
+                                    .child(repository.worktree_root.display().to_string()),
+                            ),
+                    )
+                    .child(file_action_button("History", colors, cx, {
+                        let repository = repository.clone();
+                        move |app, cx| app.show_history(repository.clone(), cx)
+                    })),
+            )
+            .children(self.navigation_controls(colors, cx))
+            .child(workspace_section(
+                "Branch",
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(div().flex().gap_2().children([
+                        validated_action_button(
+                            "Checkout branch…",
+                            has_local_branches,
+                            "No local branches are available.",
+                            colors,
+                            cx,
+                            |_, cx| GitronimoApp::prompt_branch_name(false, cx),
+                        ),
+                        file_action_button("New branch from HEAD…", colors, cx, |_, cx| {
+                            GitronimoApp::prompt_branch_name(true, cx);
+                        }),
+                    ]))
+                    .child(div().flex().gap_2().children([
+                        validated_action_button(
+                            "Rename current branch…",
+                            has_attached_branch,
+                            "Checkout a local branch first.",
+                            colors,
+                            cx,
+                            |_, cx| GitronimoApp::prompt_rename_current_branch(cx),
+                        ),
+                        validated_action_button(
+                            "Delete local branch…",
+                            has_local_branches,
+                            "No local branches are available.",
+                            colors,
+                            cx,
+                            |_, cx| GitronimoApp::prompt_delete_local_branch(cx),
+                        ),
+                    ])),
                 colors,
-                cx,
-                |_, cx| {
-                    GitronimoApp::prompt_branch_name(false, cx);
-                },
             ))
-            .child(file_action_button(
-                "New branch from HEAD…",
+            .child(workspace_section(
+                "Sync",
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(div().flex().gap_2().children([
+                        validated_action_button(
+                            "Fetch default remote",
+                            has_remotes,
+                            "Add a remote before fetching.",
+                            colors,
+                            cx,
+                            GitronimoApp::fetch_default_remote,
+                        ),
+                        validated_action_button(
+                            "Fetch remote…",
+                            has_remotes,
+                            "Add a remote before fetching.",
+                            colors,
+                            cx,
+                            |_, cx| GitronimoApp::prompt_fetch_remote(cx),
+                        ),
+                    ]))
+                    .child(div().flex().gap_2().children([
+                        validated_action_button(
+                            "Pull current branch",
+                            has_upstream,
+                            "Set an upstream before pulling.",
+                            colors,
+                            cx,
+                            GitronimoApp::pull_current,
+                        ),
+                        validated_action_button(
+                            "Push current branch",
+                            has_upstream,
+                            "Set an upstream before pushing.",
+                            colors,
+                            cx,
+                            GitronimoApp::push_current,
+                        ),
+                    ]))
+                    .child(div().flex().gap_2().children([
+                        validated_action_button(
+                            "Publish current branch",
+                            has_remotes && has_attached_branch,
+                            "Checkout a branch and add a remote before publishing.",
+                            colors,
+                            cx,
+                            GitronimoApp::publish_current,
+                        ),
+                        validated_action_button(
+                            "Advanced force-with-lease…",
+                            has_upstream,
+                            "Set an upstream before force-with-lease is available.",
+                            colors,
+                            cx,
+                            GitronimoApp::request_force_with_lease,
+                        ),
+                    ]))
+                    .children(self.network_cancel_button(colors, cx)),
                 colors,
-                cx,
-                |_, cx| {
-                    GitronimoApp::prompt_branch_name(true, cx);
-                },
             ))
-            .child(file_action_button(
-                "Rename current branch…",
-                colors,
-                cx,
-                |_, cx| GitronimoApp::prompt_rename_current_branch(cx),
-            ))
-            .child(file_action_button(
-                "Delete local branch…",
-                colors,
-                cx,
-                |_, cx| GitronimoApp::prompt_delete_local_branch(cx),
-            ))
-            .child(file_action_button(
-                "Fetch default remote",
-                colors,
-                cx,
-                |app, cx| {
-                    app.fetch_default_remote(cx);
-                },
-            ))
-            .child(file_action_button(
-                "Fetch remote…",
-                colors,
-                cx,
-                |_, cx| {
-                    GitronimoApp::prompt_fetch_remote(cx);
-                },
-            ))
-            .child(file_action_button(
-                "Pull current branch",
-                colors,
-                cx,
-                |app, cx| {
-                    app.pull_current(cx);
-                },
-            ))
-            .child(file_action_button(
-                "Push current branch",
-                colors,
-                cx,
-                |app, cx| {
-                    app.push_current(cx);
-                },
-            ))
-            .child(file_action_button(
-                "Publish current branch",
-                colors,
-                cx,
-                |app, cx| {
-                    app.publish_current(cx);
-                },
-            ))
-            .child(file_action_button(
-                "Advanced force-with-lease…",
-                colors,
-                cx,
-                GitronimoApp::request_force_with_lease,
-            ))
-            .children(self.network_cancel_button(colors, cx))
-            .child(file_action_button("History", colors, cx, {
-                let repository = repository.clone();
-                move |app, cx| app.show_history(repository.clone(), cx)
-            }))
-            .child(repository.worktree_root.display().to_string())
             .children(self.ref_context_menu_view(colors, cx))
+            .children(self.working_copy.as_ref().is_none().then(|| {
+                state_panel(
+                    "Loading working copy",
+                    "Reading status, branches, and remotes in the background.",
+                    colors.warning,
+                    colors,
+                )
+            }))
             .child(self.mutation_controls(colors, cx))
             .children(self.discard_confirmation_view(colors, cx))
+            .children(self.stash_pop_confirmation_view(colors, cx))
+            .children(self.stash_drop_confirmation_view(colors, cx))
             .children(self.branch_delete_confirmation_view(colors, cx))
             .children(self.force_with_lease_confirmation_view(colors, cx))
             .child(self.commit_composer_view(colors, cx))
@@ -2228,6 +2906,37 @@ impl GitronimoApp {
             }
         }
         Some(menu.into_any_element())
+    }
+
+    fn navigation_controls(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        (!self.navigation_back.is_empty() || !self.navigation_forward.is_empty()).then(|| {
+            div()
+                .flex()
+                .gap_2()
+                .children(self.navigation_back.last().map(|_| {
+                    file_action_button("Back", colors, cx, |app, cx| {
+                        if let Some(view) = app.navigation_back.pop() {
+                            app.navigation_forward.push(app.repository_view);
+                            app.repository_view = view;
+                            cx.notify();
+                        }
+                    })
+                }))
+                .children(self.navigation_forward.last().map(|_| {
+                    file_action_button("Forward", colors, cx, |app, cx| {
+                        if let Some(view) = app.navigation_forward.pop() {
+                            app.navigation_back.push(app.repository_view);
+                            app.repository_view = view;
+                            cx.notify();
+                        }
+                    })
+                }))
+                .into_any_element()
+        })
     }
 
     #[allow(clippy::too_many_lines)]
@@ -2389,8 +3098,7 @@ impl GitronimoApp {
             .gap_3()
             .child(div().text_xl().child("History"))
             .child(file_action_button("Working Copy", colors, cx, |app, cx| {
-                app.repository_view = RepositoryView::WorkingCopy;
-                cx.notify();
+                app.navigate_to(RepositoryView::WorkingCopy, cx);
             }))
             .child(file_action_button(
                 "Current branch",
@@ -2478,31 +3186,55 @@ impl GitronimoApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let disabled = self.mutation_in_flight;
-        div().flex().gap_2().children([
-            mutation_button(
-                "Stage selected",
-                disabled,
-                Mutation::StageSelected,
-                colors,
-                cx,
-            ),
-            mutation_button(
-                "Unstage selected",
-                disabled,
-                Mutation::UnstageSelected,
-                colors,
-                cx,
-            ),
-            mutation_button("Stage all", disabled, Mutation::StageAll, colors, cx),
-            mutation_button("Unstage all", disabled, Mutation::UnstageAll, colors, cx),
-            mutation_button(
-                "Discard selected",
-                disabled,
-                Mutation::DiscardSelected,
-                colors,
-                cx,
-            ),
-        ])
+        workspace_section(
+            "Changes",
+            div().flex().gap_2().children([
+                mutation_button(
+                    "Stage selected",
+                    disabled,
+                    Mutation::StageSelected,
+                    colors,
+                    cx,
+                ),
+                mutation_button(
+                    "Unstage selected",
+                    disabled,
+                    Mutation::UnstageSelected,
+                    colors,
+                    cx,
+                ),
+                mutation_button("Stage all", disabled, Mutation::StageAll, colors, cx),
+                mutation_button("Unstage all", disabled, Mutation::UnstageAll, colors, cx),
+                mutation_button(
+                    "Discard selected",
+                    disabled,
+                    Mutation::DiscardSelected,
+                    colors,
+                    cx,
+                ),
+                file_action_button("Stash tracked changes", colors, cx, |app, cx| {
+                    app.create_stash(false, cx);
+                }),
+                file_action_button("Stash including untracked", colors, cx, |app, cx| {
+                    app.create_stash(true, cx);
+                }),
+                file_action_button("Apply latest stash", colors, cx, |app, cx| {
+                    app.apply_latest_stash(cx);
+                }),
+                file_action_button("Pop latest stash", colors, cx, |app, cx| {
+                    app.pending_stash_action = Some(StashAction::Pop);
+                    app.activity =
+                        "Confirm before removing the latest stash recovery entry.".into();
+                    cx.notify();
+                }),
+                file_action_button("Drop latest stash", colors, cx, |app, cx| {
+                    app.pending_stash_action = Some(StashAction::Drop);
+                    app.activity = "Confirm before permanently removing the latest stash.".into();
+                    cx.notify();
+                }),
+            ]),
+            colors,
+        )
     }
 
     fn discard_confirmation_view(
@@ -2523,6 +3255,47 @@ impl GitronimoApp {
                 .child(file_action_button("Confirm discard", colors, cx, |app, cx| {
                     app.confirm_discard(cx);
                 }))
+                .into_any_element()
+        })
+    }
+
+    fn stash_pop_confirmation_view(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        (self.pending_stash_action == Some(StashAction::Pop)).then(|| {
+            div()
+                .p_2()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child("Pop the latest stash? Its recovery entry will be removed after a successful apply.")
+                .child(file_action_button("Confirm pop latest stash", colors, cx, |app, cx| {
+                    app.pop_latest_stash(cx);
+                }))
+                .into_any_element()
+        })
+    }
+
+    fn stash_drop_confirmation_view(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui::AnyElement> {
+        (self.pending_stash_action == Some(StashAction::Drop)).then(|| {
+            div()
+                .p_2()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child("Drop the latest stash permanently? This cannot be undone.")
+                .child(file_action_button(
+                    "Confirm drop latest stash",
+                    colors,
+                    cx,
+                    GitronimoApp::drop_latest_stash,
+                ))
                 .into_any_element()
         })
     }
@@ -2599,65 +3372,64 @@ impl GitronimoApp {
         let enabled = !self.mutation_in_flight
             && !self.commit_subject.trim().is_empty()
             && !self.status_groups().staged.is_empty();
-        div()
-            .p_2()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .bg(colors.panel_background)
-            .border_1()
-            .border_color(colors.border)
-            .child("Commit")
-            .child(format!(
-                "Subject: {}",
-                if self.commit_subject.is_empty() {
-                    "(required)"
-                } else {
-                    &self.commit_subject
-                }
-            ))
-            .child(file_action_button("Edit subject", colors, cx, |app, cx| {
-                app.edit_commit_subject(cx);
-            }))
-            .child(format!(
-                "Body: {}",
-                if self.commit_body.is_empty() {
-                    "(optional)"
-                } else {
-                    &self.commit_body
-                }
-            ))
-            .child(file_action_button("Edit body", colors, cx, |app, cx| {
-                app.edit_commit_body(cx);
-            }))
-            .child(format!(
-                "Amend: {}",
-                if self.commit_amend { "on" } else { "off" }
-            ))
-            .child(file_action_button("Toggle amend", colors, cx, |app, cx| {
-                app.toggle_commit_amend(cx);
-            }))
-            .child(format!(
-                "Sign-off: {}",
-                if self.commit_sign_off { "on" } else { "off" }
-            ))
-            .child(file_action_button(
-                "Toggle sign-off",
-                colors,
-                cx,
-                GitronimoApp::toggle_commit_sign_off,
-            ))
-            .child(format!("Author: {}", self.author_identity))
-            .child(file_action_button(
-                "Commit staged changes",
-                colors,
-                cx,
-                move |app, cx| {
-                    if enabled {
-                        app.commit_draft(cx);
+        workspace_section(
+            "Commit",
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(format!(
+                    "Subject: {}",
+                    if self.commit_subject.is_empty() {
+                        "(required)"
+                    } else {
+                        &self.commit_subject
                     }
-                },
-            ))
+                ))
+                .child(file_action_button("Edit subject", colors, cx, |app, cx| {
+                    app.edit_commit_subject(cx);
+                }))
+                .child(format!(
+                    "Body: {}",
+                    if self.commit_body.is_empty() {
+                        "(optional)"
+                    } else {
+                        &self.commit_body
+                    }
+                ))
+                .child(file_action_button("Edit body", colors, cx, |app, cx| {
+                    app.edit_commit_body(cx);
+                }))
+                .child(format!(
+                    "Amend: {}",
+                    if self.commit_amend { "on" } else { "off" }
+                ))
+                .child(file_action_button("Toggle amend", colors, cx, |app, cx| {
+                    app.toggle_commit_amend(cx);
+                }))
+                .child(format!(
+                    "Sign-off: {}",
+                    if self.commit_sign_off { "on" } else { "off" }
+                ))
+                .child(file_action_button(
+                    "Toggle sign-off",
+                    colors,
+                    cx,
+                    GitronimoApp::toggle_commit_sign_off,
+                ))
+                .child(format!("Author: {}", self.author_identity))
+                .child(file_action_button(
+                    "Commit staged changes",
+                    colors,
+                    cx,
+                    move |app, cx| {
+                        if enabled {
+                            app.commit_draft(cx);
+                        }
+                    },
+                )),
+            colors,
+        )
     }
 
     fn context_menu_view(
@@ -2723,7 +3495,7 @@ impl GitronimoApp {
         let rows = if entries.is_empty() {
             div()
                 .text_color(colors.text_muted)
-                .child("None")
+                .child(empty_status_message(title))
                 .into_any_element()
         } else {
             div()
@@ -2764,7 +3536,22 @@ impl GitronimoApp {
                 }))
                 .into_any_element()
         };
-        div().flex().flex_col().gap_1().child(title).child(rows)
+        div()
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .bg(colors.panel_background)
+            .border_1()
+            .border_color(colors.border)
+            .child(
+                div().flex().justify_between().child(title).child(
+                    div()
+                        .text_color(colors.text_secondary)
+                        .child(entries.len().to_string()),
+                ),
+            )
+            .child(rows)
     }
 
     fn diff_view(
@@ -2774,8 +3561,10 @@ impl GitronimoApp {
     ) -> Option<gpui::AnyElement> {
         self.loaded_diff.as_ref().map(|loaded| {
             let mut text = String::new();
+            let mut hunk_count = 0;
             for file in &loaded.diff.files {
                 for hunk in &file.hunks {
+                    hunk_count += 1;
                     text.push_str(&String::from_utf8_lossy(&hunk.header));
                     text.push('\n');
                     for line in &hunk.lines {
@@ -2790,11 +3579,46 @@ impl GitronimoApp {
                     }
                 }
             }
+            let can_mutate_hunks = !self.mutation_in_flight
+                && !loaded.truncated
+                && !loaded.diff.files.iter().any(|file| file.binary)
+                && self.selected_diff.is_some();
+            let staged_diff = matches!(&self.selected_diff, Some((_, true)));
             div()
-                .p_2()
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap_2()
                 .bg(colors.panel_background)
                 .border_1()
                 .border_color(colors.border)
+                .children((can_mutate_hunks && hunk_count > 0).then(|| {
+                    div()
+                        .flex()
+                        .gap_2()
+                        .children((0..hunk_count).map(|hunk_index| {
+                            div()
+                                .id(("diff-hunk", hunk_index))
+                                .px_2()
+                                .py_1()
+                                .bg(colors.raised_background)
+                                .border_1()
+                                .border_color(colors.border)
+                                .cursor_pointer()
+                                .on_click(cx.listener(move |app, _, _, cx| {
+                                    if staged_diff {
+                                        app.unstage_diff_hunk(hunk_index, cx);
+                                    } else {
+                                        app.stage_diff_hunk(hunk_index, cx);
+                                    }
+                                }))
+                                .child(format!(
+                                    "{} hunk {}",
+                                    if staged_diff { "Unstage" } else { "Stage" },
+                                    hunk_index + 1
+                                ))
+                        }))
+                }))
                 .child(if loaded.diff.files.iter().any(|file| file.binary) {
                     "Binary file changed".to_owned()
                 } else {
@@ -2820,10 +3644,12 @@ impl GitronimoApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let recent_rows = if self.recents.is_empty() {
-            div()
-                .text_color(colors.text_muted)
-                .child("No recent repositories yet.")
-                .into_any_element()
+            state_panel(
+                "No recent repositories",
+                "Open a Git repository to keep it here for next time.",
+                colors.text_muted,
+                colors,
+            )
         } else {
             div()
                 .flex()
@@ -2834,7 +3660,7 @@ impl GitronimoApp {
                     let label = path.display().to_string();
                     div()
                         .id(("recent-repository", index))
-                        .p_2()
+                        .p_3()
                         .bg(colors.raised_background)
                         .border_1()
                         .border_color(colors.border)
@@ -2842,23 +3668,76 @@ impl GitronimoApp {
                         .on_click(cx.listener(move |app, _, window, cx| {
                             app.open_recent(path.clone(), window, cx);
                         }))
-                        .child(label)
+                        .child(div().text_lg().child(label))
+                        .child(
+                            div()
+                                .mt_1()
+                                .text_sm()
+                                .text_color(colors.text_secondary)
+                                .child("Open this repository"),
+                        )
                 }))
                 .into_any_element()
         };
         div()
+            .max_w(px(880.0))
             .flex()
             .flex_col()
-            .gap_4()
-            .child(div().text_xl().child("Open a repository"))
-            .child("Use File > Open Repository… or Command-O to choose a folder.")
-            .child("You can also drop a folder anywhere in this window.")
+            .gap_5()
             .child(
                 div()
-                    .text_sm()
-                    .text_color(colors.text_secondary)
-                    .child("Recent repositories"),
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .child(div().text_2xl().child("Start with a repository"))
+                    .child(
+                        div().text_color(colors.text_secondary).child(
+                            "Gitronimo keeps your local Git workflow in one focused workspace.",
+                        ),
+                    )
+                    .child(
+                        div()
+                            .mt_2()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(primary_window_action_button(
+                                "Choose repository",
+                                colors,
+                                cx,
+                                |_, window, cx| {
+                                    window.dispatch_action(Box::new(OpenRepository), cx);
+                                },
+                            ))
+                            .child(
+                                div()
+                                    .text_color(colors.text_secondary)
+                                    .child("or drop a folder anywhere in this window"),
+                            ),
+                    ),
             )
+            .child(div().flex().flex_col().gap_2().children([
+                welcome_feature_card(
+                    "Review changes",
+                    "Inspect staged, unstaged, and untracked files before committing.",
+                    colors,
+                ),
+                welcome_feature_card(
+                    "Trace history",
+                    "Browse commits and follow the branch context without leaving the workspace.",
+                    colors,
+                ),
+                welcome_feature_card(
+                    "Stay in control",
+                    "Use your installed Git, credentials, hooks, and signing configuration.",
+                    colors,
+                ),
+            ]))
+            .child(div().mt_3().text_lg().child("Recent repositories"))
             .child(recent_rows)
     }
 }
@@ -2885,6 +3764,79 @@ fn status_badge(
         .into_any_element()
 }
 
+fn welcome_sidebar_view(width: f32, colors: &ui_kit::ThemeColors) -> gpui::AnyElement {
+    div()
+        .w(px(width))
+        .h_full()
+        .p_4()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .bg(colors.sidebar_background)
+        .border_r_1()
+        .border_color(colors.border)
+        .child(div().text_lg().child("Workspace"))
+        .child(
+            div()
+                .text_color(colors.text_secondary)
+                .child("Open a repository to start reviewing changes, history, and remotes."),
+        )
+        .child(
+            div()
+                .mt_4()
+                .text_color(colors.text_muted)
+                .child("Quick start"),
+        )
+        .child(
+            div()
+                .p_3()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child("Open a local repository")
+                .child(
+                    div()
+                        .mt_1()
+                        .text_sm()
+                        .text_color(colors.text_secondary)
+                        .child("Command-O or drag a folder into this window"),
+                ),
+        )
+        .child(
+            div()
+                .mt_4()
+                .text_color(colors.text_muted)
+                .child("Available here"),
+        )
+        .child("Working copy and file diffs")
+        .child("History and local branches")
+        .child("Configured remotes")
+        .into_any_element()
+}
+
+fn workspace_section(
+    title: &'static str,
+    content: impl IntoElement,
+    colors: &ui_kit::ThemeColors,
+) -> gpui::AnyElement {
+    div()
+        .p_3()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .bg(colors.panel_background)
+        .border_1()
+        .border_color(colors.border)
+        .child(
+            div()
+                .text_sm()
+                .text_color(colors.text_secondary)
+                .child(title),
+        )
+        .child(content)
+        .into_any_element()
+}
+
 fn mutation_button(
     label: &'static str,
     disabled: bool,
@@ -2892,6 +3844,7 @@ fn mutation_button(
     colors: &ui_kit::ThemeColors,
     cx: &mut Context<GitronimoApp>,
 ) -> gpui::AnyElement {
+    let tooltip_colors = *colors;
     div()
         .id(label)
         .px_2()
@@ -2900,6 +3853,13 @@ fn mutation_button(
         .border_1()
         .border_color(colors.border)
         .cursor_pointer()
+        .tooltip(move |_, cx| {
+            cx.new(|_| ActionTooltip {
+                label,
+                colors: tooltip_colors,
+            })
+            .into()
+        })
         .on_click(cx.listener(move |app, _, _, cx| {
             if !disabled {
                 app.mutate(operation, cx);
@@ -2915,6 +3875,7 @@ fn file_action_button(
     cx: &mut Context<GitronimoApp>,
     on_click: impl Fn(&mut GitronimoApp, &mut Context<GitronimoApp>) + 'static,
 ) -> gpui::AnyElement {
+    let tooltip_colors = *colors;
     div()
         .id(label)
         .px_2()
@@ -2923,7 +3884,137 @@ fn file_action_button(
         .border_1()
         .border_color(colors.border)
         .cursor_pointer()
+        .tooltip(move |_, cx| {
+            cx.new(|_| ActionTooltip {
+                label,
+                colors: tooltip_colors,
+            })
+            .into()
+        })
         .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)))
+        .child(label)
+        .into_any_element()
+}
+
+fn window_action_button(
+    label: &'static str,
+    colors: &ui_kit::ThemeColors,
+    cx: &mut Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut Window, &mut Context<GitronimoApp>) + 'static,
+) -> gpui::AnyElement {
+    let tooltip_colors = *colors;
+    div()
+        .id(label)
+        .px_3()
+        .py_2()
+        .bg(colors.raised_background)
+        .border_1()
+        .border_color(colors.border)
+        .cursor_pointer()
+        .tooltip(move |_, cx| {
+            cx.new(|_| ActionTooltip {
+                label,
+                colors: tooltip_colors,
+            })
+            .into()
+        })
+        .on_click(cx.listener(move |app, _, window, cx| on_click(app, window, cx)))
+        .child(label)
+        .into_any_element()
+}
+
+fn primary_window_action_button(
+    label: &'static str,
+    colors: &ui_kit::ThemeColors,
+    cx: &mut Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut Window, &mut Context<GitronimoApp>) + 'static,
+) -> gpui::AnyElement {
+    let tooltip_colors = *colors;
+    div()
+        .id(label)
+        .px_3()
+        .py_2()
+        .bg(colors.accent)
+        .border_1()
+        .border_color(colors.accent)
+        .text_color(colors.panel_background)
+        .cursor_pointer()
+        .tooltip(move |_, cx| {
+            cx.new(|_| ActionTooltip {
+                label,
+                colors: tooltip_colors,
+            })
+            .into()
+        })
+        .on_click(cx.listener(move |app, _, window, cx| on_click(app, window, cx)))
+        .child(label)
+        .into_any_element()
+}
+
+fn welcome_feature_card(
+    title: &'static str,
+    description: &'static str,
+    colors: &ui_kit::ThemeColors,
+) -> gpui::AnyElement {
+    div()
+        .flex_1()
+        .p_4()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .bg(colors.panel_background)
+        .border_1()
+        .border_color(colors.border)
+        .child(title)
+        .child(div().text_color(colors.text_secondary).child(description))
+        .into_any_element()
+}
+
+struct ActionTooltip {
+    label: &'static str,
+    colors: ui_kit::ThemeColors,
+}
+
+impl Render for ActionTooltip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .bg(self.colors.raised_background)
+            .border_1()
+            .border_color(self.colors.border)
+            .text_color(self.colors.text_primary)
+            .child(self.label)
+    }
+}
+
+fn validated_action_button(
+    label: &'static str,
+    enabled: bool,
+    unavailable_reason: &'static str,
+    colors: &ui_kit::ThemeColors,
+    cx: &mut Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut Context<GitronimoApp>) + 'static,
+) -> gpui::AnyElement {
+    if enabled {
+        return file_action_button(label, colors, cx, on_click);
+    }
+    let tooltip_colors = *colors;
+    div()
+        .id(label)
+        .px_2()
+        .py_1()
+        .bg(colors.raised_background)
+        .border_1()
+        .border_color(colors.border)
+        .text_color(colors.text_muted)
+        .tooltip(move |_, cx| {
+            cx.new(|_| ActionTooltip {
+                label: unavailable_reason,
+                colors: tooltip_colors,
+            })
+            .into()
+        })
         .child(label)
         .into_any_element()
 }
@@ -2960,40 +4051,95 @@ fn status_label(entry: &StatusEntry) -> String {
 }
 
 fn loading_view(path: &Path, colors: &ui_kit::ThemeColors) -> impl IntoElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap_3()
-        .child(div().text_xl().child("Opening repository…"))
-        .child(path.display().to_string())
-        .child(
-            div()
-                .text_sm()
-                .text_color(colors.text_secondary)
-                .child("Git discovery is running off the UI thread."),
-        )
+    state_panel(
+        "Opening repository",
+        &format!(
+            "Checking {} with Git. This does not block the window.",
+            path.display()
+        ),
+        colors.warning,
+        colors,
+    )
 }
 
 fn error_view(message: &str, colors: &ui_kit::ThemeColors) -> impl IntoElement {
+    state_panel(
+        "Unable to open repository",
+        &format!("{message} Choose a different folder with Command-O."),
+        colors.danger,
+        colors,
+    )
+}
+
+fn state_panel(
+    title: &str,
+    message: &str,
+    accent: gpui::Rgba,
+    colors: &ui_kit::ThemeColors,
+) -> gpui::AnyElement {
     div()
+        .p_4()
         .flex()
         .flex_col()
-        .gap_3()
-        .text_color(colors.danger)
-        .child(div().text_xl().child("Repository not opened"))
-        .child(message.to_owned())
-        .child("Choose a different folder with Command-O.")
+        .gap_2()
+        .bg(colors.panel_background)
+        .border_1()
+        .border_color(colors.border)
+        .child(div().text_color(accent).child(title.to_owned()))
+        .child(
+            div()
+                .text_color(colors.text_secondary)
+                .child(message.to_owned()),
+        )
+        .into_any_element()
+}
+
+fn empty_status_message(title: &str) -> &'static str {
+    match title {
+        "Staged" => "No staged files. Select a change, then stage it when it is ready to commit.",
+        "Unstaged" => "No unstaged changes.",
+        "Untracked" => "No untracked files.",
+        "Conflicts" => "No merge conflicts.",
+        _ => "Nothing here yet.",
+    }
+}
+
+fn activity_color(activity: &str, colors: &ui_kit::ThemeColors) -> gpui::Rgba {
+    if activity.contains("failed") || activity.contains("Unable") {
+        colors.danger
+    } else if activity.contains("complete") || activity.contains("refreshed") {
+        colors.success
+    } else if activity.ends_with('…') || activity.contains("in progress") {
+        colors.warning
+    } else {
+        colors.text_secondary
+    }
+}
+
+fn activity_label(activity: &str) -> String {
+    if activity.ends_with('…') || activity.contains("in progress") {
+        format!("● {activity}")
+    } else {
+        activity.to_owned()
+    }
 }
 
 fn resize_width(width: f32) -> f32 {
     (width + 20.0).clamp(MINIMUM_PANE_WIDTH, MAXIMUM_PANE_WIDTH)
 }
 
+fn shows_inspector(viewport_width: f32, sidebar_width: f32, inspector_width: f32) -> bool {
+    viewport_width >= sidebar_width + inspector_width + MINIMUM_CONTENT_WIDTH
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         GitPath, GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, ShellState,
-        eligible_trash_path, keymap, network_failure_message, resize_width, window_options,
+        WorktreeRepository, activity_label, crash_report_body, crash_report_path,
+        eligible_trash_path, empty_status_message, git_failure_message, keymap,
+        network_failure_message, repository_is_available, resize_width, shows_inspector,
+        window_options, window_title,
     };
     use app_core::RecentRepositoryStore;
     use gpui::{AppContext, Keystroke, TestAppContext};
@@ -3056,6 +4202,12 @@ mod tests {
     }
 
     #[test]
+    fn inspector_yields_space_to_the_main_content_in_narrow_windows() {
+        assert!(!shows_inspector(800.0, 220.0, 320.0));
+        assert!(shows_inspector(900.0, 220.0, 320.0));
+    }
+
+    #[test]
     fn error_shell_is_explicit() {
         assert!(matches!(
             ShellState::Error("message".into()),
@@ -3077,6 +4229,58 @@ mod tests {
             !network_failure_message("Fetching", "https://token@example.test/repo")
                 .contains("token@example.test")
         );
+    }
+
+    #[test]
+    fn workspace_empty_and_loading_copy_explain_the_next_state() {
+        assert!(empty_status_message("Staged").contains("stage"));
+        assert_eq!(empty_status_message("Conflicts"), "No merge conflicts.");
+        assert_eq!(
+            activity_label("Fetching origin in progress. You can cancel it."),
+            "● Fetching origin in progress. You can cancel it."
+        );
+    }
+
+    #[test]
+    fn window_titles_distinguish_welcome_loading_and_drafts() {
+        assert_eq!(window_title(&ShellState::Welcome, false), "Gitronimo");
+        assert_eq!(
+            window_title(&ShellState::Loading("/tmp/example".into()), false),
+            "Opening repository — Gitronimo"
+        );
+        assert_eq!(keymap::bindings().len(), 12);
+    }
+
+    #[test]
+    fn repository_loss_and_index_locks_have_safe_recovery_messages() {
+        let root =
+            std::env::temp_dir().join(format!("gitronimo-availability-{}", std::process::id()));
+        let git_dir = root.join(".git");
+        std::fs::create_dir_all(&git_dir).expect("fixture repository should exist");
+        let repository = WorktreeRepository {
+            worktree_root: root.clone(),
+            git_dir,
+        };
+        assert!(repository_is_available(&repository));
+        std::fs::remove_dir_all(&root).expect("fixture repository should remove");
+        assert!(!repository_is_available(&repository));
+        let message = git_failure_message("Stage selected", "fatal: .git/index.lock: File exists");
+        assert!(message.contains("no Git process"));
+        assert!(message.contains("before removing it manually"));
+    }
+
+    #[test]
+    fn crash_reports_are_local_and_do_not_include_panic_payloads() {
+        let directory = std::env::temp_dir();
+        assert!(
+            crash_report_path(&directory, 42)
+                .file_name()
+                .is_some_and(|name| name == "gitronimo-crash-42.txt")
+        );
+        let report = crash_report_body(42, Some(std::panic::Location::caller()));
+        assert!(report.contains("Timestamp: 42"));
+        assert!(report.contains("never uploaded automatically"));
+        assert!(!report.contains("secret panic payload"));
     }
 
     #[test]
