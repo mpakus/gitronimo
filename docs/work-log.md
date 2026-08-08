@@ -1,5 +1,32 @@
 # Implementation work log
 
+## 2026-08-08 — Phase 7 / line-level partial staging and discard
+
+**Intent:** let the user stage only the added lines they select in an unstaged diff, and discard selected lines back toward the index, each through Git's own patch validation. This implements the `Stage selected lines` and `Discard selected lines` checklist items and reuses the single-hunk patch foundation.
+
+**Design:** the diff model gains old/new line numbers so a pure partial-patch builder can recompute unified-diff hunk headers for a subset of change lines. Both commands re-run `git diff` for the selected path at apply time, keep every context line as an anchor, and emit only the selected additions/removals with a recomputed `@@` header. Staging pipes the patch to `git apply --cached --recount --whitespace=nowarn`; discarding pipes the same patch to `git apply --reverse --recount --whitespace=nowarn` (restoring the index content for those lines in the working tree). Discard requires a confirmation that names the path and line count.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `DiffLine` gains `old_line`/`new_line`; add `parse_hunk_header` and `selected_lines_patch` with fixture tests.
+- `crates/git_cli/src/lib.rs` — record line numbers in `parse_unified_diff`; add `stage_lines`/`discard_lines` commands, the `patch_for_selected_lines` helper, a `PatchLinesUnavailable` error, and temporary-repository integration tests.
+- `apps/desktop/src/app_state.rs` — `selected_diff_lines: Vec<(usize, usize)>` and `pending_line_discard: Option<(GitPath, Vec<(usize, usize)>)>` state.
+- `apps/desktop/src/main.rs` — `toggle_diff_line`, `stage_selected_diff_lines`, `request_line_discard`, `cancel_line_discard`, `confirm_line_discard`; clear line selection whenever the loaded diff is replaced.
+- `apps/desktop/src/views/diff_viewer.rs` — render per-line rows with line-number gutters, click-to-toggle selection on change lines, and Stage/Discard selected-lines controls.
+- `apps/desktop/src/views/working_copy.rs` — `line_discard_confirmation_view` shown in the repository view.
+- `apps/desktop/src/views/components.rs` — any shared line-row styling helper.
+- `PLAN.md`, `docs/work-log.md` — mark `Stage selected lines` and `Discard selected lines` complete.
+
+**Acceptance checks:**
+- Line numbers are recorded on parsed diff lines and survive fixture parsing (context, addition, removal).
+- `selected_lines_patch` keeps only selected change lines plus all context, recomputes `@@` headers, and returns `None` when nothing is selected.
+- A temporary repository proves staging one selected added line leaves the other added line unstaged, and that the staged/unstaged diffs split exactly.
+- A temporary repository proves discarding one selected added line removes it from the working tree while leaving the other change; discarding a selected removal restores the deleted line.
+- Invalid selection indices fail without touching the index or working tree.
+- The diff view offers line selection only for an unstaged, complete, text diff; discard requires confirmation and cancellation is a no-op.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass. `git_domain` adds `parse_hunk_header`, `selected_lines_patch` (which splits a hunk at unselected change lines, drops change-less segments, and recomputes each `@@` header from the walked positions), and 8 tests including a two-segment split fixture. `git_cli` records `old_line`/`new_line` on parsed diff lines, adds `stage_lines` and `discard_lines` over `git apply --cached` / `--reverse --recount`, and its 27 tests prove partial staging, partial discard, removal restore, out-of-range rejection, and line-number recording against temporary repositories. The desktop app gains the `selected_diff_lines`/`pending_line_discard` state, five mutations (`toggle_diff_line`, `stage_selected_diff_lines`, `request_line_discard`, `cancel_line_discard`, `confirm_line_discard`), a per-line diff view with old/new gutters and click-to-select change rows, a confirmation card, and two GPUI tests for selection toggling and discard cancellation; the workspace suite totals 55 tests.
+
 ## 2026-08-08 — UI decomposition / split main.rs into views/
 
 **Intent:** Split the 4,300-line `apps/desktop/src/main.rs` into a small `main.rs` plus a `views/` module tree mirroring the window structure that `PLAN.md §7` and §8.1 already propose (toolbar · sidebar · working copy · history · diff · inspector · welcome · shared components). This is a pure structural refactor: no behavior change, no new dependencies, no GPUI logic moved into or out of domain crates.

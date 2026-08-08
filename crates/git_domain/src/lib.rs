@@ -127,6 +127,8 @@ pub struct DiffLine {
     pub kind: DiffLineKind,
     pub content: Vec<u8>,
     pub missing_final_newline: bool,
+    pub old_line: Option<u64>,
+    pub new_line: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +136,157 @@ pub enum DiffLineKind {
     Context,
     Addition,
     Removal,
+}
+
+/// Parses a unified-diff hunk header, returning the old and new starting line
+/// numbers. Both counts may be omitted, and a trailing `@@` section label is ignored.
+///
+/// ```text
+/// @@ -old_start[,old_count] +new_start[,new_count] @@
+/// ```
+#[must_use]
+pub fn parse_hunk_header(header: &[u8]) -> Option<(u64, u64)> {
+    let rest = header.strip_prefix(b"@@ -")?;
+    let (old_start, rest) = parse_u64_at(rest)?;
+    let rest = if rest.first() == Some(&b',') {
+        let (_, rest) = parse_u64_at(&rest[1..])?;
+        rest
+    } else {
+        rest
+    };
+    let rest = rest.strip_prefix(b" +")?;
+    let (new_start, rest) = parse_u64_at(rest)?;
+    let rest = if rest.first() == Some(&b',') {
+        let (_, rest) = parse_u64_at(&rest[1..])?;
+        rest
+    } else {
+        rest
+    };
+    rest.starts_with(b" @@").then_some((old_start, new_start))
+}
+
+fn parse_u64_at(bytes: &[u8]) -> Option<(u64, &[u8])> {
+    let digits = bytes
+        .iter()
+        .take_while(|byte| byte.is_ascii_digit())
+        .count();
+    if digits == 0 {
+        return None;
+    }
+    let value = std::str::from_utf8(&bytes[..digits]).ok()?.parse().ok()?;
+    Some((value, &bytes[digits..]))
+}
+
+/// Builds a unified-diff patch containing only the selected change lines of one
+/// hunk, keeping the context lines that anchor them and recomputing each `@@`
+/// header. The hunk is split at unselected change lines so a sub-hunk never
+/// spans a change that is left out (which would shift later positions).
+///
+/// `selected` holds indexes into `hunk.lines`; context lines in the selection are
+/// ignored because they carry no change to apply. Returns `None` when no change
+/// line is selected or the hunk header cannot be parsed.
+#[must_use]
+pub fn selected_lines_patch(hunk: &DiffHunk, selected: &[usize]) -> Option<Vec<u8>> {
+    let (old_start, new_start) = parse_hunk_header(&hunk.header)?;
+    let mut old = old_start;
+    let mut new = new_start;
+    let mut segments: Vec<Segment> = Vec::new();
+    let mut current = Segment::default();
+
+    for (index, line) in hunk.lines.iter().enumerate() {
+        let is_selected = selected.contains(&index);
+        match line.kind {
+            DiffLineKind::Context => {
+                if current.lines.is_empty() {
+                    current.old_start = old;
+                    current.new_start = new;
+                }
+                current.lines.push(line);
+                current.old_count += 1;
+                current.new_count += 1;
+                old += 1;
+                new += 1;
+            }
+            DiffLineKind::Addition => {
+                if is_selected {
+                    if current.lines.is_empty() {
+                        current.old_start = old;
+                        current.new_start = new;
+                    }
+                    current.lines.push(line);
+                    current.new_count += 1;
+                    current.saw_change = true;
+                } else {
+                    push_segment(&mut segments, &mut current);
+                }
+                new += 1;
+            }
+            DiffLineKind::Removal => {
+                if is_selected {
+                    if current.lines.is_empty() {
+                        current.old_start = old;
+                        current.new_start = new;
+                    }
+                    current.lines.push(line);
+                    current.old_count += 1;
+                    current.saw_change = true;
+                } else {
+                    push_segment(&mut segments, &mut current);
+                }
+                old += 1;
+            }
+        }
+    }
+    push_segment(&mut segments, &mut current);
+
+    if segments.is_empty() {
+        return None;
+    }
+    let mut patch = Vec::new();
+    for segment in segments {
+        patch.extend_from_slice(
+            format!(
+                "@@ -{},{} +{},{} @@\n",
+                segment.old_start, segment.old_count, segment.new_start, segment.new_count
+            )
+            .as_bytes(),
+        );
+        for line in segment.lines {
+            let prefix = match line.kind {
+                DiffLineKind::Context => b' ',
+                DiffLineKind::Addition => b'+',
+                DiffLineKind::Removal => b'-',
+            };
+            patch.push(prefix);
+            patch.extend_from_slice(&line.content);
+            patch.push(b'\n');
+            if line.missing_final_newline {
+                patch.extend_from_slice(b"\\ No newline at end of file\n");
+            }
+        }
+    }
+    Some(patch)
+}
+
+#[derive(Default)]
+struct Segment<'a> {
+    old_start: u64,
+    new_start: u64,
+    old_count: u64,
+    new_count: u64,
+    lines: Vec<&'a DiffLine>,
+    saw_change: bool,
+}
+
+fn push_segment<'a>(segments: &mut Vec<Segment<'a>>, current: &mut Segment<'a>) {
+    if current.saw_change {
+        segments.push(std::mem::take(current));
+    } else {
+        current.lines.clear();
+        current.old_count = 0;
+        current.new_count = 0;
+    }
+    current.saw_change = false;
 }
 
 /// A bounded request for commit history.
@@ -258,7 +411,111 @@ pub fn layout_history_graph(commits: &[HistoryCommit], state: &mut GraphState) -
 
 #[cfg(test)]
 mod tests {
-    use super::{CommitIdentity, GraphState, HistoryCommit, layout_history_graph};
+    use super::{
+        CommitIdentity, DiffHunk, DiffLine, DiffLineKind, GraphState, HistoryCommit,
+        layout_history_graph, parse_hunk_header, selected_lines_patch,
+    };
+
+    fn diff_line(kind: DiffLineKind, content: &str) -> DiffLine {
+        DiffLine {
+            kind,
+            content: content.as_bytes().to_vec(),
+            missing_final_newline: false,
+            old_line: None,
+            new_line: None,
+        }
+    }
+
+    #[test]
+    fn hunk_headers_parse_with_and_without_counts_and_labels() {
+        assert_eq!(parse_hunk_header(b"@@ -1,3 +1,4 @@"), Some((1, 1)));
+        assert_eq!(parse_hunk_header(b"@@ -1 +1 @@"), Some((1, 1)));
+        assert_eq!(parse_hunk_header(b"@@ -9,2 +7,4 @@ fn run()"), Some((9, 7)));
+        assert_eq!(parse_hunk_header(b"@@ -0,0 +1,2 @@"), Some((0, 1)));
+        assert_eq!(parse_hunk_header(b"plain text"), None);
+        assert_eq!(parse_hunk_header(b"@@ -a +1 @@"), None);
+    }
+
+    fn sample_hunk() -> DiffHunk {
+        DiffHunk {
+            header: b"@@ -1,5 +1,5 @@".to_vec(),
+            lines: vec![
+                diff_line(DiffLineKind::Context, "alpha"),
+                diff_line(DiffLineKind::Removal, "beta"),
+                diff_line(DiffLineKind::Addition, "beta changed"),
+                diff_line(DiffLineKind::Context, "gamma"),
+                diff_line(DiffLineKind::Context, "delta"),
+            ],
+        }
+    }
+
+    #[test]
+    fn partial_patch_keeps_context_and_recomputes_the_header() {
+        let hunk = sample_hunk();
+        let patch = selected_lines_patch(&hunk, &[2]).expect("addition should be selected");
+        let text = String::from_utf8(patch).expect("patch should be UTF-8");
+        assert_eq!(text, "@@ -3,2 +2,3 @@\n+beta changed\n gamma\n delta\n");
+    }
+
+    #[test]
+    fn partial_patch_splits_at_unselected_changes() {
+        let hunk = DiffHunk {
+            header: b"@@ -1,5 +1,6 @@".to_vec(),
+            lines: vec![
+                diff_line(DiffLineKind::Context, "one"),
+                diff_line(DiffLineKind::Addition, "ADD A"),
+                diff_line(DiffLineKind::Addition, "SKIP B"),
+                diff_line(DiffLineKind::Addition, "ADD C"),
+                diff_line(DiffLineKind::Context, "two"),
+            ],
+        };
+        let patch =
+            selected_lines_patch(&hunk, &[1, 3]).expect("selected additions should be kept");
+        let text = String::from_utf8(patch).expect("patch should be UTF-8");
+        assert_eq!(
+            text,
+            "@@ -1,1 +1,2 @@\n one\n+ADD A\n@@ -2,1 +4,2 @@\n+ADD C\n two\n"
+        );
+    }
+
+    #[test]
+    fn partial_patch_can_select_a_removal() {
+        let hunk = sample_hunk();
+        let patch = selected_lines_patch(&hunk, &[1]).expect("removal should be selected");
+        let text = String::from_utf8(patch).expect("patch should be UTF-8");
+        assert_eq!(text, "@@ -1,2 +1,1 @@\n alpha\n-beta\n");
+    }
+
+    #[test]
+    fn partial_patch_can_select_multiple_change_lines() {
+        let hunk = sample_hunk();
+        let patch = selected_lines_patch(&hunk, &[1, 2]).expect("changes should be selected");
+        let text = String::from_utf8(patch).expect("patch should be UTF-8");
+        assert_eq!(
+            text,
+            "@@ -1,4 +1,4 @@\n alpha\n-beta\n+beta changed\n gamma\n delta\n"
+        );
+    }
+
+    #[test]
+    fn partial_patch_ignores_context_selection_and_empty_selection() {
+        let hunk = sample_hunk();
+        assert!(selected_lines_patch(&hunk, &[0]).is_none());
+        assert!(selected_lines_patch(&hunk, &[]).is_none());
+        assert!(selected_lines_patch(&hunk, &[0, 3, 4]).is_none());
+    }
+
+    #[test]
+    fn partial_patch_preserves_final_newline_markers() {
+        let mut hunk = sample_hunk();
+        hunk.lines[4].missing_final_newline = true;
+        let patch = selected_lines_patch(&hunk, &[2]).expect("addition should be selected");
+        let text = String::from_utf8(patch).expect("patch should be UTF-8");
+        assert!(
+            text.ends_with(" delta\n\\ No newline at end of file\n"),
+            "final newline marker should survive, got {text:?}"
+        );
+    }
 
     fn commit(oid: &str, parents: &[&str]) -> HistoryCommit {
         let identity = CommitIdentity {

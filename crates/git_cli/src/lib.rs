@@ -18,7 +18,8 @@ use git_domain::{
     BranchStatus, CommitIdentity, DiffFile, DiffHunk, DiffLine, DiffLineKind, FileStatus, GitPath,
     HeadStatus, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest, NamedRef,
     RefDecoration, RefSnapshot, Remote, RenameKind, RepositoryLocation, StatusEntry,
-    SubmoduleState, UnifiedDiff, WorktreeRepository, WorktreeStatus,
+    SubmoduleState, UnifiedDiff, WorktreeRepository, WorktreeStatus, parse_hunk_header,
+    selected_lines_patch,
 };
 
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
@@ -685,6 +686,82 @@ impl GitExecutable {
             .ok_or_else(|| command_error(&output))
     }
 
+    /// Stages only the selected change lines of an unstaged diff using Git's own
+    /// patch validation. `selection` holds `(hunk_index, line_index)` pairs into
+    /// the freshly requested diff for `path`.
+    ///
+    /// # Errors
+    /// Returns an error when a selection is out of range or Git rejects the patch.
+    pub fn stage_lines(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        selection: &[(usize, usize)],
+    ) -> Result<(), GitStatusError> {
+        let diff = self.unstaged_diff_for(path, repository)?;
+        let parsed = parse_unified_diff(&diff.stdout);
+        let lines_patch = patch_for_selected_lines(&diff.stdout, &parsed, selection)?;
+        let output = self.run_with_stdin(
+            &repository.worktree_root,
+            ["apply", "--cached", "--recount", "--whitespace=nowarn"],
+            &lines_patch,
+        )?;
+        output
+            .status
+            .success()
+            .then_some(())
+            .ok_or_else(|| command_error(&output))
+    }
+
+    /// Discards only the selected change lines from the working tree, restoring the
+    /// index content for those lines. `selection` holds `(hunk_index, line_index)`
+    /// pairs into the freshly requested unstaged diff for `path`.
+    ///
+    /// # Errors
+    /// Returns an error when a selection is out of range or Git rejects the patch.
+    pub fn discard_lines(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        selection: &[(usize, usize)],
+    ) -> Result<(), GitStatusError> {
+        let diff = self.unstaged_diff_for(path, repository)?;
+        let parsed = parse_unified_diff(&diff.stdout);
+        let lines_patch = patch_for_selected_lines(&diff.stdout, &parsed, selection)?;
+        let output = self.run_with_stdin(
+            &repository.worktree_root,
+            ["apply", "--reverse", "--recount", "--whitespace=nowarn"],
+            &lines_patch,
+        )?;
+        output
+            .status
+            .success()
+            .then_some(())
+            .ok_or_else(|| command_error(&output))
+    }
+
+    fn unstaged_diff_for(
+        &self,
+        path: &GitPath,
+        repository: &WorktreeRepository,
+    ) -> Result<Output, GitStatusError> {
+        let diff = self.run(
+            &repository.worktree_root,
+            [
+                OsString::from("diff"),
+                OsString::from("--no-ext-diff"),
+                OsString::from("--no-textconv"),
+                OsString::from("--binary"),
+                OsString::from("--"),
+                OsString::from_vec(path.0.clone()),
+            ],
+        )?;
+        if !diff.status.success() {
+            return Err(command_error(&diff));
+        }
+        Ok(diff)
+    }
+
     /// Stashes tracked changes, optionally including untracked files.
     ///
     /// # Errors
@@ -1073,6 +1150,7 @@ pub enum GitStatusError {
     UnsafePath,
     UnsupportedDiscard,
     PatchHunkUnavailable,
+    PatchLinesUnavailable,
     ParseHistory,
     ParseHistoryFields,
     ParseHistoryTimestamp,
@@ -1263,6 +1341,8 @@ fn parse_divergence(value: &[u8], sign: u8) -> Result<u32, PorcelainParseError> 
 pub fn parse_unified_diff(bytes: &[u8]) -> UnifiedDiff {
     let mut diff = UnifiedDiff::default();
     let mut current: Option<DiffFile> = None;
+    let mut hunk_old_line = 1u64;
+    let mut hunk_new_line = 1u64;
 
     for line in bytes.split_inclusive(|byte| *byte == b'\n') {
         let line = line.strip_suffix(b"\n").unwrap_or(line);
@@ -1296,6 +1376,7 @@ pub fn parse_unified_diff(bytes: &[u8]) -> UnifiedDiff {
         } else if line.starts_with(b"Binary files ") || line == b"GIT binary patch" {
             file.binary = true;
         } else if line.starts_with(b"@@ ") {
+            (hunk_old_line, hunk_new_line) = parse_hunk_header(line).unwrap_or((1, 1));
             file.hunks.push(DiffHunk {
                 header: line.to_vec(),
                 lines: Vec::new(),
@@ -1313,10 +1394,30 @@ pub fn parse_unified_diff(bytes: &[u8]) -> UnifiedDiff {
                 [b'-', content @ ..] => (DiffLineKind::Removal, content),
                 _ => continue,
             };
+            let mut old_line = None;
+            let mut new_line = None;
+            match kind {
+                DiffLineKind::Context => {
+                    old_line = Some(hunk_old_line);
+                    new_line = Some(hunk_new_line);
+                    hunk_old_line += 1;
+                    hunk_new_line += 1;
+                }
+                DiffLineKind::Addition => {
+                    new_line = Some(hunk_new_line);
+                    hunk_new_line += 1;
+                }
+                DiffLineKind::Removal => {
+                    old_line = Some(hunk_old_line);
+                    hunk_old_line += 1;
+                }
+            }
             hunk.lines.push(DiffLine {
                 kind,
                 content: content.to_vec(),
                 missing_final_newline: false,
+                old_line,
+                new_line,
             });
         }
     }
@@ -1352,6 +1453,64 @@ fn single_hunk_patch(diff: &[u8], wanted_index: usize) -> Option<Vec<u8>> {
         }
     }
     in_wanted_hunk.then_some(patch)
+}
+
+/// Builds a single-file patch containing only the selected change lines of the
+/// parsed diff, keeping the raw file header and recomputing each affected hunk.
+fn patch_for_selected_lines(
+    raw_diff: &[u8],
+    parsed: &UnifiedDiff,
+    selection: &[(usize, usize)],
+) -> Result<Vec<u8>, GitStatusError> {
+    let file = parsed
+        .files
+        .first()
+        .ok_or(GitStatusError::PatchLinesUnavailable)?;
+    let mut header = Vec::new();
+    for line in raw_diff.split_inclusive(|byte| *byte == b'\n') {
+        if line.starts_with(b"@@ ") {
+            break;
+        }
+        header.extend_from_slice(line);
+    }
+
+    let mut selected_hunks = Vec::new();
+    for &(hunk_index, line_index) in selection {
+        let hunk = file
+            .hunks
+            .get(hunk_index)
+            .ok_or(GitStatusError::PatchLinesUnavailable)?;
+        let line = hunk
+            .lines
+            .get(line_index)
+            .ok_or(GitStatusError::PatchLinesUnavailable)?;
+        if line.kind == DiffLineKind::Context {
+            return Err(GitStatusError::PatchLinesUnavailable);
+        }
+        selected_hunks.push(hunk_index);
+    }
+    selected_hunks.sort_unstable();
+    selected_hunks.dedup();
+
+    let mut patch = Vec::new();
+    for hunk_index in selected_hunks {
+        let hunk = &file.hunks[hunk_index];
+        let mut selected = Vec::new();
+        for &(selected_hunk, line_index) in selection {
+            if selected_hunk == hunk_index {
+                selected.push(line_index);
+            }
+        }
+        patch.extend_from_slice(
+            &selected_lines_patch(hunk, &selected).ok_or(GitStatusError::PatchLinesUnavailable)?,
+        );
+    }
+    if patch.is_empty() {
+        return Err(GitStatusError::PatchLinesUnavailable);
+    }
+    let mut full_patch = header;
+    full_patch.extend_from_slice(&patch);
+    Ok(full_patch)
 }
 
 fn strip_diff_prefix(path: &[u8]) -> Option<&[u8]> {
@@ -1766,6 +1925,35 @@ Binary files a/image.png and b/image.png differ\n",
     }
 
     #[test]
+    fn records_old_and_new_line_numbers_for_diff_lines() {
+        let diff = parse_unified_diff(
+            b"diff --git a/fixture.txt b/fixture.txt\n\
+index 1111111..2222222 100644\n\
+--- a/fixture.txt\n\
++++ b/fixture.txt\n\
+@@ -2,4 +3,5 @@ second\n\
+\x20third\n\
+-removed\n\
++added\n\
+\x20fifth\n\
+\x20sixth\n",
+        );
+        let hunk = &diff.files[0].hunks[0];
+        assert_eq!(hunk.lines[0].kind, DiffLineKind::Context);
+        assert_eq!(hunk.lines[0].old_line, Some(2));
+        assert_eq!(hunk.lines[0].new_line, Some(3));
+        assert_eq!(hunk.lines[1].kind, DiffLineKind::Removal);
+        assert_eq!(hunk.lines[1].old_line, Some(3));
+        assert_eq!(hunk.lines[1].new_line, None);
+        assert_eq!(hunk.lines[2].kind, DiffLineKind::Addition);
+        assert_eq!(hunk.lines[2].old_line, None);
+        assert_eq!(hunk.lines[2].new_line, Some(4));
+        assert_eq!(hunk.lines[3].kind, DiffLineKind::Context);
+        assert_eq!(hunk.lines[3].old_line, Some(4));
+        assert_eq!(hunk.lines[3].new_line, Some(5));
+    }
+
+    #[test]
     fn parses_detached_head_and_counts_stashes() {
         let repository = Repository::new();
         repository.commit("initial");
@@ -1934,6 +2122,174 @@ Binary files a/image.png and b/image.png differ\n",
         let unstaged_text = diff_text(&unstaged.diff);
         assert!(unstaged_text.contains("first changed"));
         assert!(unstaged_text.contains("tenth changed"));
+    }
+
+    fn selection_for(diff: &git_domain::UnifiedDiff, content: &[u8]) -> (usize, usize) {
+        diff.files[0]
+            .hunks
+            .iter()
+            .enumerate()
+            .find_map(|(hunk_index, hunk)| {
+                hunk.lines
+                    .iter()
+                    .position(|line| line.kind != DiffLineKind::Context && line.content == content)
+                    .map(|line_index| (hunk_index, line_index))
+            })
+            .expect("fixture should expose the requested change line")
+    }
+
+    #[test]
+    fn stages_only_the_requested_unstaged_lines() {
+        let repository = Repository::new();
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\niota\nkappa\n",
+        )
+        .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "initial"]);
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "alpha\nbeta\nINSERT ONE\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\nINSERT TWO\niota\nkappa\n",
+        )
+        .expect("fixture should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let path = GitPath(b"fixture.txt".to_vec());
+        let unstaged = repository
+            .git
+            .file_diff(&worktree, &path, false)
+            .expect("unstaged diff should load");
+        let selection = selection_for(&unstaged.diff, b"INSERT ONE");
+
+        repository
+            .git
+            .stage_lines(&worktree, &path, std::slice::from_ref(&selection))
+            .expect("selected addition should stage");
+
+        let staged = repository
+            .git
+            .file_diff(&worktree, &path, true)
+            .expect("staged diff should load");
+        let unstaged = repository
+            .git
+            .file_diff(&worktree, &path, false)
+            .expect("unstaged diff should load");
+        let staged_text = diff_text(&staged.diff);
+        let unstaged_text = diff_text(&unstaged.diff);
+        assert!(staged_text.contains("INSERT ONE"));
+        assert!(!staged_text.contains("INSERT TWO"));
+        assert!(!unstaged_text.contains("INSERT ONE"));
+        assert!(unstaged_text.contains("INSERT TWO"));
+    }
+
+    #[test]
+    fn discards_only_the_requested_unstaged_lines() {
+        let repository = Repository::new();
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\niota\nkappa\n",
+        )
+        .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "initial"]);
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "alpha\nbeta\nINSERT ONE\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\nINSERT TWO\niota\nkappa\n",
+        )
+        .expect("fixture should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let path = GitPath(b"fixture.txt".to_vec());
+        let unstaged = repository
+            .git
+            .file_diff(&worktree, &path, false)
+            .expect("unstaged diff should load");
+        let selection = selection_for(&unstaged.diff, b"INSERT ONE");
+
+        repository
+            .git
+            .discard_lines(&worktree, &path, std::slice::from_ref(&selection))
+            .expect("selected addition should discard");
+
+        let remaining =
+            fs::read_to_string(repository.path.join("fixture.txt")).expect("fixture should read");
+        assert!(!remaining.contains("INSERT ONE"));
+        assert!(remaining.contains("INSERT TWO"));
+        assert!(remaining.starts_with("alpha\nbeta\n"));
+        assert!(remaining.ends_with("iota\nkappa\n"));
+    }
+
+    #[test]
+    fn discarding_a_selected_removal_restores_the_deleted_line() {
+        let repository = Repository::new();
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "alpha\nbeta\ngamma\ndelta\nepsilon\n",
+        )
+        .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "initial"]);
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "alpha\nbeta\ndelta\nepsilon\n",
+        )
+        .expect("fixture should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let path = GitPath(b"fixture.txt".to_vec());
+        let unstaged = repository
+            .git
+            .file_diff(&worktree, &path, false)
+            .expect("unstaged diff should load");
+        let selection = selection_for(&unstaged.diff, b"gamma");
+
+        repository
+            .git
+            .discard_lines(&worktree, &path, std::slice::from_ref(&selection))
+            .expect("selected removal should discard");
+
+        let remaining =
+            fs::read_to_string(repository.path.join("fixture.txt")).expect("fixture should read");
+        assert_eq!(remaining, "alpha\nbeta\ngamma\ndelta\nepsilon\n");
+    }
+
+    #[test]
+    fn line_selection_rejects_out_of_range_indexes() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("fixture.txt"), "alpha\nbeta\n").expect("fixture write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "initial"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nbeta\nADDED\n")
+            .expect("fixture should write");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let path = GitPath(b"fixture.txt".to_vec());
+        let error = repository
+            .git
+            .stage_lines(&worktree, &path, &[(0, 99)])
+            .expect_err("out-of-range selection should fail");
+        assert!(matches!(error, GitStatusError::PatchLinesUnavailable));
     }
 
     #[test]

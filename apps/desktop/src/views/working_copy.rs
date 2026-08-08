@@ -174,6 +174,7 @@ impl GitronimoApp {
             }))
             .child(self.mutation_controls(colors, cx))
             .children(self.discard_confirmation_view(colors, cx))
+            .children(self.line_discard_confirmation_view(colors, cx))
             .children(self.stash_pop_confirmation_view(colors, cx))
             .children(self.stash_drop_confirmation_view(colors, cx))
             .children(self.branch_delete_confirmation_view(colors, cx))
@@ -399,6 +400,38 @@ impl GitronimoApp {
                 .child(file_action_button("Confirm discard", colors, cx, |app, cx| {
                     app.confirm_discard(cx);
                 }))
+                .into_any_element()
+        })
+    }
+
+    pub(crate) fn line_discard_confirmation_view(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        self.pending_line_discard.as_ref().map(|(path, selection)| {
+            div()
+                .p_2()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child(format!(
+                    "Discard {} selected line(s) in {}? Their working-copy changes are restored from the index.",
+                    selection.len(),
+                    String::from_utf8_lossy(&path.0)
+                ))
+                .child(file_action_button(
+                    "Confirm line discard",
+                    colors,
+                    cx,
+                    GitronimoApp::confirm_line_discard,
+                ))
+                .child(file_action_button(
+                    "Cancel line discard",
+                    colors,
+                    cx,
+                    GitronimoApp::cancel_line_discard,
+                ))
                 .into_any_element()
         })
     }

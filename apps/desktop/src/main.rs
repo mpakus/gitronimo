@@ -215,6 +215,8 @@ impl GitronimoApp {
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
+            selected_diff_lines: Vec::new(),
+            pending_line_discard: None,
             pending_discard: None,
             pending_stash_action: None,
             pending_branch_delete: None,
@@ -311,6 +313,8 @@ impl GitronimoApp {
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
+            selected_diff_lines: Vec::new(),
+            pending_line_discard: None,
             pending_discard: None,
             pending_stash_action: None,
             pending_branch_delete: None,
@@ -416,6 +420,8 @@ impl GitronimoApp {
                 self.context_path = None;
                 self.loaded_diff = None;
                 self.selected_diff = None;
+                self.selected_diff_lines.clear();
+                self.pending_line_discard = None;
                 self.pending_discard = None;
                 self.pending_branch_delete = None;
                 self.force_push_state = ForcePushState::Idle;
@@ -1551,6 +1557,8 @@ impl GitronimoApp {
             let _ = this.update(cx, |app, cx| {
                 if let Ok(diff) = diff {
                     app.loaded_diff = Some(diff);
+                    app.selected_diff_lines.clear();
+                    app.pending_line_discard = None;
                 }
                 cx.notify();
             });
@@ -1735,6 +1743,154 @@ impl GitronimoApp {
             return;
         };
         self.run_mutation(Mutation::DiscardSelected, paths, cx);
+    }
+
+    fn toggle_diff_line(&mut self, hunk_index: usize, line_index: usize, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let can_edit_lines = self
+            .loaded_diff
+            .as_ref()
+            .and_then(|loaded| loaded.diff.files.first())
+            .and_then(|file| file.hunks.get(hunk_index))
+            .and_then(|hunk| hunk.lines.get(line_index))
+            .is_some_and(|line| {
+                matches!(
+                    line.kind,
+                    git_domain::DiffLineKind::Addition | git_domain::DiffLineKind::Removal
+                )
+            })
+            && matches!(self.selected_diff, Some((_, false)));
+        if !can_edit_lines {
+            return;
+        }
+        if let Some(index) = self
+            .selected_diff_lines
+            .iter()
+            .position(|&(hunk, line)| hunk == hunk_index && line == line_index)
+        {
+            self.selected_diff_lines.remove(index);
+        } else {
+            self.selected_diff_lines.push((hunk_index, line_index));
+        }
+        cx.notify();
+    }
+
+    fn stage_selected_diff_lines(&mut self, cx: &mut Context<Self>) {
+        if self.mutation_in_flight || self.selected_diff_lines.is_empty() {
+            return;
+        }
+        let Some((path, false)) = self.selected_diff.clone() else {
+            return;
+        };
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let worker_path = path.clone();
+        let selection = self.selected_diff_lines.clone();
+        self.mutation_in_flight = true;
+        self.activity = "Staging selected lines…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .stage_lines(&worker_repository, &worker_path, &selection)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = "Selected lines staged.".into();
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_diff(
+                            repository,
+                            path,
+                            false,
+                            git_cli::MAX_DISPLAY_DIFF_BYTES,
+                            cx,
+                        );
+                    }
+                    Err(error) => {
+                        app.activity = git_failure_message("Stage selected lines", &error);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn request_line_discard(&mut self, cx: &mut Context<Self>) {
+        if self.mutation_in_flight || self.selected_diff_lines.is_empty() {
+            return;
+        }
+        let Some((path, false)) = self.selected_diff.clone() else {
+            return;
+        };
+        self.pending_line_discard = Some((path, self.selected_diff_lines.clone()));
+        self.activity = "Review the line discard consequences, then confirm.".into();
+        cx.notify();
+    }
+
+    fn cancel_line_discard(&mut self, cx: &mut Context<Self>) {
+        self.pending_line_discard = None;
+        self.activity = "Line discard cancelled.".into();
+        cx.notify();
+    }
+
+    fn confirm_line_discard(&mut self, cx: &mut Context<Self>) {
+        let Some((path, selection)) = self.pending_line_discard.take() else {
+            return;
+        };
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let worker_path = path.clone();
+        self.mutation_in_flight = true;
+        self.activity = "Discarding selected lines…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .discard_lines(&worker_repository, &worker_path, &selection)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                app.selected_diff_lines.clear();
+                match result {
+                    Ok(()) => {
+                        app.activity = "Selected lines discarded.".into();
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_diff(
+                            repository,
+                            path,
+                            false,
+                            git_cli::MAX_DISPLAY_DIFF_BYTES,
+                            cx,
+                        );
+                    }
+                    Err(error) => {
+                        app.activity = git_failure_message("Discard selected lines", &error);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn create_stash(&mut self, include_untracked: bool, cx: &mut Context<Self>) {
@@ -2011,6 +2167,7 @@ impl GitronimoApp {
                         app.selected_paths.clear();
                         app.loaded_diff = None;
                         app.selected_diff = None;
+                        app.selected_diff_lines.clear();
                         app.activity = format!("{} complete.", operation.label());
                         app.load_working_copy(repository, cx);
                     }

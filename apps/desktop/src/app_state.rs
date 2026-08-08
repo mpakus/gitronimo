@@ -147,6 +147,8 @@ pub(crate) struct GitronimoApp {
     pub context_path: Option<GitPath>,
     pub loaded_diff: Option<LoadedDiff>,
     pub selected_diff: Option<(GitPath, bool)>,
+    pub selected_diff_lines: Vec<(usize, usize)>,
+    pub pending_line_discard: Option<(GitPath, Vec<(usize, usize)>)>,
     pub pending_discard: Option<Vec<GitPath>>,
     pub pending_stash_action: Option<StashAction>,
     pub pending_branch_delete: Option<String>,

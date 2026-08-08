@@ -166,3 +166,106 @@ fn trash_refuses_unsafe_paths_symlinks_and_nested_repositories() {
     assert!(eligible_trash_path(&root, &GitPath(b"nested".to_vec())).is_err());
     std::fs::remove_dir_all(root).expect("temporary root should be removed");
 }
+
+fn diff_line(kind: git_domain::DiffLineKind) -> git_domain::DiffLine {
+    git_domain::DiffLine {
+        kind,
+        content: b"line".to_vec(),
+        missing_final_newline: false,
+        old_line: None,
+        new_line: None,
+    }
+}
+
+fn sample_loaded_diff() -> git_cli::LoadedDiff {
+    git_cli::LoadedDiff {
+        diff: git_domain::UnifiedDiff {
+            files: vec![git_domain::DiffFile {
+                hunks: vec![git_domain::DiffHunk {
+                    header: b"@@ -1,3 +1,3 @@".to_vec(),
+                    lines: vec![
+                        diff_line(git_domain::DiffLineKind::Context),
+                        diff_line(git_domain::DiffLineKind::Addition),
+                        diff_line(git_domain::DiffLineKind::Removal),
+                    ],
+                }],
+                ..Default::default()
+            }],
+        },
+        truncated: false,
+    }
+}
+
+#[gpui::test]
+fn line_selection_toggles_only_change_lines_on_unstaged_text_diffs(cx: &mut TestAppContext) {
+    let window = cx.update(|cx| {
+        cx.open_window(window_options(cx, None), |window, cx| {
+            cx.new(|cx| {
+                GitronimoApp::welcome(
+                    Vec::new(),
+                    RecentRepositoryStore::new(
+                        std::env::temp_dir().join("gitronimo-test-recents.json"),
+                    ),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .expect("the test window should open")
+    });
+    window
+        .update(cx, |app, _, cx| {
+            app.loaded_diff = Some(sample_loaded_diff());
+            app.selected_diff = Some((GitPath(b"notes.txt".to_vec()), false));
+            app.toggle_diff_line(0, 0, cx);
+            assert!(
+                app.selected_diff_lines.is_empty(),
+                "context lines are not selectable"
+            );
+            app.toggle_diff_line(0, 1, cx);
+            assert_eq!(app.selected_diff_lines, vec![(0, 1)]);
+            app.toggle_diff_line(0, 2, cx);
+            assert_eq!(app.selected_diff_lines, vec![(0, 1), (0, 2)]);
+            app.toggle_diff_line(0, 1, cx);
+            assert_eq!(app.selected_diff_lines, vec![(0, 2)]);
+            app.selected_diff = Some((GitPath(b"notes.txt".to_vec()), true));
+            app.toggle_diff_line(0, 2, cx);
+            assert_eq!(
+                app.selected_diff_lines,
+                vec![(0, 2)],
+                "staged diffs refuse line selection"
+            );
+        })
+        .expect("window should remain open");
+}
+
+#[gpui::test]
+fn line_discard_requires_confirmation_and_cancellation_is_a_no_op(cx: &mut TestAppContext) {
+    let window = cx.update(|cx| {
+        cx.open_window(window_options(cx, None), |window, cx| {
+            cx.new(|cx| {
+                GitronimoApp::welcome(
+                    Vec::new(),
+                    RecentRepositoryStore::new(
+                        std::env::temp_dir().join("gitronimo-test-recents.json"),
+                    ),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .expect("the test window should open")
+    });
+    window
+        .update(cx, |app, _, cx| {
+            app.loaded_diff = Some(sample_loaded_diff());
+            app.selected_diff = Some((GitPath(b"notes.txt".to_vec()), false));
+            app.selected_diff_lines = vec![(0, 1)];
+            app.request_line_discard(cx);
+            assert!(app.pending_line_discard.is_some());
+            app.cancel_line_discard(cx);
+            assert!(app.pending_line_discard.is_none());
+            assert_eq!(app.selected_diff_lines, vec![(0, 1)]);
+        })
+        .expect("window should remain open");
+}
