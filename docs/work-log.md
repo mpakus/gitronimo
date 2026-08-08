@@ -1,5 +1,43 @@
 # Implementation work log
 
+## 2026-08-08 — UI decomposition / split main.rs into views/
+
+**Intent:** Split the 4,300-line `apps/desktop/src/main.rs` into a small `main.rs` plus a `views/` module tree mirroring the window structure that `PLAN.md §7` and §8.1 already propose (toolbar · sidebar · working copy · history · diff · inspector · welcome · shared components). This is a pure structural refactor: no behavior change, no new dependencies, no GPUI logic moved into or out of domain crates.
+
+**Why:** The current single-file desktop shell is the single largest blocker for the subsequent Tower-quality UI work-streams (inline commit composer, real toolbar, sidebar tree with icons, polished history, in-app dialogs, command palette). Each of those improvements needs a stable home in its own module; today every change collides in `main.rs`. `PLAN.md §7` already prescribes `apps/desktop/src/views/` and §7.1 lists `ui_kit` primitives that this split enables per-module work on.
+
+**Files (planned):**
+- `apps/desktop/src/main.rs` — trimmed to entry point, constants, panic/geometry helpers, window options, top-level dispatch, and the `impl GitronimoApp` block containing state-mutating methods (construction, observer setup, refresh, navigation, history load/selection, branch operations, network commands, mutation, stash, commit, diff hunk, watcher, context menu, prompts).
+- `apps/desktop/src/app_state.rs` — `GitronimoApp` struct, `ShellState`, `ThemeMode`, `RepositoryView`, `LastAction`, `NetworkOperation`, `ForcePushState`, `ShortcutReferenceState`, `RefContext`, `RefKind`, `OpenedRepository`, `Mutation`, `StashAction`, free helpers (`network_failure_message`, `git_failure_message`, `repository_is_available`, `repository_unavailable_message`, `appearance_from_window`, `window_title`, `resize_width`, `shows_inspector`, `discard_selected`, `eligible_trash_path`).
+- `apps/desktop/src/views/mod.rs` — module declarations + private re-exports.
+- `apps/desktop/src/views/workspace.rs` — root `Render for GitronimoApp` layout plus shortcut reference and activity bar.
+- `apps/desktop/src/views/toolbar.rs` — `workspace_toolbar`.
+- `apps/desktop/src/views/sidebar.rs` — `sidebar_view`, `ref_rows`, `welcome_sidebar_view`, `status_badge`.
+- `apps/desktop/src/views/working_copy.rs` — `repository_view`, `status_groups`, `status_group_view`, `context_menu_view`, `mutation_controls`, `navigation_controls`, `network_cancel_button`, `discard/stash/branch-delete/force-with-lease` confirmation views, `ref_context_menu_view`.
+- `apps/desktop/src/views/history.rs` — `history_view`, `history_row_count`.
+- `apps/desktop/src/views/commit_composer.rs` — `commit_composer_view`.
+- `apps/desktop/src/views/diff_viewer.rs` — `diff_view`.
+- `apps/desktop/src/views/welcome.rs` — `welcome_view`, `welcome_feature_card`.
+- `apps/desktop/src/views/components.rs` — `StatusGroups`, `workspace_section`, `file_action_button`, `window_action_button`, `primary_window_action_button`, `mutation_button`, `validated_action_button`, `ActionTooltip` + its `Render`, `state_panel`, `loading_view`, `error_view`, `status_path`, `status_label`, `empty_status_message`, `activity_color`, `activity_label`.
+- `apps/desktop/src/tests.rs` — extracted unit tests (kept in desktop crate; tests touch private items via `pub(crate)` re-exports).
+- `docs/work-log.md`, `PLAN.md` — this entry plus checkbox mapping if applicable.
+
+**Visibility change:** types and helpers that tests reach (e.g. `ShellState` variants, `GitronimoApp::welcome`, `window_options`, `resize_width`, `shows_inspector`, `window_title`, `network_failure_message`, `git_failure_message`, `crash_report_path`, `crash_report_body`, `eligible_trash_path`, `repository_is_available`, `keymap`, `GitPath`, `WorktreeRepository`, `LastAction`) become `pub(crate)` so the `tests` module can import them. No public API changes; binary crate only.
+
+**Acceptance checks:**
+- `cargo fmt --all -- --check` clean.
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` clean.
+- `cargo test --workspace --all-features` passes with the same set of tests as before.
+- `cargo deny check` passes.
+- The `.app` builds (`cargo build --release`) without new warnings.
+- No dependency added; `Cargo.toml` untouched.
+- No GPUI import added to `git_domain`, `app_core`, `git_cli`, `test_support`, or `ui_kit`.
+- No Git/domain logic moved into render modules: render modules continue to call existing `GitronimoApp` methods; no new Git CLI calls introduced inside `views/`.
+- After the split, `main.rs` retains the entry point and every state-mutating `GitronimoApp` method, while all window render code moved into `views/` (toolbar · sidebar · working copy · history · diff · commit composer · welcome · shared components).
+- All existing tests retain their assertions (welcome window opens, keybindings dispatch, pane widths safe, error shell explicit, network failures actionable without echoing remote output, empty/loading copy explains next state, window titles distinguish welcome/loading/drafts, repository loss safe recovery, crash reports local, trash refuses unsafe paths).
+
+**Verification:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (41 tests), and `cargo deny check` all pass. `main.rs` dropped from 4,355 to ~2,023 lines; the render code moved to `apps/desktop/src/views/` and shared shell types to `app_state.rs`. Only Cargo's upstream future-incompatibility notice for `block`/`proc-macro-error2` remains, as before the refactor.
+
 ## 2026-08-07 — Phase 6 / context-sensitive action validation
 
 **Intent:** make branch and remote controls visibly unavailable when the current repository state cannot support them.
