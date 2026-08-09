@@ -29,7 +29,7 @@ use app_core::{
 use git_cli::{CommitRequest, GitExecutable, GitStatusError, read_stderr_limited};
 use git_domain::{
     GitPath, GraphState, HeadStatus, HistoryPage, HistoryReference, HistoryRequest, RefSnapshot,
-    WorktreeRepository, layout_history_graph,
+    ReflogRequest, WorktreeRepository, layout_history_graph,
 };
 use gpui::{
     App, Application, Bounds, ClipboardItem, Context, ExternalPaths, ListAlignment, ListState,
@@ -255,6 +255,9 @@ impl GitronimoApp {
             history_diff: None,
             history_selection_token: 0,
             history_load_token: 0,
+            reflog: Vec::new(),
+            reflog_load_token: 0,
+            selected_reflog: None,
             mutation_in_flight: false,
             network_operation: None,
             watcher: None,
@@ -355,6 +358,9 @@ impl GitronimoApp {
             history_diff: None,
             history_selection_token: 0,
             history_load_token: 0,
+            reflog: Vec::new(),
+            reflog_load_token: 0,
+            selected_reflog: None,
             mutation_in_flight: false,
             network_operation: None,
             watcher: None,
@@ -520,7 +526,7 @@ impl GitronimoApp {
             let command = cx
                 .background_spawn(async {
                     Command::new("osascript")
-                        .args(["-e", "choose from list {\"Refresh working copy\", \"Show history\", \"Show working copy\", \"Show keyboard shortcuts\"} with title \"Gitronimo commands\" with prompt \"Choose an action\""])
+                        .args(["-e", "choose from list {\"Refresh working copy\", \"Show history\", \"Show reflog\", \"Show working copy\", \"Show keyboard shortcuts\"} with title \"Gitronimo commands\" with prompt \"Choose an action\""])
                         .output()
                         .ok()
                         .filter(|output| output.status.success())
@@ -542,6 +548,11 @@ impl GitronimoApp {
                         app.show_history(repository.clone(), cx);
                     }
                 }
+                Some("Show reflog") => {
+                    if let ShellState::Repository(repository) = &app.state {
+                        app.show_reflog(repository.clone(), cx);
+                    }
+                }
                 Some("Show working copy") => {
                     app.navigate_to(RepositoryView::WorkingCopy, cx);
                 }
@@ -556,11 +567,19 @@ impl GitronimoApp {
     }
 
     fn history_previous(&mut self, _: &HistoryPrevious, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_history_selection(-1, cx);
+        if self.repository_view == RepositoryView::Reflog {
+            self.move_reflog_selection(-1, cx);
+        } else {
+            self.move_history_selection(-1, cx);
+        }
     }
 
     fn history_next(&mut self, _: &HistoryNext, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_history_selection(1, cx);
+        if self.repository_view == RepositoryView::Reflog {
+            self.move_reflog_selection(1, cx);
+        } else {
+            self.move_history_selection(1, cx);
+        }
     }
 
     fn navigate_back(&mut self, _: &NavigateBack, _: &mut Window, cx: &mut Context<Self>) {
@@ -671,6 +690,138 @@ impl GitronimoApp {
                 cx.notify();
             });
         }).detach();
+    }
+
+    fn show_reflog(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        self.navigate_to(RepositoryView::Reflog, cx);
+        if self.reflog.is_empty() {
+            self.load_reflog(repository, cx);
+        }
+        cx.notify();
+    }
+
+    fn load_reflog(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        let load_token = self.reflog_load_token;
+        self.activity = "Loading reflog…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let entries = git
+                        .reflog(
+                            &repository,
+                            &ReflogRequest {
+                                reference: None,
+                                limit: 200,
+                            },
+                        )
+                        .map_err(|error| format!("{error:?}"))?;
+                    Ok::<_, String>(entries)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root)
+                    || app.reflog_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok(entries) => {
+                        app.reflog = entries;
+                        app.selected_reflog = None;
+                        app.activity = format!("Loaded {} reflog entries.", app.reflog.len());
+                    }
+                    Err(error) => app.activity = format!("Reflog load failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn move_reflog_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.repository_view != RepositoryView::Reflog || self.reflog.is_empty() {
+            return;
+        }
+        let current = self.selected_reflog.unwrap_or(0);
+        let index = if delta.is_negative() {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current
+                .saturating_add(delta.unsigned_abs())
+                .min(self.reflog.len() - 1)
+        };
+        self.selected_reflog = Some(index);
+        cx.notify();
+    }
+
+    fn prompt_restore_branch_from_reflog(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let name = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Restore lost branch from reflog\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|name| !name.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(name) = name {
+                    app.restore_branch_from_reflog(name, cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn restore_branch_from_reflog(&mut self, branch: String, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let Some(selected) = self.selected_reflog else {
+            return;
+        };
+        let Some(entry) = self.reflog.get(selected) else {
+            return;
+        };
+        let oid = String::from_utf8_lossy(&entry.new_oid).into_owned();
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let worker_branch = branch.clone();
+        self.mutation_in_flight = true;
+        self.activity = format!("Restoring branch {branch}…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    git.restore_branch_from_reflog(&worker_repository, &worker_branch, &oid)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = format!("Restored branch {branch}.");
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_refs(repository, cx);
+                    }
+                    Err(error) => {
+                        app.activity =
+                            git_failure_message(&format!("Restore branch {branch}"), &error);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn toggle_appearance(

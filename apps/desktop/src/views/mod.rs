@@ -8,6 +8,7 @@ pub(crate) mod commit_composer;
 pub(crate) mod components;
 pub(crate) mod diff_viewer;
 pub(crate) mod history;
+pub(crate) mod reflog;
 pub(crate) mod sidebar;
 pub(crate) mod toolbar;
 pub(crate) mod welcome;

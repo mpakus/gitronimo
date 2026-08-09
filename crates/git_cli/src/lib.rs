@@ -17,9 +17,9 @@ use app_core::{RepositoryDiscoverer, RepositoryOpenError};
 use git_domain::{
     BranchStatus, CommitIdentity, DiffFile, DiffHunk, DiffLine, DiffLineKind, FileStatus, GitPath,
     HeadStatus, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest, InProgressOperation,
-    NamedRef, RecoveredBranchTip, RecoveryRecord, RefDecoration, RefSnapshot, Remote, RenameKind,
-    RepositoryLocation, StatusEntry, SubmoduleState, UnifiedDiff, WorktreeRepository,
-    WorktreeStatus, parse_hunk_header, selected_lines_patch,
+    NamedRef, RecoveredBranchTip, RecoveryRecord, RefDecoration, RefSnapshot, ReflogEntry,
+    ReflogRequest, Remote, RenameKind, RepositoryLocation, StatusEntry, SubmoduleState,
+    UnifiedDiff, WorktreeRepository, WorktreeStatus, parse_hunk_header, selected_lines_patch,
 };
 
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
@@ -540,6 +540,55 @@ impl GitExecutable {
             repository,
             ["branch", if force { "-D" } else { "--delete" }, branch],
         )
+    }
+
+    /// Reads a bounded reflog, newest entry first, from HEAD or the requested
+    /// ref. The `old_oid` of each entry is derived from the following entry's
+    /// `new_oid`, which git's reflog chain makes exact.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects the reflog read.
+    pub fn reflog(
+        &self,
+        repository: &WorktreeRepository,
+        request: &ReflogRequest,
+    ) -> Result<Vec<ReflogEntry>, GitStatusError> {
+        let limit = request.limit.clamp(1, 500);
+        let mut args = vec![
+            OsString::from("reflog"),
+            OsString::from(format!("--max-count={limit}")),
+            OsString::from("--format=%H%x00%gD%x00%gs%x00%cn%x00%ce%x00%ct%x1e"),
+        ];
+        if let Some(reference) = &request.reference {
+            args.push(OsString::from(reference));
+        }
+        let output = self.run(&repository.worktree_root, args)?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        let mut entries = parse_reflog_records(&output.stdout)?;
+        for index in 0..entries.len() {
+            if let Some(next) = entries.get(index + 1) {
+                entries[index].old_oid = Some(next.new_oid.clone());
+            }
+        }
+        Ok(entries)
+    }
+
+    /// Recreates a local branch pointing at the reflog oid selected by the
+    /// user, restoring a branch whose commits are otherwise only reachable
+    /// through the reflog. Git validates the branch name; an existing branch
+    /// is rejected.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the branch name is invalid or already exists.
+    pub fn restore_branch_from_reflog(
+        &self,
+        repository: &WorktreeRepository,
+        branch: &str,
+        oid: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["branch", branch, oid])
     }
 
     /// Fetches all configured refs from a selected remote.
@@ -1406,6 +1455,7 @@ pub enum GitStatusError {
     ParseHistory,
     ParseHistoryFields,
     ParseHistoryTimestamp,
+    ParseReflog,
 }
 
 fn command_error(output: &Output) -> GitStatusError {
@@ -1831,6 +1881,47 @@ pub fn parse_commit_records(bytes: &[u8]) -> Result<Vec<CommitRecord>, &'static 
         .collect()
 }
 
+fn parse_reflog_records(bytes: &[u8]) -> Result<Vec<ReflogEntry>, GitStatusError> {
+    bytes
+        .split(|byte| *byte == 0x1e)
+        .filter(|record| record.iter().any(|byte| !byte.is_ascii_whitespace()))
+        .map(|record| {
+            let record = record.strip_prefix(b"\n").unwrap_or(record);
+            let fields = record.split(|byte| *byte == 0).collect::<Vec<_>>();
+            if fields.len() < 6 {
+                return Err(GitStatusError::ParseReflog);
+            }
+            let new_oid = fields[0].to_vec();
+            let selector = std::str::from_utf8(fields[1])
+                .map_err(|_| GitStatusError::ParseReflog)?
+                .trim()
+                .to_owned();
+            let subject = std::str::from_utf8(fields[2])
+                .map_err(|_| GitStatusError::ParseReflog)?
+                .trim()
+                .to_owned();
+            let name = fields[3].to_vec();
+            let email = fields[4].to_vec();
+            let timestamp = std::str::from_utf8(fields[5])
+                .map_err(|_| GitStatusError::ParseReflog)?
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| GitStatusError::ParseReflog)?;
+            Ok(ReflogEntry {
+                old_oid: None,
+                new_oid,
+                selector,
+                identity: CommitIdentity {
+                    name,
+                    email,
+                    timestamp,
+                },
+                subject,
+            })
+        })
+        .collect()
+}
+
 fn parse_history_records(bytes: &[u8]) -> Result<Vec<HistoryCommit>, GitStatusError> {
     bytes
         .split(|byte| *byte == 0x1e)
@@ -1974,7 +2065,7 @@ mod tests {
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
         DiffLineKind, GitPath, HeadStatus, HistoryReference, HistoryRequest, InProgressOperation,
-        RepositoryLocation, StatusEntry, SubmoduleState,
+        ReflogRequest, RepositoryLocation, StatusEntry, SubmoduleState,
     };
 
     static NEXT_REPOSITORY: AtomicUsize = AtomicUsize::new(0);
@@ -3607,6 +3698,102 @@ index 1111111..2222222 100644\n\
             snapshot.old_head.as_deref(),
             Some(head_before.as_slice()),
             "the recorded snapshot must retain the true pre-operation refs"
+        );
+    }
+
+    #[test]
+    fn reflog_reads_newest_first_with_chained_old_oids_and_restores_a_deleted_branch() {
+        let repository = Repository::new();
+        repository.commit("base");
+        repository.success(["checkout", "-b", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "topic work\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "topic commit"]);
+        let topic_oid = String::from_utf8_lossy(
+            &repository
+                .git
+                .run(&repository.path, ["rev-parse", "HEAD"])
+                .expect("HEAD should resolve")
+                .stdout,
+        )
+        .trim()
+        .to_owned();
+        repository.success(["checkout", "main"]);
+        repository.success(["branch", "-D", "topic"]);
+
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let entries = repository
+            .git
+            .reflog(
+                &worktree,
+                &ReflogRequest {
+                    reference: None,
+                    limit: 100,
+                },
+            )
+            .expect("reflog should read");
+        assert!(
+            entries.len() >= 3,
+            "the reflog should cover the checkout, commit, and deletion history"
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.new_oid == topic_oid.as_bytes()),
+            "the deleted topic tip should appear in the HEAD reflog"
+        );
+        for pair in entries.windows(2) {
+            assert_eq!(
+                pair[0].old_oid.as_deref(),
+                Some(pair[1].new_oid.as_slice()),
+                "each entry should chain its old oid to the newer entry's oid"
+            );
+        }
+        assert!(
+            entries.iter().all(|entry| entry.identity.timestamp > 0),
+            "every entry should carry a parsed committer timestamp"
+        );
+        assert!(
+            entries.iter().all(|entry| !entry.selector.is_empty()),
+            "every entry should carry a selector"
+        );
+
+        repository
+            .git
+            .restore_branch_from_reflog(&worktree, "topic", &topic_oid)
+            .expect("deleted branch should restore at its reflog oid");
+        let restored = String::from_utf8_lossy(
+            &repository
+                .git
+                .run(&repository.path, ["rev-parse", "topic"])
+                .expect("restored branch should resolve")
+                .stdout,
+        )
+        .trim()
+        .to_owned();
+        assert_eq!(
+            restored, topic_oid,
+            "the restored branch should point at the original topic tip"
+        );
+
+        let conflict = repository
+            .git
+            .restore_branch_from_reflog(&worktree, "topic", &topic_oid)
+            .expect_err("restoring an existing branch should be refused");
+        let GitStatusError::CommandFailed(message) = conflict else {
+            panic!("restore should surface Git's refusal, got {conflict:?}");
+        };
+        assert!(
+            message.contains("exists"),
+            "Git should explain the refusal, got: {message}"
         );
     }
 

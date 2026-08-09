@@ -2,16 +2,18 @@
 //! imports (`TestAppContext`, `Keystroke`) do not leak into production modules.
 
 use app_core::RecentRepositoryStore;
-use git_domain::{GitPath, InProgressOperation, WorktreeRepository, WorktreeStatus};
+use git_domain::{
+    CommitIdentity, GitPath, InProgressOperation, ReflogEntry, WorktreeRepository, WorktreeStatus,
+};
 use gpui::{AppContext, Keystroke, TestAppContext};
 
 use super::crash_report_body;
 use super::crash_report_path;
 use super::window_options;
 use crate::app_state::{
-    GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, OperationAction, ShellState,
-    eligible_trash_path, git_failure_message, network_failure_message, repository_is_available,
-    resize_width, shows_inspector, window_title,
+    GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, OperationAction,
+    RepositoryView, ShellState, eligible_trash_path, git_failure_message, network_failure_message,
+    repository_is_available, resize_width, shows_inspector, window_title,
 };
 use crate::keymap;
 use crate::views::components::{activity_label, empty_status_message};
@@ -22,6 +24,51 @@ fn conflict_overview_names_the_count_and_the_next_step() {
     assert!(operation_conflict_overview(0).contains("No conflicted files"));
     assert!(operation_conflict_overview(3).contains("3 conflicted file(s)"));
     assert!(operation_conflict_overview(3).contains("Continue"));
+}
+
+#[gpui::test]
+fn reflog_selection_moves_and_clamps_within_loaded_entries(cx: &mut TestAppContext) {
+    let window = cx.update(|cx| {
+        cx.open_window(window_options(cx, None), |window, cx| {
+            cx.new(|cx| {
+                GitronimoApp::welcome(
+                    Vec::new(),
+                    RecentRepositoryStore::new(
+                        std::env::temp_dir().join("gitronimo-test-recents.json"),
+                    ),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .expect("the test window should open")
+    });
+    window
+        .update(cx, |app, _, cx| {
+            app.repository_view = RepositoryView::Reflog;
+            app.reflog = vec![reflog_entry(b"bbbb"), reflog_entry(b"aaaa")];
+            app.move_reflog_selection(1, cx);
+            assert_eq!(app.selected_reflog, Some(1));
+            app.move_reflog_selection(1, cx);
+            assert_eq!(
+                app.selected_reflog,
+                Some(1),
+                "selection should clamp at the newest entry"
+            );
+            app.move_reflog_selection(-3, cx);
+            assert_eq!(
+                app.selected_reflog,
+                Some(0),
+                "selection should clamp at the oldest entry"
+            );
+            app.move_reflog_selection(1, cx);
+            assert_eq!(
+                app.selected_reflog,
+                Some(1),
+                "selection should track the newest entry after clamping"
+            );
+        })
+        .expect("window should remain open");
 }
 
 #[gpui::test]
@@ -173,6 +220,20 @@ fn trash_refuses_unsafe_paths_symlinks_and_nested_repositories() {
     assert!(eligible_trash_path(&root, &GitPath(b"link".to_vec())).is_err());
     assert!(eligible_trash_path(&root, &GitPath(b"nested".to_vec())).is_err());
     std::fs::remove_dir_all(root).expect("temporary root should be removed");
+}
+
+fn reflog_entry(new_oid: &[u8]) -> ReflogEntry {
+    ReflogEntry {
+        old_oid: None,
+        new_oid: new_oid.to_vec(),
+        selector: "HEAD@{0}".into(),
+        identity: CommitIdentity {
+            name: b"Test".to_vec(),
+            email: b"test@example.test".to_vec(),
+            timestamp: 1,
+        },
+        subject: "test entry".into(),
+    }
 }
 
 fn diff_line(kind: git_domain::DiffLineKind) -> git_domain::DiffLine {

@@ -367,6 +367,29 @@ pub struct CommitIdentity {
     pub timestamp: i64,
 }
 
+/// A bounded request for a ref's reflog, newest entry first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReflogRequest {
+    /// The ref whose reflog to read; `None` reads HEAD's reflog.
+    pub reference: Option<String>,
+    pub limit: usize,
+}
+
+/// One entry in a ref's reflog, newest first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReflogEntry {
+    /// The oid the ref pointed at before this entry, when the reflog chain
+    /// provides one.
+    pub old_oid: Option<Vec<u8>>,
+    /// The oid the ref pointed at after this entry.
+    pub new_oid: Vec<u8>,
+    /// Git's selector for this entry, for example `HEAD@{2}`.
+    pub selector: String,
+    pub identity: CommitIdentity,
+    /// Git's reflog message, for example `commit: Fix the flaky test`.
+    pub subject: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RefDecoration {
     pub name: Vec<u8>,

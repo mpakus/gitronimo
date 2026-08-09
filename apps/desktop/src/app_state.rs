@@ -14,7 +14,7 @@ use std::{
 use git_cli::LoadedDiff;
 use git_domain::{
     GitPath, GraphRow, GraphState, HistoryCommit, HistoryReference, RefDecoration, RefSnapshot,
-    WorktreeRepository,
+    ReflogEntry, WorktreeRepository,
 };
 use gpui::{FocusHandle, ListState, WindowAppearance};
 use notify::RecommendedWatcher;
@@ -52,6 +52,7 @@ pub(crate) enum ThemeMode {
 pub(crate) enum RepositoryView {
     WorkingCopy,
     History,
+    Reflog,
 }
 
 pub(crate) struct NetworkOperation {
@@ -183,6 +184,9 @@ pub(crate) struct GitronimoApp {
     pub history_diff: Option<LoadedDiff>,
     pub history_selection_token: u64,
     pub history_load_token: u64,
+    pub reflog: Vec<ReflogEntry>,
+    pub reflog_load_token: u64,
+    pub selected_reflog: Option<usize>,
     pub mutation_in_flight: bool,
     pub network_operation: Option<Arc<Mutex<NetworkOperation>>>,
     pub watcher: Option<RecommendedWatcher>,

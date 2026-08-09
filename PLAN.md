@@ -2000,8 +2000,8 @@ Expand local Git capability without compromising repository safety.
 
 - [ ] File history.
 - [ ] Blame.
-- [ ] Reflog.
-- [ ] Restore lost branch from reflog.
+- [x] Reflog.
+- [x] Restore lost branch from reflog.
 - [ ] Compare refs.
 - [ ] Browse tree at commit.
 - [ ] Export file at revision.

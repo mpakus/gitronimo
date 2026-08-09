@@ -1,5 +1,28 @@
 # Implementation work log
 
+## 2026-08-09 — Phase 8 / reflog and restore lost branch
+
+**Intent:** implement the first self-contained Phase 8 unit: read a bounded HEAD reflog in the desktop and restore a deleted branch by recreating it at a reflog entry's commit. Covers the `Reflog` and `Restore lost branch from reflog` checklist items.
+
+**Design:** `git_domain` gains pure `ReflogRequest` (`reference: Option<String>`, `limit`) and `ReflogEntry` (`old_oid`, `new_oid`, `selector` like `HEAD@{2}`, `identity`, `subject`) types. `git_cli::reflog` shells out to `git reflog --max-count=N --format=%H%x00%gD%x00%gs%x00%cn%x00%ce%x00%ct%x1e` (NUL-separated fields, 0x1e-separated records, mirroring the history parser), parses records with a new `parse_reflog_records` helper, then derives each entry's `old_oid` from the following entry's `new_oid` — exact because git's reflog chain records the ref value before and after each action. `git_cli::restore_branch_from_reflog` recreates the branch with `git branch <name> <oid>`, letting Git validate the name and refuse an existing branch. The desktop adds a `RepositoryView::Reflog` view (`reflog` list state, `selected_reflog` selection, `show_reflog`/`load_reflog` background load with the same stale-load token guard as history), routes `up`/`down` selection there, exposes it via the command palette and a `reflog_view`, and restores a branch from the selected entry by prompting for a name (reusing the osascript dialog pattern) before running the typed mutation and refreshing refs. A relative-time helper renders entry age without a new dependency. Deleting a branch removes its own reflog, so recovery targets the commit recorded in HEAD's reflog while the branch was checked out.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `ReflogRequest`, `ReflogEntry`.
+- `crates/git_cli/src/lib.rs` — `reflog`, `restore_branch_from_reflog`, `parse_reflog_records`, `GitStatusError::ParseReflog`, and a temporary-repository integration test covering chained old-oids and restoring a deleted branch.
+- `apps/desktop/src/app_state.rs` — `RepositoryView::Reflog`, `reflog`, `reflog_load_token`, `selected_reflog`.
+- `apps/desktop/src/main.rs` — `show_reflog`, `load_reflog`, `move_reflog_selection`, `prompt_restore_branch_from_reflog`, `restore_branch_from_reflog`; reflog routing in the `up`/`down` handlers and command palette.
+- `apps/desktop/src/views/reflog.rs` — `reflog_view`; dispatch in `working_copy.rs`.
+- `apps/desktop/src/tests.rs` — a test that reflog selection moves and clamps within the loaded entries.
+- `PLAN.md`, `docs/work-log.md` — mark the `Reflog` and `Restore lost branch from reflog` items complete.
+
+**Acceptance checks:**
+- `reflog` returns newest-first entries with `%gD` selectors and committer timestamps, each chaining its `old_oid` to the newer entry's oid; a deleted branch's commit still appears in the HEAD reflog.
+- `restore_branch_from_reflog` recreates the branch at the selected oid and is refused by Git for an existing name.
+- The Reflog view loads in the background, `up`/`down` move and clamp the selection, and Restore prompts for a name, runs the mutation, and refreshes refs on success.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass after this unit. `git_domain` adds the pure reflog types; `git_cli::reflog` parses `%H/%gD/%gs/%cn/%ce/%ct` records (NUL fields, 0x1e records), derives exact `old_oid` chains, and `restore_branch_from_reflog` recreates a deleted branch at its reflog commit while Git refuses an existing name, all proven by a temporary-repository integration test; the desktop gains the `Reflog` view reachable from the command palette with `up`/`down` selection and a Restore action that prompts for a branch name before running the typed mutation. `Reflog` and `Restore lost branch from reflog` are now checked in PLAN.md. Workspace suite totals 73 tests (38 git_cli, 17 desktop, 8 app_core, 8 git_domain, 2 ui_kit), and the git_cli suite is stable across three repeated runs.
+
 ## 2026-08-08 — Phase 7 / recovery journal, conflict overview, and group completion
 
 **Intent:** close the two remaining Phase 7 gaps and mark the whole group complete: record pre-operation refs for every history-changing operation the app performs, surface a conflict overview in the operation banner, and flip every Phase 7 checkbox and exit criterion.

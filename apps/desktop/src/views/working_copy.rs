@@ -25,6 +25,9 @@ impl GitronimoApp {
         if self.repository_view == RepositoryView::History {
             return self.history_view(repository, colors, cx).into_any_element();
         }
+        if self.repository_view == RepositoryView::Reflog {
+            return self.reflog_view(repository, colors, cx).into_any_element();
+        }
         let groups = self.status_groups();
         let has_local_branches = !self.refs.local_branches.is_empty();
         let has_remotes = !self.refs.remotes.is_empty();
