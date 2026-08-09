@@ -3,13 +3,16 @@
 use std::{
     fmt, fs, io,
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-use git_domain::{RepositoryLocation, WorktreeRepository};
+use git_domain::{RecoveryRecord, RepositoryLocation, WorktreeRepository};
 use serde::{Deserialize, Serialize};
 
 const STORE_SCHEMA_VERSION: u32 = 1;
 const MAXIMUM_RECENT_REPOSITORIES: usize = 12;
+const RECOVERY_JOURNAL_SCHEMA_VERSION: u32 = 1;
+const MAXIMUM_RECOVERY_JOURNAL_ENTRIES: usize = 20;
 
 /// The infrastructure boundary for classifying a user-selected path.
 pub trait RepositoryDiscoverer {
@@ -232,6 +235,127 @@ impl fmt::Display for RecentRepositoryStoreError {
 
 impl std::error::Error for RecentRepositoryStoreError {}
 
+/// A versioned, bounded journal of pre-operation refs recorded before each
+/// history-changing Git operation. Kept without credentials; corrupt data is
+/// quarantined by the same policy as preferences.
+#[derive(Clone, Debug)]
+pub struct RecoveryJournalStore {
+    path: PathBuf,
+}
+
+/// One journaled recovery snapshot for a repository.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct RecoveryJournalEntry {
+    pub repository_path: PathBuf,
+    pub recorded_at_millis: u64,
+    pub record: RecoveryRecord,
+}
+
+impl RecoveryJournalStore {
+    #[must_use]
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    /// Prepends one entry and persists the bounded journal.
+    ///
+    /// # Errors
+    /// Returns an error for an unreadable store, a newer schema, or a failed write.
+    pub fn record_entry(
+        &self,
+        repository_path: PathBuf,
+        record: RecoveryRecord,
+    ) -> Result<(), RecoveryJournalStoreError> {
+        let mut document = self.load_document()?;
+        let mut entries = std::mem::take(&mut document.entries);
+        let recorded_at_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |duration| {
+                u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+            });
+        entries.insert(
+            0,
+            RecoveryJournalEntry {
+                repository_path,
+                recorded_at_millis,
+                record,
+            },
+        );
+        entries.truncate(MAXIMUM_RECOVERY_JOURNAL_ENTRIES);
+        document.entries.clone_from(&entries);
+        self.save(&document)
+    }
+
+    /// Returns the journal entries, newest first.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`RecentRepositoryStore::load`].
+    pub fn load(&self) -> Result<Vec<RecoveryJournalEntry>, RecoveryJournalStoreError> {
+        Ok(self.load_document()?.entries)
+    }
+
+    fn load_document(&self) -> Result<RecoveryJournalDocument, RecoveryJournalStoreError> {
+        match fs::read(&self.path) {
+            Ok(bytes) => {
+                let document = serde_json::from_slice::<RecoveryJournalDocument>(&bytes)
+                    .map_err(RecoveryJournalStoreError::InvalidJson)?;
+                if document.schema_version != RECOVERY_JOURNAL_SCHEMA_VERSION {
+                    return Err(RecoveryJournalStoreError::UnsupportedSchema(
+                        document.schema_version,
+                    ));
+                }
+                Ok(document)
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                Ok(RecoveryJournalDocument::default())
+            }
+            Err(error) => Err(RecoveryJournalStoreError::Io(error)),
+        }
+    }
+
+    fn save(&self, document: &RecoveryJournalDocument) -> Result<(), RecoveryJournalStoreError> {
+        let parent = self
+            .path
+            .parent()
+            .ok_or(RecoveryJournalStoreError::MissingParent)?;
+        fs::create_dir_all(parent).map_err(RecoveryJournalStoreError::Io)?;
+        let bytes =
+            serde_json::to_vec_pretty(document).map_err(RecoveryJournalStoreError::InvalidJson)?;
+        let temporary_path = self.path.with_extension("tmp");
+        fs::write(&temporary_path, bytes).map_err(RecoveryJournalStoreError::Io)?;
+        fs::rename(temporary_path, &self.path).map_err(RecoveryJournalStoreError::Io)
+    }
+}
+
+#[derive(Debug)]
+pub enum RecoveryJournalStoreError {
+    Io(io::Error),
+    InvalidJson(serde_json::Error),
+    MissingParent,
+    UnsupportedSchema(u32),
+}
+
+impl fmt::Display for RecoveryJournalStoreError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(_) => {
+                formatter.write_str("Gitronimo could not read its operation recovery journal.")
+            }
+            Self::InvalidJson(_) => {
+                formatter.write_str("Gitronimo's operation recovery journal is invalid.")
+            }
+            Self::MissingParent => {
+                formatter.write_str("Gitronimo's recovery journal location is invalid.")
+            }
+            Self::UnsupportedSchema(_) => formatter.write_str(
+                "Gitronimo's recovery journal was created by a newer version and was left unchanged.",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RecoveryJournalStoreError {}
+
 #[derive(Deserialize, Serialize)]
 struct RecentRepositoryDocument {
     schema_version: u32,
@@ -253,6 +377,22 @@ impl Default for RecentRepositoryDocument {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+struct RecoveryJournalDocument {
+    schema_version: u32,
+    #[serde(default)]
+    entries: Vec<RecoveryJournalEntry>,
+}
+
+impl Default for RecoveryJournalDocument {
+    fn default() -> Self {
+        Self {
+            schema_version: RECOVERY_JOURNAL_SCHEMA_VERSION,
+            entries: Vec::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -260,7 +400,10 @@ mod tests {
         sync::atomic::{AtomicUsize, Ordering},
     };
 
-    use super::{RecentRepositoryStore, RecentRepositoryStoreError, WindowGeometry};
+    use super::{
+        RecentRepositoryStore, RecentRepositoryStoreError, RecoveryJournalStore, WindowGeometry,
+    };
+    use git_domain::{GitPath, RecoveredBranchTip, RecoveryRecord};
 
     static NEXT_STORE: AtomicUsize = AtomicUsize::new(0);
 
@@ -381,6 +524,101 @@ mod tests {
         assert_eq!(
             store.load_window_geometry().expect("geometry should load"),
             Some(geometry)
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    fn temporary_journal() -> (std::path::PathBuf, RecoveryJournalStore) {
+        let directory = std::env::temp_dir().join(format!(
+            "gitronimo-journal-{}-{}",
+            std::process::id(),
+            NEXT_STORE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        let path = directory.join("recovery-journal.json");
+        (directory, RecoveryJournalStore::new(path))
+    }
+
+    fn recovery_record(prefix: &str) -> RecoveryRecord {
+        RecoveryRecord {
+            old_head: Some(format!("{prefix}head").into_bytes()),
+            head_name: Some(GitPath(format!("{prefix}name").into_bytes())),
+            branch_tips: vec![RecoveredBranchTip {
+                name: GitPath(format!("{prefix}ref").into_bytes()),
+                oid: format!("{prefix}oid").into_bytes(),
+            }],
+        }
+    }
+
+    #[test]
+    fn recovery_journal_persists_entries_newest_first() {
+        let (directory, store) = temporary_journal();
+        let repository = directory.join("repository");
+
+        store
+            .record_entry(repository.clone(), recovery_record("one-"))
+            .expect("first entry should save");
+        store
+            .record_entry(repository.clone(), recovery_record("two-"))
+            .expect("second entry should save");
+
+        let entries = store.load().expect("journal should reload");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            entries[0].record.old_head.as_deref(),
+            Some(b"two-head".as_slice())
+        );
+        assert_eq!(
+            entries[0].repository_path, repository,
+            "entries should retain their repository"
+        );
+        assert_eq!(
+            entries[1].record.old_head.as_deref(),
+            Some(b"one-head".as_slice())
+        );
+        assert!(
+            entries[0].recorded_at_millis >= entries[1].recorded_at_millis,
+            "newest entry should be first"
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn recovery_journal_is_bounded_to_twenty_entries() {
+        let (directory, store) = temporary_journal();
+        let repository = directory.join("repository");
+
+        for index in 0..25 {
+            store
+                .record_entry(repository.clone(), recovery_record(&format!("{index}-")))
+                .expect("entry should save");
+        }
+
+        let entries = store.load().expect("journal should reload");
+        assert_eq!(entries.len(), 20);
+        assert_eq!(
+            entries.first().unwrap().record.old_head.as_deref(),
+            Some(b"24-head".as_slice()),
+            "newest entries should be retained"
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn newer_recovery_journal_schema_is_rejected_without_overwriting() {
+        let (directory, store) = temporary_journal();
+        let store_path = directory.join("recovery-journal.json");
+        fs::create_dir_all(&directory).expect("store directory should create");
+        let newer = br#"{"schema_version":2,"entries":[]}"#;
+        fs::write(&store_path, newer).expect("newer journal should write");
+
+        assert!(matches!(
+            store.record_entry(directory.join("repository"), recovery_record("x-")),
+            Err(super::RecoveryJournalStoreError::UnsupportedSchema(2))
+        ));
+        assert_eq!(
+            fs::read(&store_path).expect("newer journal should remain"),
+            newer
         );
         let _ = fs::remove_dir_all(directory);
     }

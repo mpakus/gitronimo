@@ -3,10 +3,11 @@
 use gpui::{AnyElement, ClickEvent, MouseButton, div, prelude::*};
 use ui_kit::ThemeColors;
 
-use git_domain::{StatusEntry, WorktreeRepository};
+use git_domain::{InProgressOperation, StatusEntry, WorktreeRepository};
 
 use crate::app_state::{
-    ForcePushState, GitronimoApp, Mutation, RefContext, RepositoryView, StashAction,
+    ForcePushState, GitronimoApp, Mutation, OperationAction, RefContext, RepositoryView,
+    StashAction,
 };
 use crate::views::components::{
     empty_status_message, file_action_button, mutation_button, state_panel, status_label,
@@ -61,6 +62,8 @@ impl GitronimoApp {
                     })),
             )
             .children(self.navigation_controls(colors, cx))
+            .children(self.operation_banner_view(colors, cx))
+            .children(self.operation_confirmation_view(colors, cx))
             .child(workspace_section(
                 "Branch",
                 div()
@@ -383,6 +386,82 @@ impl GitronimoApp {
         )
     }
 
+    pub(crate) fn operation_banner_view(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        let operation = self.working_copy.as_ref()?.operation.clone();
+        (operation != InProgressOperation::None).then(|| {
+            let (title, detail) = operation_description(&operation);
+            let conflict_count = self.status_groups().conflicts.len();
+            let overview = operation_conflict_overview(conflict_count);
+            div()
+                .p_4()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .bg(colors.panel_background)
+                .border_1()
+                .border_color(colors.warning)
+                .child(div().text_color(colors.warning).child(title))
+                .child(div().text_color(colors.text_secondary).child(detail))
+                .child(div().text_color(colors.text_secondary).child(overview))
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(file_action_button(
+                            "Abort operation",
+                            colors,
+                            cx,
+                            GitronimoApp::request_operation_abort,
+                        ))
+                        .child(file_action_button(
+                            "Continue operation",
+                            colors,
+                            cx,
+                            GitronimoApp::request_operation_continue,
+                        )),
+                )
+                .into_any_element()
+        })
+    }
+
+    pub(crate) fn operation_confirmation_view(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        self.pending_operation_action.map(|action| {
+            let (confirm_label, cancel_label, message) = match action {
+                OperationAction::Abort => (
+                    "Confirm abort",
+                    "Cancel abort",
+                    "Abort this operation? Its conflict work is discarded and the repository returns to the operation start state.",
+                ),
+                OperationAction::Continue => (
+                    "Confirm continue",
+                    "Cancel continue",
+                    "Continue this operation? The staged conflict resolution is committed and the operation finishes.",
+                ),
+            };
+            div()
+                .p_2()
+                .bg(colors.raised_background)
+                .border_1()
+                .border_color(colors.border)
+                .child(message.to_owned())
+                .child(file_action_button(confirm_label, colors, cx, |app, cx| {
+                    app.confirm_operation_action(cx);
+                }))
+                .child(file_action_button(cancel_label, colors, cx, |app, cx| {
+                    app.cancel_operation_action(cx);
+                }))
+                .into_any_element()
+        })
+    }
+
     pub(crate) fn discard_confirmation_view(
         &self,
         colors: &ThemeColors,
@@ -697,4 +776,53 @@ impl GitronimoApp {
             )
             .child(rows)
     }
+}
+
+/// The conflict-overview line shown inside the operation banner.
+pub(crate) fn operation_conflict_overview(conflict_count: usize) -> String {
+    if conflict_count > 0 {
+        format!(
+            "{conflict_count} conflicted file(s) below — resolve each, stage it, then Continue."
+        )
+    } else {
+        "No conflicted files — stage your changes, then Continue.".into()
+    }
+}
+
+fn operation_description(operation: &InProgressOperation) -> (String, String) {
+    match operation {
+        InProgressOperation::Merge { oid } => (
+            "Merge in progress".into(),
+            format!(
+                "Target {} — resolve conflicts, stage the resolved files, then Continue or Abort.",
+                short_oid(oid.as_deref())
+            ),
+        ),
+        InProgressOperation::CherryPick { oid } => (
+            "Cherry-pick in progress".into(),
+            format!(
+                "Commit {} — resolve conflicts, stage the resolved files, then Continue or Abort.",
+                short_oid(oid.as_deref())
+            ),
+        ),
+        InProgressOperation::Revert { oid } => (
+            "Revert in progress".into(),
+            format!(
+                "Commit {} — resolve conflicts, stage the resolved files, then Continue or Abort.",
+                short_oid(oid.as_deref())
+            ),
+        ),
+        InProgressOperation::Rebase => (
+            "Rebase in progress".into(),
+            "Resolve conflicts, stage the resolved files, then Continue or Abort.".into(),
+        ),
+        InProgressOperation::None => ("No operation in progress".into(), String::new()),
+    }
+}
+
+fn short_oid(oid: Option<&[u8]>) -> String {
+    oid.and_then(|oid| std::str::from_utf8(oid).ok())
+        .map(|oid| oid.chars().take(7).collect::<String>())
+        .filter(|short| !short.is_empty())
+        .unwrap_or_else(|| "an unknown commit".into())
 }

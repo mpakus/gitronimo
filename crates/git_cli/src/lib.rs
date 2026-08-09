@@ -16,10 +16,10 @@ use std::{
 use app_core::{RepositoryDiscoverer, RepositoryOpenError};
 use git_domain::{
     BranchStatus, CommitIdentity, DiffFile, DiffHunk, DiffLine, DiffLineKind, FileStatus, GitPath,
-    HeadStatus, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest, NamedRef,
-    RefDecoration, RefSnapshot, Remote, RenameKind, RepositoryLocation, StatusEntry,
-    SubmoduleState, UnifiedDiff, WorktreeRepository, WorktreeStatus, parse_hunk_header,
-    selected_lines_patch,
+    HeadStatus, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest, InProgressOperation,
+    NamedRef, RecoveredBranchTip, RecoveryRecord, RefDecoration, RefSnapshot, Remote, RenameKind,
+    RepositoryLocation, StatusEntry, SubmoduleState, UnifiedDiff, WorktreeRepository,
+    WorktreeStatus, parse_hunk_header, selected_lines_patch,
 };
 
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
@@ -137,8 +137,20 @@ impl GitExecutable {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let mut child = self
-            .command(directory, args)
+        self.run_env(directory, std::iter::empty(), args)
+    }
+
+    fn run_env<I, E, S>(&self, directory: &Path, envs: E, args: I) -> io::Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+        E: IntoIterator<Item = (&'static str, &'static str)>,
+    {
+        let mut command = self.command(directory, args);
+        for (key, value) in envs {
+            command.env(key, value);
+        }
+        let mut child = command
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
@@ -240,7 +252,99 @@ impl GitExecutable {
             .count()
             .try_into()
             .map_err(|_| GitStatusError::TooManyStashes)?;
+        status.operation = self.in_progress_operation(repository);
         Ok(status)
+    }
+
+    /// Detects a history-changing operation paused in the repository by looking for
+    /// Git's per-worktree state files under the absolute Git directory. The target
+    /// hex oid is read best-effort; a missing or unreadable marker reports `None`.
+    #[must_use]
+    pub fn in_progress_operation(&self, repository: &WorktreeRepository) -> InProgressOperation {
+        let git_dir = &repository.git_dir;
+        let merge_head = git_dir.join("MERGE_HEAD");
+        if merge_head.exists() {
+            return InProgressOperation::Merge {
+                oid: read_state_oid(&merge_head),
+            };
+        }
+        if git_dir.join("rebase-merge").is_dir() || git_dir.join("rebase-apply").is_dir() {
+            return InProgressOperation::Rebase;
+        }
+        let cherry_pick_head = git_dir.join("CHERRY_PICK_HEAD");
+        if cherry_pick_head.exists() {
+            return InProgressOperation::CherryPick {
+                oid: read_state_oid(&cherry_pick_head),
+            };
+        }
+        let revert_head = git_dir.join("REVERT_HEAD");
+        if revert_head.exists() {
+            return InProgressOperation::Revert {
+                oid: read_state_oid(&revert_head),
+            };
+        }
+        InProgressOperation::None
+    }
+
+    /// Captures the pre-operation refs a history-changing operation can move:
+    /// HEAD's oid, HEAD's symbolic branch name, and every local branch tip.
+    /// Callers record this before running a merge, cherry-pick, revert, rebase,
+    /// or their abort/continue forms so the start state can be restored or
+    /// described later.
+    ///
+    /// # Errors
+    /// Returns an error when Git rejects the ref read.
+    pub fn recovery_snapshot(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<RecoveryRecord, GitStatusError> {
+        let head_output = self.run(&repository.worktree_root, ["rev-parse", "HEAD"])?;
+        let old_head = head_output
+            .status
+            .success()
+            .then(|| trim_oid(&head_output.stdout))
+            .flatten();
+
+        let name_output = self.run(
+            &repository.worktree_root,
+            ["symbolic-ref", "--quiet", "HEAD"],
+        )?;
+        let head_name = name_output
+            .status
+            .success()
+            .then(|| trim_oid(&name_output.stdout))
+            .flatten()
+            .map(GitPath);
+
+        let refs_output = self.run(
+            &repository.worktree_root,
+            [
+                "for-each-ref",
+                "refs/heads",
+                "--format=%(refname) %(objectname)",
+            ],
+        )?;
+        if !refs_output.status.success() {
+            return Err(command_error(&refs_output));
+        }
+        let branch_tips = refs_output
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .filter(|record| !record.is_empty())
+            .filter_map(|record| {
+                let separator = record.iter().position(|byte| *byte == b' ')?;
+                Some(RecoveredBranchTip {
+                    name: GitPath(record[..separator].to_vec()),
+                    oid: record[separator + 1..].to_vec(),
+                })
+            })
+            .collect();
+
+        Ok(RecoveryRecord {
+            old_head,
+            head_name,
+            branch_tips,
+        })
     }
 
     /// Loads one staged or unstaged file diff for display.
@@ -831,6 +935,127 @@ impl GitExecutable {
         self.mutate(repository, ["stash", "drop", "stash@{0}"])
     }
 
+    /// Merges the named branch into the current branch. A conflicting merge leaves
+    /// the repository paused with `MERGE_HEAD`; callers detect that with
+    /// `in_progress_operation` and either abort or resolve, stage, and continue.
+    ///
+    /// # Errors
+    /// Returns Git's conflict, refusal, or missing-branch failure.
+    pub fn merge_branch(
+        &self,
+        repository: &WorktreeRepository,
+        branch: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["merge", branch])
+    }
+
+    /// Aborts an in-progress merge, restoring the pre-merge working tree and index.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when no merge is in progress.
+    pub fn abort_merge(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["merge", "--abort"])
+    }
+
+    /// Cherry-picks one commit onto the current branch. A conflict leaves the
+    /// repository paused with `CHERRY_PICK_HEAD`.
+    ///
+    /// # Errors
+    /// Returns Git's conflict or missing-commit failure.
+    pub fn cherry_pick(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["cherry-pick", oid])
+    }
+
+    /// Aborts an in-progress cherry-pick.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when no cherry-pick is in progress.
+    pub fn abort_cherry_pick(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["cherry-pick", "--abort"])
+    }
+
+    /// Reverts one commit onto the current branch without opening an editor. A
+    /// conflict leaves the repository paused with `REVERT_HEAD`.
+    ///
+    /// # Errors
+    /// Returns Git's conflict or missing-commit failure.
+    pub fn revert_commit(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["revert", "--no-edit", oid])
+    }
+
+    /// Aborts an in-progress revert.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when no revert is in progress.
+    pub fn abort_revert(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["revert", "--abort"])
+    }
+
+    /// Rebases the current branch onto the named base. A conflict pauses the
+    /// rebase; `continue_operation` resumes it after the caller resolves and stages.
+    ///
+    /// # Errors
+    /// Returns Git's conflict or missing-base failure.
+    pub fn rebase_branch(
+        &self,
+        repository: &WorktreeRepository,
+        base: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["rebase", base])
+    }
+
+    /// Aborts an in-progress rebase, returning to the original branch and commit.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when no rebase is in progress.
+    pub fn abort_rebase(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["rebase", "--abort"])
+    }
+
+    /// Finishes a paused history operation after the caller resolved and staged
+    /// every conflict. Merge continues with `git commit --no-edit` (reusing the
+    /// recorded merge message); cherry-pick, revert, and rebase continue with their
+    /// own `--continue` forms, and rebase never opens an editor.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when nothing is in progress or conflicts remain unstaged.
+    pub fn continue_operation(
+        &self,
+        repository: &WorktreeRepository,
+        operation: &InProgressOperation,
+    ) -> Result<(), GitStatusError> {
+        match operation {
+            InProgressOperation::Merge { .. } => self.mutate(repository, ["commit", "--no-edit"]),
+            InProgressOperation::CherryPick { .. } => {
+                self.mutate(repository, ["cherry-pick", "--continue", "--no-edit"])
+            }
+            InProgressOperation::Revert { .. } => {
+                self.mutate(repository, ["revert", "--continue", "--no-edit"])
+            }
+            InProgressOperation::Rebase => {
+                let output = self.run_env(
+                    &repository.worktree_root,
+                    [("GIT_EDITOR", "true")],
+                    ["rebase", "--continue"],
+                )?;
+                output
+                    .status
+                    .success()
+                    .then_some(())
+                    .ok_or_else(|| command_error(&output))
+            }
+            InProgressOperation::None => Err(GitStatusError::NoOperationInProgress),
+        }
+    }
+
     /// Unstages the supplied paths, including in an unborn repository.
     ///
     /// # Errors
@@ -1177,6 +1402,7 @@ pub enum GitStatusError {
     UnsupportedDiscard,
     PatchHunkUnavailable,
     PatchLinesUnavailable,
+    NoOperationInProgress,
     ParseHistory,
     ParseHistoryFields,
     ParseHistoryTimestamp,
@@ -1185,11 +1411,34 @@ pub enum GitStatusError {
 fn command_error(output: &Output) -> GitStatusError {
     let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     let message = if message.is_empty() {
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    } else {
+        message
+    };
+    let message = if message.is_empty() {
         "Git command failed without an error message.".into()
     } else {
         message
     };
     GitStatusError::CommandFailed(message)
+}
+
+fn read_state_oid(path: &Path) -> Option<Vec<u8>> {
+    let oid = fs::read(path).ok()?;
+    let oid = oid
+        .into_iter()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect::<Vec<_>>();
+    (!oid.is_empty()).then_some(oid)
+}
+
+fn trim_oid(bytes: &[u8]) -> Option<Vec<u8>> {
+    let oid = bytes
+        .iter()
+        .copied()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect::<Vec<_>>();
+    (!oid.is_empty()).then_some(oid)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1720,12 +1969,12 @@ mod tests {
     use super::{
         CommitRequest, GitExecutable, GitStatusError, MAX_PROCESS_OUTPUT_BYTES, RenameKind,
         git_candidates, parse_commit_records, parse_porcelain_v2_z, parse_unified_diff,
-        read_limited,
+        read_limited, trim_oid,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
-        DiffLineKind, GitPath, HeadStatus, HistoryReference, HistoryRequest, RepositoryLocation,
-        StatusEntry, SubmoduleState,
+        DiffLineKind, GitPath, HeadStatus, HistoryReference, HistoryRequest, InProgressOperation,
+        RepositoryLocation, StatusEntry, SubmoduleState,
     };
 
     static NEXT_REPOSITORY: AtomicUsize = AtomicUsize::new(0);
@@ -2420,22 +2669,26 @@ index 1111111..2222222 100644\n\
         assert!(status.entries.iter().any(
             |entry| matches!(entry, StatusEntry::Untracked(path) if path.0 == b"untracked.txt")
         ));
+        fs::write(repository.path.join("fixture.txt"), "second change")
+            .expect("fixture should write");
         repository
             .git
             .create_stash(&worktree, true)
             .expect("fixture should stash");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(status.stash_count, 2);
         repository
             .git
             .drop_latest_stash(&worktree)
             .expect("latest stash should drop");
-        assert_eq!(
-            repository
-                .git
-                .worktree_status(&worktree, false)
-                .expect("status should load")
-                .stash_count,
-            0
-        );
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(status.stash_count, 1);
     }
 
     #[test]
@@ -3009,5 +3262,506 @@ index 1111111..2222222 100644\n\
                 .success()
         );
         let _ = fs::remove_dir_all(remote);
+    }
+
+    #[test]
+    fn detects_a_conflicting_merge_and_its_abort() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("fixture.txt"), "alpha\nbeta\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "base"]);
+        repository.success(["branch", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nMAIN\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "main change"]);
+        repository.success(["checkout", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nTOPIC\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "topic change"]);
+        repository.success(["checkout", "main"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let merged = repository
+            .git
+            .run(&repository.path, ["merge", "topic"])
+            .expect("merge should run");
+        assert!(!merged.status.success(), "conflicting merge should fail");
+        let operation = repository.git.in_progress_operation(&worktree);
+        let InProgressOperation::Merge { oid } = &operation else {
+            panic!("merge should be reported in progress: {operation:?}");
+        };
+        assert!(oid.as_ref().is_some_and(|oid| !oid.is_empty()));
+
+        repository.success(["merge", "--abort"]);
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::None
+        );
+    }
+
+    #[test]
+    fn detects_a_conflicting_rebase_and_its_abort() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("fixture.txt"), "alpha\nbeta\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "base"]);
+        repository.success(["checkout", "-b", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nTOPIC\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "topic change"]);
+        repository.success(["checkout", "main"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nMAIN\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "main change"]);
+        repository.success(["checkout", "topic"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let rebased = repository
+            .git
+            .run(&repository.path, ["rebase", "main"])
+            .expect("rebase should run");
+        assert!(!rebased.status.success(), "conflicting rebase should fail");
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::Rebase
+        );
+
+        repository.success(["rebase", "--abort"]);
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::None
+        );
+    }
+
+    #[test]
+    fn detects_conflicting_cherry_picks_and_reverts_and_their_aborts() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("fixture.txt"), "alpha\nbeta\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "base"]);
+        repository.success(["checkout", "-b", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nTOPIC\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "topic change"]);
+        repository.success(["checkout", "main"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nMAIN\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "main change"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let picked = repository
+            .git
+            .run(&repository.path, ["cherry-pick", "topic"])
+            .expect("cherry-pick should run");
+        assert!(
+            !picked.status.success(),
+            "conflicting cherry-pick should fail"
+        );
+        let operation = repository.git.in_progress_operation(&worktree);
+        let InProgressOperation::CherryPick { oid } = &operation else {
+            panic!("cherry-pick should be reported in progress: {operation:?}");
+        };
+        assert!(oid.as_ref().is_some_and(|oid| !oid.is_empty()));
+
+        repository.success(["cherry-pick", "--abort"]);
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::None
+        );
+
+        let main_version = String::from_utf8_lossy(
+            &repository
+                .git
+                .run(&repository.path, ["rev-parse", "HEAD"])
+                .expect("HEAD should resolve")
+                .stdout,
+        )
+        .trim()
+        .to_owned();
+        fs::write(repository.path.join("fixture.txt"), "alpha\nB\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "second main change"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nC\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "third main change"]);
+        let reverted = repository
+            .git
+            .run(&repository.path, ["revert", "--no-edit", &main_version])
+            .expect("revert should run");
+        assert!(!reverted.status.success(), "conflicting revert should fail");
+        let operation = repository.git.in_progress_operation(&worktree);
+        let InProgressOperation::Revert { oid } = &operation else {
+            panic!("revert should be reported in progress: {operation:?}");
+        };
+        assert!(oid.as_ref().is_some_and(|oid| !oid.is_empty()));
+
+        repository.success(["revert", "--abort"]);
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::None
+        );
+    }
+
+    #[test]
+    fn merges_clean_and_conflicting_histories_and_aborts() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("fixture.txt"), "alpha\nbeta\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "base"]);
+        repository.success(["checkout", "-b", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nTOPIC\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "topic change"]);
+        repository.success(["checkout", "main"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        repository
+            .git
+            .merge_branch(&worktree, "topic")
+            .expect("fast-forward merge should succeed");
+        assert_eq!(
+            fs::read_to_string(repository.path.join("fixture.txt")).expect("fixture should read"),
+            "alpha\nTOPIC\ngamma\n"
+        );
+
+        repository.success(["checkout", "-b", "conflict", "main~1"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nMAIN\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "main change"]);
+        let merged = repository
+            .git
+            .merge_branch(&worktree, "topic")
+            .expect_err("conflicting merge should fail");
+        assert!(matches!(
+            merged,
+            GitStatusError::CommandFailed(ref message) if message.contains("CONFLICT")
+        ));
+        let operation = repository.git.in_progress_operation(&worktree);
+        let InProgressOperation::Merge { oid } = &operation else {
+            panic!("merge should be reported in progress: {operation:?}");
+        };
+        assert!(oid.as_ref().is_some_and(|oid| !oid.is_empty()));
+        repository
+            .git
+            .abort_merge(&worktree)
+            .expect("merge should abort");
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::None
+        );
+    }
+
+    #[test]
+    fn resolves_stages_and_continues_a_conflicting_merge() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("fixture.txt"), "alpha\nbeta\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "base"]);
+        repository.success(["branch", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nMAIN\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "main change"]);
+        repository.success(["checkout", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nTOPIC\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "topic change"]);
+        repository.success(["checkout", "main"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let path = repository.path.clone();
+
+        repository
+            .git
+            .merge_branch(&worktree, "topic")
+            .expect_err("conflicting merge should fail");
+        let operation = repository.git.in_progress_operation(&worktree);
+        fs::write(path.join("fixture.txt"), "alpha\nRESOLVED\ngamma\n")
+            .expect("resolution should write");
+        repository.success(["add", "fixture.txt"]);
+        repository
+            .git
+            .continue_operation(&worktree, &operation)
+            .expect("resolved merge should continue");
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::None
+        );
+        assert_eq!(
+            fs::read_to_string(path.join("fixture.txt")).expect("fixture should read"),
+            "alpha\nRESOLVED\ngamma\n"
+        );
+    }
+
+    #[test]
+    fn recovery_snapshot_records_pre_operation_refs() {
+        let repository = Repository::new();
+        repository.commit("base");
+        repository.success(["checkout", "-b", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "topic work\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "topic commit"]);
+        repository.success(["checkout", "main"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let head_before = repository
+            .git
+            .run(&repository.path, ["rev-parse", "HEAD"])
+            .expect("HEAD should resolve")
+            .stdout;
+        let head_before = trim_oid(&head_before).expect("HEAD should have an oid");
+
+        let snapshot = repository
+            .git
+            .recovery_snapshot(&worktree)
+            .expect("snapshot should load");
+        assert_eq!(
+            snapshot.old_head.as_deref(),
+            Some(head_before.as_slice()),
+            "snapshot should capture the pre-operation HEAD"
+        );
+        assert_eq!(
+            snapshot.head_name,
+            Some(GitPath(b"refs/heads/main".to_vec())),
+            "snapshot should name the current branch"
+        );
+        let main_tip = snapshot
+            .branch_tips
+            .iter()
+            .find(|tip| tip.name == GitPath(b"refs/heads/main".to_vec()))
+            .expect("snapshot should include the main tip");
+        assert_eq!(main_tip.oid, head_before);
+        assert!(
+            snapshot
+                .branch_tips
+                .iter()
+                .any(|tip| tip.name == GitPath(b"refs/heads/topic".to_vec()))
+        );
+
+        repository
+            .git
+            .merge_branch(&worktree, "topic")
+            .expect("fast-forward merge should succeed");
+        let head_after = repository
+            .git
+            .run(&repository.path, ["rev-parse", "HEAD"])
+            .expect("HEAD should resolve")
+            .stdout;
+        let head_after = trim_oid(&head_after).expect("HEAD should have an oid");
+        assert_ne!(
+            head_after, head_before,
+            "the merge should move HEAD so the snapshot differs from the new state"
+        );
+        assert_eq!(
+            snapshot.old_head.as_deref(),
+            Some(head_before.as_slice()),
+            "the recorded snapshot must retain the true pre-operation refs"
+        );
+    }
+
+    #[test]
+    fn cherry_picks_reverts_and_continues_resolved_conflicts() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("fixture.txt"), "alpha\nbeta\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "base"]);
+        repository.success(["checkout", "-b", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nTOPIC\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "topic change"]);
+        let topic_oid = String::from_utf8_lossy(
+            &repository
+                .git
+                .run(&repository.path, ["rev-parse", "HEAD"])
+                .expect("HEAD should resolve")
+                .stdout,
+        )
+        .trim()
+        .to_owned();
+        repository.success(["checkout", "main"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nMAIN\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "main change"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let path = repository.path.clone();
+
+        repository
+            .git
+            .cherry_pick(&worktree, &topic_oid)
+            .expect_err("conflicting cherry-pick should fail");
+        let picked = repository.git.in_progress_operation(&worktree);
+        fs::write(path.join("fixture.txt"), "alpha\nRESOLVED\ngamma\n")
+            .expect("resolution should write");
+        repository.success(["add", "fixture.txt"]);
+        repository
+            .git
+            .continue_operation(&worktree, &picked)
+            .expect("resolved cherry-pick should continue");
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::None
+        );
+
+        let main_version = String::from_utf8_lossy(
+            &repository
+                .git
+                .run(&repository.path, ["rev-parse", "HEAD"])
+                .expect("HEAD should resolve")
+                .stdout,
+        )
+        .trim()
+        .to_owned();
+        fs::write(path.join("fixture.txt"), "alpha\nB\ngamma\n").expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "second main change"]);
+        fs::write(path.join("fixture.txt"), "alpha\nC\ngamma\n").expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "third main change"]);
+        repository
+            .git
+            .revert_commit(&worktree, &main_version)
+            .expect_err("conflicting revert should fail");
+        let reverted = repository.git.in_progress_operation(&worktree);
+        fs::write(path.join("fixture.txt"), "alpha\nRESOLVED\ngamma\n")
+            .expect("resolution should write");
+        repository.success(["add", "fixture.txt"]);
+        repository
+            .git
+            .continue_operation(&worktree, &reverted)
+            .expect("resolved revert should continue");
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::None
+        );
+    }
+
+    #[test]
+    fn rebases_and_continues_a_resolved_conflict() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("fixture.txt"), "alpha\nbeta\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "base"]);
+        repository.success(["checkout", "-b", "topic"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nTOPIC\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "topic change"]);
+        repository.success(["checkout", "main"]);
+        fs::write(repository.path.join("fixture.txt"), "alpha\nMAIN\ngamma\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "main change"]);
+        repository.success(["checkout", "topic"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let path = repository.path.clone();
+
+        repository
+            .git
+            .rebase_branch(&worktree, "main")
+            .expect_err("conflicting rebase should fail");
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::Rebase
+        );
+        fs::write(path.join("fixture.txt"), "alpha\nRESOLVED\ngamma\n")
+            .expect("resolution should write");
+        repository.success(["add", "fixture.txt"]);
+        repository
+            .git
+            .continue_operation(&worktree, &InProgressOperation::Rebase)
+            .expect("resolved rebase should continue");
+        assert_eq!(
+            repository.git.in_progress_operation(&worktree),
+            InProgressOperation::None
+        );
+        assert_eq!(
+            fs::read_to_string(path.join("fixture.txt")).expect("fixture should read"),
+            "alpha\nRESOLVED\ngamma\n"
+        );
+    }
+
+    #[test]
+    fn continuing_without_an_operation_fails() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let error = repository
+            .git
+            .continue_operation(&worktree, &InProgressOperation::None)
+            .expect_err("continuing nothing should fail");
+        assert!(matches!(error, GitStatusError::NoOperationInProgress));
     }
 }

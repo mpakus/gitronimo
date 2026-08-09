@@ -129,6 +129,12 @@ pub(crate) enum StashAction {
     Drop,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OperationAction {
+    Abort,
+    Continue,
+}
+
 pub(crate) struct GitronimoApp {
     pub focus_handle: FocusHandle,
     pub last_action: Option<LastAction>,
@@ -152,6 +158,7 @@ pub(crate) struct GitronimoApp {
     pub pending_hunk_discard: Option<(GitPath, usize)>,
     pub pending_discard: Option<Vec<GitPath>>,
     pub pending_stash_action: Option<StashAction>,
+    pub pending_operation_action: Option<OperationAction>,
     pub pending_branch_delete: Option<String>,
     pub force_push_state: ForcePushState,
     pub shortcut_reference_state: ShortcutReferenceState,

@@ -2,19 +2,27 @@
 //! imports (`TestAppContext`, `Keystroke`) do not leak into production modules.
 
 use app_core::RecentRepositoryStore;
-use git_domain::{GitPath, WorktreeRepository};
+use git_domain::{GitPath, InProgressOperation, WorktreeRepository, WorktreeStatus};
 use gpui::{AppContext, Keystroke, TestAppContext};
 
 use super::crash_report_body;
 use super::crash_report_path;
 use super::window_options;
 use crate::app_state::{
-    GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, ShellState,
+    GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, OperationAction, ShellState,
     eligible_trash_path, git_failure_message, network_failure_message, repository_is_available,
     resize_width, shows_inspector, window_title,
 };
 use crate::keymap;
 use crate::views::components::{activity_label, empty_status_message};
+use crate::views::working_copy::operation_conflict_overview;
+
+#[test]
+fn conflict_overview_names_the_count_and_the_next_step() {
+    assert!(operation_conflict_overview(0).contains("No conflicted files"));
+    assert!(operation_conflict_overview(3).contains("3 conflicted file(s)"));
+    assert!(operation_conflict_overview(3).contains("Continue"));
+}
 
 #[gpui::test]
 fn opens_the_welcome_window(cx: &mut TestAppContext) {
@@ -303,6 +311,51 @@ fn hunk_discard_requires_confirmation_and_cancellation_is_a_no_op(cx: &mut TestA
             assert!(
                 app.pending_hunk_discard.is_none(),
                 "staged diffs refuse hunk discard"
+            );
+        })
+        .expect("window should remain open");
+}
+
+#[gpui::test]
+fn operation_actions_require_a_paused_operation_and_cancel_is_a_no_op(cx: &mut TestAppContext) {
+    let window = cx.update(|cx| {
+        cx.open_window(window_options(cx, None), |window, cx| {
+            cx.new(|cx| {
+                GitronimoApp::welcome(
+                    Vec::new(),
+                    RecentRepositoryStore::new(
+                        std::env::temp_dir().join("gitronimo-test-recents.json"),
+                    ),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .expect("the test window should open")
+    });
+    window
+        .update(cx, |app, _, cx| {
+            app.working_copy = Some(WorktreeStatus {
+                operation: InProgressOperation::Rebase,
+                ..Default::default()
+            });
+            app.request_operation_abort(cx);
+            assert_eq!(app.pending_operation_action, Some(OperationAction::Abort));
+            app.cancel_operation_action(cx);
+            assert!(app.pending_operation_action.is_none());
+            app.request_operation_continue(cx);
+            assert_eq!(
+                app.pending_operation_action,
+                Some(OperationAction::Continue)
+            );
+            app.cancel_operation_action(cx);
+            assert!(app.pending_operation_action.is_none());
+
+            app.working_copy = Some(WorktreeStatus::default());
+            app.request_operation_abort(cx);
+            assert!(
+                app.pending_operation_action.is_none(),
+                "no paused operation means no request is recorded"
             );
         })
         .expect("window should remain open");

@@ -22,7 +22,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use app_core::{RecentRepositoryStore, RepositoryOpenError, WindowGeometry, open_repository};
+use app_core::{
+    RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError, WindowGeometry,
+    open_repository,
+};
 use git_cli::{CommitRequest, GitExecutable, GitStatusError, read_stderr_limited};
 use git_domain::{
     GitPath, GraphState, HeadStatus, HistoryPage, HistoryReference, HistoryRequest, RefSnapshot,
@@ -41,7 +44,7 @@ use crate::actions::{
 };
 use crate::app_state::{
     ForcePushState, GitronimoApp, LastAction, Mutation, NetworkOperation, OpenedRepository,
-    RefContext, RepositoryView, ShellState, ShortcutReferenceState, ThemeMode,
+    OperationAction, RefContext, RepositoryView, ShellState, ShortcutReferenceState, ThemeMode,
     appearance_from_window, discard_selected, git_failure_message, network_failure_message,
     repository_is_available, repository_unavailable_message, resize_width,
 };
@@ -124,6 +127,13 @@ fn preferences_path() -> PathBuf {
     std::env::var_os("HOME")
         .map_or_else(std::env::temp_dir, PathBuf::from)
         .join("Library/Application Support/Gitronimo/recent-repositories.json")
+}
+
+fn recovery_journal_path() -> PathBuf {
+    preferences_path()
+        .parent()
+        .map_or_else(std::env::temp_dir, Path::to_path_buf)
+        .join("recovery-journal.json")
 }
 
 fn install_panic_reporter() {
@@ -220,6 +230,7 @@ impl GitronimoApp {
             pending_hunk_discard: None,
             pending_discard: None,
             pending_stash_action: None,
+            pending_operation_action: None,
             pending_branch_delete: None,
             force_push_state: ForcePushState::Idle,
             shortcut_reference_state: ShortcutReferenceState::Hidden,
@@ -319,6 +330,7 @@ impl GitronimoApp {
             pending_hunk_discard: None,
             pending_discard: None,
             pending_stash_action: None,
+            pending_operation_action: None,
             pending_branch_delete: None,
             force_push_state: ForcePushState::Idle,
             shortcut_reference_state: ShortcutReferenceState::Hidden,
@@ -426,6 +438,8 @@ impl GitronimoApp {
                 self.pending_line_discard = None;
                 self.pending_hunk_discard = None;
                 self.pending_discard = None;
+                self.pending_stash_action = None;
+                self.pending_operation_action = None;
                 self.pending_branch_delete = None;
                 self.force_push_state = ForcePushState::Idle;
                 self.shortcut_reference_state = ShortcutReferenceState::Hidden;
@@ -1954,6 +1968,145 @@ impl GitronimoApp {
                         );
                     }
                     Err(error) => app.activity = git_failure_message("Discard hunk", &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn request_operation_abort(&mut self, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let Some(operation) = self
+            .working_copy
+            .as_ref()
+            .map(|status| status.operation.clone())
+        else {
+            return;
+        };
+        if operation == git_domain::InProgressOperation::None {
+            return;
+        }
+        self.pending_operation_action = Some(OperationAction::Abort);
+        self.activity =
+            "Aborting discards the paused operation and returns to its start state.".into();
+        cx.notify();
+    }
+
+    fn request_operation_continue(&mut self, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let Some(operation) = self
+            .working_copy
+            .as_ref()
+            .map(|status| status.operation.clone())
+        else {
+            return;
+        };
+        if operation == git_domain::InProgressOperation::None {
+            return;
+        }
+        self.pending_operation_action = Some(OperationAction::Continue);
+        self.activity =
+            "Resolve conflicts, stage the resolved files, then confirm to continue the operation."
+                .into();
+        cx.notify();
+    }
+
+    fn cancel_operation_action(&mut self, cx: &mut Context<Self>) {
+        self.pending_operation_action = None;
+        self.activity = "Operation action cancelled.".into();
+        cx.notify();
+    }
+
+    fn confirm_operation_action(&mut self, cx: &mut Context<Self>) {
+        let Some(action) = self.pending_operation_action.take() else {
+            return;
+        };
+        if self.mutation_in_flight {
+            return;
+        }
+        let Some(operation) = self
+            .working_copy
+            .as_ref()
+            .map(|status| status.operation.clone())
+        else {
+            return;
+        };
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let repository_path = repository.worktree_root.clone();
+        let journal = RecoveryJournalStore::new(recovery_journal_path());
+        self.mutation_in_flight = true;
+        self.activity = match action {
+            OperationAction::Abort => "Aborting operation…".into(),
+            OperationAction::Continue => "Continuing operation…".into(),
+        };
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let snapshot = git.recovery_snapshot(&worker_repository).map_err(|error| {
+                        format!("Could not record the pre-operation state: {error:?}")
+                    })?;
+                    let journal_warning = journal
+                        .record_entry(repository_path, snapshot)
+                        .err()
+                        .map(|error| format!("Pre-operation refs were not journaled: {error}"));
+                    let outcome = match (action, &operation) {
+                        (OperationAction::Abort, git_domain::InProgressOperation::Merge { .. }) => {
+                            git.abort_merge(&worker_repository)
+                        }
+                        (
+                            OperationAction::Abort,
+                            git_domain::InProgressOperation::CherryPick { .. },
+                        ) => git.abort_cherry_pick(&worker_repository),
+                        (
+                            OperationAction::Abort,
+                            git_domain::InProgressOperation::Revert { .. },
+                        ) => git.abort_revert(&worker_repository),
+                        (OperationAction::Abort, git_domain::InProgressOperation::Rebase) => {
+                            git.abort_rebase(&worker_repository)
+                        }
+                        (OperationAction::Continue, operation) => {
+                            git.continue_operation(&worker_repository, operation)
+                        }
+                        (OperationAction::Abort, git_domain::InProgressOperation::None) => {
+                            Err(GitStatusError::NoOperationInProgress)
+                        }
+                    };
+                    outcome
+                        .map_err(|error| format!("{error:?}"))
+                        .map(|()| journal_warning)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(journal_warning) => {
+                        let base = match action {
+                            OperationAction::Abort => "Operation aborted.",
+                            OperationAction::Continue => "Operation continued.",
+                        };
+                        app.activity = match journal_warning {
+                            Some(warning) => format!("{base} {warning}"),
+                            None => base.into(),
+                        };
+                        app.load_working_copy(repository, cx);
+                    }
+                    Err(error) => {
+                        let label = match action {
+                            OperationAction::Abort => "Abort operation",
+                            OperationAction::Continue => "Continue operation",
+                        };
+                        app.activity = git_failure_message(label, &error);
+                    }
                 }
                 cx.notify();
             });

@@ -1974,23 +1974,23 @@ Expand local Git capability without compromising repository safety.
 - [x] Apply stash.
 - [x] Pop stash.
 - [x] Drop stash with confirmation.
-- [ ] Cherry-pick commit.
-- [ ] Revert commit.
-- [ ] Merge branch.
-- [ ] Abort merge.
-- [ ] Rebase branch.
-- [ ] Abort rebase.
-- [ ] Continue operation after conflicts.
-- [ ] Add recovery journal.
-- [ ] Add operation-state banner.
-- [ ] Add conflict overview.
+- [x] Cherry-pick commit.
+- [x] Revert commit.
+- [x] Merge branch.
+- [x] Abort merge.
+- [x] Rebase branch.
+- [x] Abort rebase.
+- [x] Continue operation after conflicts.
+- [x] Add recovery journal.
+- [x] Add operation-state banner.
+- [x] Add conflict overview.
 
 ## Exit criteria
 
-- [ ] Patch operations have extensive integration tests.
-- [ ] Every history-changing operation records pre-operation refs.
-- [ ] Abort and recovery behavior is tested.
-- [ ] The application accurately reflects in-progress Git operation state.
+- [x] Patch operations have extensive integration tests.
+- [x] Every history-changing operation records pre-operation refs.
+- [x] Abort and recovery behavior is tested.
+- [x] The application accurately reflects in-progress Git operation state.
 
 ---
 

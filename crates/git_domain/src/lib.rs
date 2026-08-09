@@ -17,7 +17,7 @@ pub enum RepositoryLocation {
 }
 
 /// A repository-relative path exactly as reported by Git.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct GitPath(pub Vec<u8>);
 
 /// The branch information emitted by `git status --porcelain=v2 --branch`.
@@ -50,11 +50,51 @@ pub enum HeadStatus {
     Unknown,
 }
 
+/// A history-changing Git operation paused in the repository awaiting a decision.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum InProgressOperation {
+    /// No history-changing operation is in progress.
+    #[default]
+    None,
+    /// `git merge` reached a conflict; `oid` is the branch being merged.
+    Merge { oid: Option<Vec<u8>> },
+    /// `git cherry-pick` reached a conflict; `oid` is the cherry-picked commit.
+    CherryPick { oid: Option<Vec<u8>> },
+    /// `git revert` reached a conflict; `oid` is the reverted commit.
+    Revert { oid: Option<Vec<u8>> },
+    /// `git rebase` is paused on a conflict or an instruction edit.
+    Rebase,
+}
+
+/// A point-in-time snapshot of the refs a history-changing operation can move,
+/// recorded before the operation runs so its start state can be restored or
+/// described later. Contains no credentials.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RecoveryRecord {
+    /// The pre-operation HEAD oid, or `None` for an unborn repository.
+    pub old_head: Option<Vec<u8>>,
+    /// The symbolic local branch HEAD points at, if any.
+    pub head_name: Option<GitPath>,
+    /// The pre-operation local branch tips; these are the refs history-changing
+    /// operations can move.
+    pub branch_tips: Vec<RecoveredBranchTip>,
+}
+
+/// One local branch tip captured in a [`RecoveryRecord`].
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RecoveredBranchTip {
+    /// The full ref name, for example `refs/heads/main`.
+    pub name: GitPath,
+    /// The ref's current oid.
+    pub oid: Vec<u8>,
+}
+
 /// The complete non-mutating working-copy state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WorktreeStatus {
     pub branch: BranchStatus,
     pub stash_count: u32,
+    pub operation: InProgressOperation,
     pub entries: Vec<StatusEntry>,
 }
 

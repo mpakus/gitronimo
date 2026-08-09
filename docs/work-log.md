@@ -1,5 +1,88 @@
 # Implementation work log
 
+## 2026-08-08 — Phase 7 / recovery journal, conflict overview, and group completion
+
+**Intent:** close the two remaining Phase 7 gaps and mark the whole group complete: record pre-operation refs for every history-changing operation the app performs, surface a conflict overview in the operation banner, and flip every Phase 7 checkbox and exit criterion.
+
+**Design:** `git_domain` gains pure `RecoveryRecord` (`old_head`, `head_name`, `branch_tips`) and `RecoveredBranchTip` types; `git_cli::recovery_snapshot` reads HEAD's oid (`rev-parse HEAD`), the symbolic branch (`symbolic-ref --quiet HEAD`), and every local branch tip (`for-each-ref refs/heads --format=%(refname) %(objectname)`, safe because Git ref names cannot contain spaces) — the refs a merge, cherry-pick, revert, rebase, or abort/continue can move. `app_core` gains a versioned, bounded `RecoveryJournalStore` (20 entries, atomic temp+rename write, corrupt files quarantined under the same policy as preferences) persisted at `~/Library/Application Support/Gitronimo/recovery-journal.json`. The desktop captures the snapshot before every confirmed abort/continue (the only history-changing operations the UI currently runs; while a merge/cherry-pick/revert/rebase is paused, HEAD still holds the true pre-operation refs), records it in the journal, and only runs the mutation when the snapshot succeeds; a journal write failure is surfaced in the activity area without blocking the operation. The operation banner now includes an `operation_conflict_overview` line naming the conflicted-file count and the next step, completing the conflict-overview item.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `RecoveryRecord`, `RecoveredBranchTip`; `serde` dependency and derives on those types and `GitPath`.
+- `crates/git_cli/src/lib.rs` — `recovery_snapshot`, `trim_oid`, and a temporary-repository integration test proving the recorded refs match the pre-merge state after HEAD moves.
+- `crates/app_core/src/lib.rs` — `RecoveryJournalStore`, `RecoveryJournalEntry`, `RecoveryJournalStoreError`, `RecoveryJournalDocument`, and store tests (persistence newest-first, 20-entry bound, newer-schema rejection).
+- `apps/desktop/src/main.rs` — `recovery_journal_path`, journal snapshot before `confirm_operation_action`'s abort/continue dispatch.
+- `apps/desktop/src/views/working_copy.rs` — `operation_conflict_overview` helper and banner line.
+- `apps/desktop/src/tests.rs` — a test for the conflict-overview copy.
+- `PLAN.md`, `docs/work-log.md` — mark all Phase 7 items and exit criteria complete.
+
+**Acceptance checks:**
+- `recovery_snapshot` records HEAD oid, the symbolic branch, and every local branch tip; after a fast-forward merge moves HEAD, the recorded `old_head` still equals the true pre-operation commit.
+- Confirming an abort or continue records a journal entry (repository, timestamp, refs) before Git runs; a snapshot failure prevents the mutation; a journal write failure is reported without blocking.
+- The journal persists newest-first across a reload, is bounded to 20 entries, and rejects a newer schema without overwriting it.
+- The operation banner shows a conflict overview naming the conflicted-file count and next step.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass after this unit. `git_domain` adds the pure recovery-record types; `git_cli::recovery_snapshot` captures HEAD + the symbolic branch + local branch tips, proven by a temporary-repository test that rebases the recorded state against a fast-forward merge that moves HEAD; `app_core`'s versioned, bounded `RecoveryJournalStore` persists newest-first, caps at 20 entries, and rejects newer schemas; the desktop records the snapshot before every confirmed abort/continue and surfaces journal-write failures without blocking; the operation banner gains the `operation_conflict_overview` count line. All Phase 7 checkboxes and exit criteria are now checked. Workspace suite totals 71 tests (37 git_cli, 16 desktop, 8 app_core, 8 git_domain, 2 ui_kit).
+
+## 2026-08-08 — Phase 7 / operation-state banner with confirmed abort and continue
+
+**Intent:** surface an in-progress merge, cherry-pick, revert, or rebase in the desktop Working Copy view and let the user abort it or continue it after resolving and staging conflicts. This implements the `Add operation-state banner` checklist item, the `Abort merge`/`Abort rebase` items, and the `Continue operation after conflicts` item, and moves the exit criterion "The application accurately reflects in-progress Git operation state" to the UI.
+
+**Design:** `working_copy.operation` (populated by `worktree_status`) drives a warning `state_panel` at the top of the Working Copy view that names the paused operation and its short target oid. Two controls request an Abort or Continue decision into `pending_operation_action`; a confirmation card then executes it through the existing background lifecycle. `confirm_operation_action` dispatches on `(OperationAction, InProgressOperation)`: abort maps to the matching `--abort` command and continue maps to `continue_operation`; success refreshes the working copy so the banner disappears. Because aborting discards conflict work and continue commits the staged resolution, both require the confirmation card; cancelling is a no-op.
+
+**Files (planned):**
+- `apps/desktop/src/app_state.rs` — `OperationAction` enum and `pending_operation_action: Option<OperationAction>`.
+- `apps/desktop/src/main.rs` — `request_operation_abort`, `request_operation_continue`, `cancel_operation_action`, `confirm_operation_action`; initialize the field in both constructors and clear it on repository change.
+- `apps/desktop/src/views/working_copy.rs` — `operation_banner_view` and `operation_confirmation_view`, wired into `repository_view`.
+- `apps/desktop/src/tests.rs` — a test that requesting abort/continue sets the pending action and cancelling is a no-op.
+- `PLAN.md`, `docs/work-log.md` — mark `Add operation-state banner`, `Abort merge`, `Abort rebase`, and `Continue operation after conflicts` complete.
+
+**Acceptance checks:**
+- A paused operation (from `working_copy.operation`) renders a warning banner naming the operation and target oid, with Abort and Continue controls.
+- Requesting Abort or Continue shows a confirmation card; cancelling is a no-op.
+- Confirm dispatches to the correct `--abort`/`--continue` Git command for each operation kind and refreshes the working copy on success.
+- With no operation paused, no banner appears and no request can be recorded.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+## 2026-08-08 — Phase 7 / history operation mutations (merge, cherry-pick, revert, rebase)
+
+**Intent:** add the typed Git boundary for the `safe history operations` group: merge, cherry-pick, revert, and rebase with abort and continue support, all gated on the in-progress operation detection. Conflicts pause the repository with the correct state marker; callers can abort (returning to the pre-operation state) or resolve, stage, and continue.
+
+**Design:** each operation is a typed, non-shell `git` command: `merge <branch>`, `cherry-pick <oid>`, `revert --no-edit <oid>`, `rebase <base>`, plus the matching `--abort` forms. `continue_operation` dispatches on `InProgressOperation`: merge continues with `git commit --no-edit` (reusing `MERGE_MSG`), cherry-pick/revert with `--continue --no-edit`, and rebase with `git rebase --continue` under `GIT_EDITOR=true` (via a new bounded `run_env` that the existing `run` delegates to, preserving the 8 MB concurrent output reader). `git 2.51` prints merge-conflict diagnostics to stdout, so `command_error` now falls back to stdout when stderr is empty, making conflicts actionable. A new `NoOperationInProgress` error guards `continue_operation`.
+
+**Files (planned):**
+- `crates/git_cli/src/lib.rs` — `merge_branch`, `abort_merge`, `cherry_pick`, `abort_cherry_pick`, `revert_commit`, `abort_revert`, `rebase_branch`, `abort_rebase`, `continue_operation`; `run_env`; `command_error` stdout fallback; `NoOperationInProgress`; temporary-repository integration tests.
+- `docs/work-log.md` — this entry.
+
+**Acceptance checks:**
+- A fast-forward merge and a conflicting merge both behave correctly; the conflict pauses with `Merge { oid }`, `abort_merge` returns to `None`, and resolve+stage+`continue_operation` finishes the merge with the resolved content.
+- Conflicting cherry-pick and revert pause with their markers; each aborts and continues correctly after staging a resolution.
+- A conflicting rebase pauses with `Rebase`; abort returns to the original branch, and resolve+stage+continue replays the change.
+- `continue_operation` on `None` fails with `NoOperationInProgress` without running Git.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass. All nine boundary methods build Git commands as separate typed arguments, and five new temporary-repository tests prove the fast-forward merge, the conflict/abort path for merge, resolve+stage+continue for merge/cherry-pick/revert/rebase, and the `NoOperationInProgress` guard. `git 2.51.1` merges conflict diagnostics to stdout, which `command_error` now surfaces when stderr is empty. The workspace suite totals 65 tests (36 git_cli, 14 desktop, 8 git_domain, 5 app_core, 2 ui_kit).
+
+## 2026-08-08 — Phase 7 / in-progress operation detection
+
+**Intent:** give the status model a reliable, UI-independent view of a history-changing Git operation (merge, cherry-pick, revert, rebase) that is paused awaiting user action. This is the foundation for the operation-state banner, recovery journal, and abort/continue actions in the `Phase 7 — safe history operations` group, and moves the exit criterion "The application accurately reflects in-progress Git operation state" forward without rendering anything yet.
+
+**Design:** Git records paused operations as per-worktree state files under the absolute Git directory (`MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, and the `rebase-merge`/`rebase-apply` directories), which `discover_repository` already exposes as `WorktreeRepository.git_dir`. `git_domain` gains the pure `InProgressOperation` enum (`None`, `Merge { oid }`, `CherryPick { oid }`, `Revert { oid }`, `Rebase`) and `WorktreeStatus.operation`. `git_cli::in_progress_operation` checks those files (reading the hex oid best-effort) and `worktree_status` attaches the result so the desktop's existing status refresh carries it. No UI is changed in this unit.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `InProgressOperation` enum and the `operation` field on `WorktreeStatus`.
+- `crates/git_cli/src/lib.rs` — `in_progress_operation`, a `read_state_oid` helper, wiring into `worktree_status`, and temporary-repository integration tests that create real paused states via genuine merge, rebase, cherry-pick, and revert conflicts (then abort them).
+- `docs/work-log.md` — this entry.
+
+**Acceptance checks:**
+- A genuine conflicting `git merge` leaves `MERGE_HEAD` and `in_progress_operation` reports `Merge` with the branch oid; `git merge --abort` returns to `None`.
+- A genuine conflicting `git rebase` reports `Rebase`; `git rebase --abort` returns to `None`.
+- Genuine conflicting `git cherry-pick` and `git revert` report their variants with the target oid; aborting each returns to `None`.
+- A clean repository reports `None`.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass. `git_domain::InProgressOperation` (`None`, `Merge { oid }`, `CherryPick { oid }`, `Revert { oid }`, `Rebase`) and `WorktreeStatus.operation` carry the paused-operation state, and `git_cli::in_progress_operation` checks `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, and the `rebase-merge`/`rebase-apply` directories under `git_dir`, reading the hex oid best-effort. `worktree_status` now attaches the result so the desktop status refresh reflects it. Three temporary-repository tests create genuine paused states (conflicting merge, conflicting rebase, conflicting cherry-pick + revert) and verify each reports the right variant with a non-empty oid and that `--abort` returns to `None`. The workspace suite totals 60 tests (31 git_cli, 14 desktop, 8 git_domain, 5 app_core, 2 ui_kit).
+
 ## 2026-08-08 — Phase 7 / discard a single unstaged hunk
 
 **Intent:** complete the `Discard hunk` checklist item by letting the user discard one unstaged text hunk back to the index content, mirroring the tested `stage_hunk`/`unstage_hunk` foundation and the confirmed discard posture of the file- and line-level discards.
