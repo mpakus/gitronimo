@@ -1,6 +1,20 @@
 # Implementation work log
 
-## 2026-08-09 — Phase 8 / signed-commit status
+## 2026-08-09 — UI/UX study and skills registration
+
+**Intent:** prepare professional-UI guidance and enable GPUI skills in opencode.
+
+**Design:** the user relaxed the Tower-asset rule; `AGENTS.md` now forbids copying third-party icons/glyphs/design assets into shipped code but permits attributed screenshots under `docs/` for UI/UX reference (never shipped). `PLAN.md` §28 risk updated to match. `PLAN.md` was also edited by the user to drop GitLab/Bitbucket/Azure DevOps auth checkboxes (GitHub only) and to mention OpenCode alongside Codex in the execution protocol.
+
+**Files:**
+- `.opencode/opencode.json` — registers `./skills` (11 Apache-2.0 GPUI skills from Zed) as opencode project skills.
+- `AGENTS.md`, `PLAN.md` — asset/attribution policy update.
+- `docs/UI-IMPROVE.md` — UI/UX improvement plan mapped from the Tower "Getting Started", "Interface Overview", and "Basic Workflow" guides.
+- `docs/screens/tower-guides/` — 15 attributed screenshots downloaded from the Tower help guides (reference only).
+
+**Acceptance checks:** the skills load after opencode restart; every screenshot is attributed in `docs/UI-IMPROVE.md`; no assets are added to the shipped app. Note: the model cannot read images, so `docs/screens/*.png` (the user's own captures) and the downloaded guides could not be visually verified; the plan is grounded in the guides' text.
+
+
 
 **Intent:** implement the `Signed-commit status` checklist item by exposing Git's `%G?` signature validation per commit.
 

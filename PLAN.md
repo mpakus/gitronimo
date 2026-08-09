@@ -1164,15 +1164,15 @@ When implemented:
 
 Refresh matrix:
 
-| Invalidation | Refresh |
-|---|---|
-| Worktree | status, visible working-copy diff |
-| Index | status, staged diff |
-| Head | status, refs, history head |
-| Refs | refs, decorations, ahead/behind |
-| Config | remotes, identity, settings |
-| OperationState | merge/rebase/conflict state |
-| Everything | all repository snapshots |
+| Invalidation   | Refresh                           |
+| -------------- | --------------------------------- |
+| Worktree       | status, visible working-copy diff |
+| Index          | status, staged diff               |
+| Head           | status, refs, history head        |
+| Refs           | refs, decorations, ahead/behind   |
+| Config         | remotes, identity, settings       |
+| OperationState | merge/rebase/conflict state       |
+| Everything     | all repository snapshots          |
 
 Debounce target:
 
@@ -2022,9 +2022,6 @@ Expand local Git capability without compromising repository safety.
 
 - [ ] Define provider-neutral service trait.
 - [ ] GitHub authentication.
-- [ ] GitLab authentication.
-- [ ] Bitbucket authentication.
-- [ ] Azure DevOps authentication.
 - [ ] Store tokens in macOS Keychain.
 - [ ] List repositories.
 - [ ] Clone from service.
@@ -2042,7 +2039,7 @@ Expand local Git capability without compromising repository safety.
 
 ## 23. Codex execution protocol
 
-Codex must follow this protocol for every implementation session.
+Codex or OpenCode must follow this protocol for every implementation session.
 
 ## 23.1 Before coding
 
@@ -2351,7 +2348,7 @@ A phase is done only when all checklist items and exit criteria in that phase pa
 **Mitigation:**
 
 - original name, icon, palette, typography, and component design;
-- no Tower assets or screenshots in repository;
+- no Tower screenshots shipped in the app bundle; attributed third-party screenshots under `docs/` are permitted for UI/UX reference only;
 - describe product as “a Git client,” not an unofficial Tower version;
 - use Tower only as workflow research;
 - include trademark disclaimer where relevant.
