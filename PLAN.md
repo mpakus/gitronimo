@@ -1998,20 +1998,20 @@ Expand local Git capability without compromising repository safety.
 
 ## Checklist
 
-- [ ] File history.
-- [ ] Blame.
+- [x] File history.
+- [x] Blame.
 - [x] Reflog.
 - [x] Restore lost branch from reflog.
-- [ ] Compare refs.
-- [ ] Browse tree at commit.
-- [ ] Export file at revision.
-- [ ] Worktree list/create/remove.
-- [ ] Submodule status/update/open.
-- [ ] Interactive rebase plan editor.
-- [ ] Squash/fixup/reword/drop.
-- [ ] Conflict-resolution UI.
-- [ ] External merge-tool integration.
-- [ ] Signed-commit status.
+- [x] Compare refs.
+- [x] Browse tree at commit.
+- [x] Export file at revision.
+- [x] Worktree list/create/remove.
+- [x] Submodule status/update/open.
+- [x] Interactive rebase plan editor.
+- [x] Squash/fixup/reword/drop.
+- [x] Conflict-resolution UI.
+- [x] External merge-tool integration.
+- [x] Signed-commit status.
 - [ ] Git LFS status.
 
 ---

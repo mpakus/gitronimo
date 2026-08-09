@@ -396,6 +396,193 @@ pub struct RefDecoration {
     pub target: String,
 }
 
+/// A bounded request for the commit history of a single tracked path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileHistoryRequest {
+    pub path: GitPath,
+    pub limit: usize,
+}
+
+/// One source line with the commit that last touched it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlameLine {
+    /// The oid of the commit that introduced the line.
+    pub oid: Vec<u8>,
+    pub author: CommitIdentity,
+    /// The line content, without the trailing newline.
+    pub content: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TreeEntryKind {
+    Blob,
+    Tree,
+    Commit,
+}
+
+/// One entry in a commit's tree at a directory level.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TreeEntry {
+    pub name: GitPath,
+    pub kind: TreeEntryKind,
+    pub oid: Vec<u8>,
+    pub mode: String,
+}
+
+/// One linked worktree managed by the repository.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorktreeEntry {
+    pub path: GitPath,
+    /// The checked-out commit oid.
+    pub head: Vec<u8>,
+    /// The checked-out branch, `None` for a detached HEAD.
+    pub branch: Option<GitPath>,
+    /// Whether the worktree's files differ from HEAD.
+    pub dirty: bool,
+    /// Whether this is the main working directory.
+    pub main: bool,
+}
+
+/// One submodule registered in `.gitmodules`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SubmoduleEntry {
+    pub path: GitPath,
+    /// Git's status flag: `-` uninitialized, `+` checked out but differing
+    /// from the index, `U` merge conflicts, ` ` clean.
+    pub flag: u8,
+    /// The gitlink oid recorded in the index.
+    pub oid: Vec<u8>,
+    /// Git's `(describe)` suffix, when present.
+    pub description: String,
+}
+
+/// One verb in an interactive rebase todo.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RebaseAction {
+    Pick,
+    Reword,
+    Edit,
+    Squash,
+    Fixup,
+    Drop,
+    Exec,
+    /// `label`, `reset`, `merge`, `break`, and anything else Git accepts.
+    Other(String),
+}
+
+impl RebaseAction {
+    /// The verb Git writes into the todo, and the app echoes back on save.
+    #[must_use]
+    pub fn verb(&self) -> &str {
+        match self {
+            RebaseAction::Pick => "pick",
+            RebaseAction::Reword => "reword",
+            RebaseAction::Edit => "edit",
+            RebaseAction::Squash => "squash",
+            RebaseAction::Fixup => "fixup",
+            RebaseAction::Drop => "drop",
+            RebaseAction::Exec => "exec",
+            RebaseAction::Other(verb) => verb,
+        }
+    }
+
+    /// The next action in the plan-editor cycle.
+    #[must_use]
+    pub fn next(&self) -> RebaseAction {
+        match self {
+            RebaseAction::Pick => RebaseAction::Reword,
+            RebaseAction::Reword => RebaseAction::Edit,
+            RebaseAction::Edit => RebaseAction::Squash,
+            RebaseAction::Squash => RebaseAction::Fixup,
+            RebaseAction::Fixup => RebaseAction::Drop,
+            RebaseAction::Drop => RebaseAction::Pick,
+            other => other.clone(),
+        }
+    }
+
+    /// The action verb when parsing a todo line.
+    #[must_use]
+    pub fn from_verb(verb: &[u8]) -> RebaseAction {
+        match verb {
+            b"pick" | b"p" => RebaseAction::Pick,
+            b"reword" | b"r" => RebaseAction::Reword,
+            b"edit" | b"e" => RebaseAction::Edit,
+            b"squash" | b"s" => RebaseAction::Squash,
+            b"fixup" | b"f" => RebaseAction::Fixup,
+            b"drop" | b"d" => RebaseAction::Drop,
+            b"exec" | b"x" => RebaseAction::Exec,
+            other => RebaseAction::Other(String::from_utf8_lossy(other).into_owned()),
+        }
+    }
+}
+
+/// One line of an interactive rebase plan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RebaseTodoItem {
+    pub action: RebaseAction,
+    /// Everything after the verb on the original line, kept verbatim so a
+    /// saved plan round-trips (the oid for pick/reword/edit/squash/fixup/drop,
+    /// the command for exec, the label for label/reset).
+    pub arguments: String,
+}
+
+/// Which side of a conflicted file to keep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConflictSide {
+    /// The branch being rebased onto, or the current branch during a merge.
+    Ours,
+    /// The commit being applied, or the other branch during a merge.
+    Theirs,
+}
+
+/// Git's `%G?` verdict for a commit signature.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommitSignatureStatus {
+    /// A valid signature.
+    Good,
+    /// A bad signature.
+    Bad,
+    /// A good signature whose key is unknown.
+    Unknown,
+    /// No signature.
+    None,
+    /// A good signature whose key has expired.
+    Expired,
+    /// A good signature made by an expired key.
+    GoodExpired,
+    /// A signature by a revoked key.
+    Revoked,
+    /// An error while checking.
+    Error,
+    /// Any other verdict Git emits.
+    Other(String),
+}
+
+impl CommitSignatureStatus {
+    #[must_use]
+    pub fn label(&self) -> &str {
+        match self {
+            CommitSignatureStatus::Good => "good",
+            CommitSignatureStatus::Bad => "bad",
+            CommitSignatureStatus::Unknown => "unknown key",
+            CommitSignatureStatus::None => "unsigned",
+            CommitSignatureStatus::Expired => "expired",
+            CommitSignatureStatus::GoodExpired => "good, expired key",
+            CommitSignatureStatus::Revoked => "revoked key",
+            CommitSignatureStatus::Error => "error",
+            CommitSignatureStatus::Other(verdict) => verdict,
+        }
+    }
+}
+
+/// The signature status and signer of one commit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitSignature {
+    pub status: CommitSignatureStatus,
+    /// The `%GS` signer line, empty for unsigned commits.
+    pub signer: String,
+}
+
 /// A non-mutating snapshot of refs and configured remotes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RefSnapshot {

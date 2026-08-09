@@ -13,8 +13,9 @@ use std::{
 
 use git_cli::LoadedDiff;
 use git_domain::{
-    GitPath, GraphRow, GraphState, HistoryCommit, HistoryReference, RefDecoration, RefSnapshot,
-    ReflogEntry, WorktreeRepository,
+    BlameLine, GitPath, GraphRow, GraphState, HistoryCommit, HistoryReference, RebaseTodoItem,
+    RefDecoration, RefSnapshot, ReflogEntry, SubmoduleEntry, TreeEntry, WorktreeEntry,
+    WorktreeRepository,
 };
 use gpui::{FocusHandle, ListState, WindowAppearance};
 use notify::RecommendedWatcher;
@@ -53,6 +54,14 @@ pub(crate) enum RepositoryView {
     WorkingCopy,
     History,
     Reflog,
+    FileHistory,
+    Blame,
+    Compare,
+    Tree,
+    Worktrees,
+    Submodules,
+    Rebase,
+    Conflicts,
 }
 
 pub(crate) struct NetworkOperation {
@@ -187,6 +196,30 @@ pub(crate) struct GitronimoApp {
     pub reflog: Vec<ReflogEntry>,
     pub reflog_load_token: u64,
     pub selected_reflog: Option<usize>,
+    pub file_history: Vec<HistoryCommit>,
+    pub file_history_path: String,
+    pub file_history_load_token: u64,
+    pub blame: Vec<BlameLine>,
+    pub blame_path: String,
+    pub blame_load_token: u64,
+    pub compare_diff: Option<git_cli::LoadedDiff>,
+    pub compare_left: String,
+    pub compare_right: String,
+    pub compare_load_token: u64,
+    pub tree: Vec<TreeEntry>,
+    pub tree_oid: String,
+    pub tree_path: Vec<GitPath>,
+    pub tree_blob: Option<Vec<u8>>,
+    pub tree_blob_path: Option<GitPath>,
+    pub tree_load_token: u64,
+    pub worktrees: Vec<WorktreeEntry>,
+    pub worktrees_load_token: u64,
+    pub submodules: Vec<SubmoduleEntry>,
+    pub submodules_load_token: u64,
+    pub rebase_plan: Vec<RebaseTodoItem>,
+    pub rebase_plan_load_token: u64,
+    pub conflict_path: Option<GitPath>,
+    pub conflict_content: Option<Vec<u8>>,
     pub mutation_in_flight: bool,
     pub network_operation: Option<Arc<Mutex<NetworkOperation>>>,
     pub watcher: Option<RecommendedWatcher>,

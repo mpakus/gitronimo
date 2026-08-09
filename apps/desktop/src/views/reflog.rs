@@ -7,7 +7,7 @@ use ui_kit::ThemeColors;
 use git_domain::WorktreeRepository;
 
 use crate::app_state::{GitronimoApp, RepositoryView};
-use crate::views::components::file_action_button;
+use crate::views::components::{file_action_button, relative_time};
 
 impl GitronimoApp {
     pub(crate) fn reflog_view(
@@ -21,7 +21,7 @@ impl GitronimoApp {
             .iter()
             .enumerate()
             .map(|(index, entry)| {
-                let when = format_timestamp(entry.identity.timestamp);
+                let when = relative_time(entry.identity.timestamp);
                 (
                     index,
                     String::from_utf8_lossy(&entry.new_oid).to_string(),
@@ -80,28 +80,5 @@ impl GitronimoApp {
                     .child(format!("{oid}  {name}  {when}  {subject}"))
             }))
             .child("Select an entry, then Restore to recreate a branch at that commit.".to_string())
-    }
-}
-
-fn format_timestamp(timestamp: i64) -> String {
-    let Ok(seconds) = u64::try_from(timestamp) else {
-        return "unknown time".into();
-    };
-    let duration = std::time::Duration::from_secs(seconds);
-    let Some(then) = std::time::UNIX_EPOCH.checked_add(duration) else {
-        return "unknown time".into();
-    };
-    let Ok(age) = std::time::SystemTime::now().duration_since(then) else {
-        return "unknown time".into();
-    };
-    let seconds = age.as_secs();
-    if seconds < 60 {
-        format!("{seconds}s ago")
-    } else if seconds < 3600 {
-        format!("{}m ago", seconds / 60)
-    } else if seconds < 86_400 {
-        format!("{}h ago", seconds / 3600)
-    } else {
-        format!("{}d ago", seconds / 86_400)
     }
 }

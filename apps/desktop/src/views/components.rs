@@ -289,6 +289,29 @@ pub(crate) fn activity_label(activity: &str) -> String {
     }
 }
 
+pub(crate) fn relative_time(timestamp: i64) -> String {
+    let Ok(seconds) = u64::try_from(timestamp) else {
+        return "unknown time".into();
+    };
+    let duration = std::time::Duration::from_secs(seconds);
+    let Some(then) = std::time::UNIX_EPOCH.checked_add(duration) else {
+        return "unknown time".into();
+    };
+    let Ok(age) = std::time::SystemTime::now().duration_since(then) else {
+        return "unknown time".into();
+    };
+    let seconds = age.as_secs();
+    if seconds < 60 {
+        format!("{seconds}s ago")
+    } else if seconds < 3600 {
+        format!("{}m ago", seconds / 60)
+    } else if seconds < 86_400 {
+        format!("{}h ago", seconds / 3600)
+    } else {
+        format!("{}d ago", seconds / 86_400)
+    }
+}
+
 pub(crate) struct ActionTooltip {
     pub label: &'static str,
     pub colors: ThemeColors,

@@ -28,6 +28,38 @@ impl GitronimoApp {
         if self.repository_view == RepositoryView::Reflog {
             return self.reflog_view(repository, colors, cx).into_any_element();
         }
+        if self.repository_view == RepositoryView::FileHistory {
+            return self
+                .file_history_view(repository, colors, cx)
+                .into_any_element();
+        }
+        if self.repository_view == RepositoryView::Blame {
+            return self.blame_view(repository, colors, cx).into_any_element();
+        }
+        if self.repository_view == RepositoryView::Compare {
+            return self.compare_view(repository, colors, cx).into_any_element();
+        }
+        if self.repository_view == RepositoryView::Tree {
+            return self.tree_view(repository, colors, cx).into_any_element();
+        }
+        if self.repository_view == RepositoryView::Worktrees {
+            return self
+                .worktrees_view(repository, colors, cx)
+                .into_any_element();
+        }
+        if self.repository_view == RepositoryView::Submodules {
+            return self
+                .submodules_view(repository, colors, cx)
+                .into_any_element();
+        }
+        if self.repository_view == RepositoryView::Rebase {
+            return self.rebase_view(repository, colors, cx).into_any_element();
+        }
+        if self.repository_view == RepositoryView::Conflicts {
+            return self
+                .conflicts_view(repository, colors, cx)
+                .into_any_element();
+        }
         let groups = self.status_groups();
         let has_local_branches = !self.refs.local_branches.is_empty();
         let has_remotes = !self.refs.remotes.is_empty();

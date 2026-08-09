@@ -28,8 +28,9 @@ use app_core::{
 };
 use git_cli::{CommitRequest, GitExecutable, GitStatusError, read_stderr_limited};
 use git_domain::{
-    GitPath, GraphState, HeadStatus, HistoryPage, HistoryReference, HistoryRequest, RefSnapshot,
-    ReflogRequest, WorktreeRepository, layout_history_graph,
+    ConflictSide, FileHistoryRequest, GitPath, GraphState, HeadStatus, HistoryPage,
+    HistoryReference, HistoryRequest, RefSnapshot, ReflogRequest, TreeEntry, TreeEntryKind,
+    WorktreeRepository, layout_history_graph,
 };
 use gpui::{
     App, Application, Bounds, ClipboardItem, Context, ExternalPaths, ListAlignment, ListState,
@@ -134,6 +135,17 @@ fn recovery_journal_path() -> PathBuf {
         .parent()
         .map_or_else(std::env::temp_dir, Path::to_path_buf)
         .join("recovery-journal.json")
+}
+
+fn joined_tree_path(segments: &[GitPath]) -> GitPath {
+    let mut bytes = Vec::new();
+    for segment in segments {
+        if !bytes.is_empty() {
+            bytes.push(b'/');
+        }
+        bytes.extend_from_slice(&segment.0);
+    }
+    GitPath(bytes)
 }
 
 fn install_panic_reporter() {
@@ -258,6 +270,30 @@ impl GitronimoApp {
             reflog: Vec::new(),
             reflog_load_token: 0,
             selected_reflog: None,
+            file_history: Vec::new(),
+            file_history_path: String::new(),
+            file_history_load_token: 0,
+            blame: Vec::new(),
+            blame_path: String::new(),
+            blame_load_token: 0,
+            compare_diff: None,
+            compare_left: String::new(),
+            compare_right: String::new(),
+            compare_load_token: 0,
+            tree: Vec::new(),
+            tree_oid: String::new(),
+            tree_path: Vec::new(),
+            tree_blob: None,
+            tree_blob_path: None,
+            tree_load_token: 0,
+            worktrees: Vec::new(),
+            worktrees_load_token: 0,
+            submodules: Vec::new(),
+            submodules_load_token: 0,
+            rebase_plan: Vec::new(),
+            rebase_plan_load_token: 0,
+            conflict_path: None,
+            conflict_content: None,
             mutation_in_flight: false,
             network_operation: None,
             watcher: None,
@@ -361,6 +397,30 @@ impl GitronimoApp {
             reflog: Vec::new(),
             reflog_load_token: 0,
             selected_reflog: None,
+            file_history: Vec::new(),
+            file_history_path: String::new(),
+            file_history_load_token: 0,
+            blame: Vec::new(),
+            blame_path: String::new(),
+            blame_load_token: 0,
+            compare_diff: None,
+            compare_left: String::new(),
+            compare_right: String::new(),
+            compare_load_token: 0,
+            tree: Vec::new(),
+            tree_oid: String::new(),
+            tree_path: Vec::new(),
+            tree_blob: None,
+            tree_blob_path: None,
+            tree_load_token: 0,
+            worktrees: Vec::new(),
+            worktrees_load_token: 0,
+            submodules: Vec::new(),
+            submodules_load_token: 0,
+            rebase_plan: Vec::new(),
+            rebase_plan_load_token: 0,
+            conflict_path: None,
+            conflict_content: None,
             mutation_in_flight: false,
             network_operation: None,
             watcher: None,
@@ -526,7 +586,7 @@ impl GitronimoApp {
             let command = cx
                 .background_spawn(async {
                     Command::new("osascript")
-                        .args(["-e", "choose from list {\"Refresh working copy\", \"Show history\", \"Show reflog\", \"Show working copy\", \"Show keyboard shortcuts\"} with title \"Gitronimo commands\" with prompt \"Choose an action\""])
+                        .args(["-e", "choose from list {\"Refresh working copy\", \"Show history\", \"Show reflog\", \"File history…\", \"Blame…\", \"Compare refs…\", \"Browse tree at commit…\", \"Worktrees…\", \"Submodules…\", \"Rebase plan…\", \"Squash staged changes…\", \"Fixup staged changes…\", \"Drop commit…\", \"Reword last commit…\", \"Conflicts…\", \"Set merge tool…\", \"Open in merge tool…\", \"Check commit signature…\", \"Show working copy\", \"Show keyboard shortcuts\"} with title \"Gitronimo commands\" with prompt \"Choose an action\""])
                         .output()
                         .ok()
                         .filter(|output| output.status.success())
@@ -553,6 +613,37 @@ impl GitronimoApp {
                         app.show_reflog(repository.clone(), cx);
                     }
                 }
+                Some("File history…") => GitronimoApp::prompt_file_history(cx),
+                Some("Blame…") => GitronimoApp::prompt_blame(cx),
+                Some("Compare refs…") => GitronimoApp::prompt_compare_refs(cx),
+                Some("Browse tree at commit…") => GitronimoApp::prompt_browse_tree(cx),
+                Some("Worktrees…") => {
+                    if let ShellState::Repository(repository) = &app.state {
+                        app.show_worktrees(repository.clone(), cx);
+                    }
+                }
+                Some("Submodules…") => {
+                    if let ShellState::Repository(repository) = &app.state {
+                        app.show_submodules(repository.clone(), cx);
+                    }
+                }
+                Some("Rebase plan…") => {
+                    if let ShellState::Repository(repository) = &app.state {
+                        app.show_rebase(repository.clone(), cx);
+                    }
+                }
+                Some("Squash staged changes…") => GitronimoApp::prompt_autosquash(true, cx),
+                Some("Fixup staged changes…") => GitronimoApp::prompt_autosquash(false, cx),
+                Some("Drop commit…") => GitronimoApp::prompt_drop_commit(cx),
+                Some("Reword last commit…") => GitronimoApp::prompt_reword_last_commit(cx),
+                Some("Conflicts…") => {
+                    if let ShellState::Repository(repository) = &app.state {
+                        app.show_conflicts(repository.clone(), cx);
+                    }
+                }
+                Some("Set merge tool…") => GitronimoApp::prompt_set_merge_tool(cx),
+                Some("Open in merge tool…") => GitronimoApp::prompt_run_merge_tool(cx),
+                Some("Check commit signature…") => GitronimoApp::prompt_check_commit_signature(cx),
                 Some("Show working copy") => {
                     app.navigate_to(RepositoryView::WorkingCopy, cx);
                 }
@@ -819,6 +910,1081 @@ impl GitronimoApp {
                     }
                 }
                 cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_file_history(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let path = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"File history for path\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|path| !path.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(path) = path {
+                    app.file_history_path = path;
+                    let ShellState::Repository(repository) = &app.state else {
+                        return;
+                    };
+                    let repository = repository.clone();
+                    app.navigate_to(RepositoryView::FileHistory, cx);
+                    app.load_file_history(repository, cx);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn load_file_history(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        let load_token = self.file_history_load_token;
+        let path = self.file_history_path.clone();
+        self.activity = format!("Loading history for {path}…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let commits = git
+                        .file_history(
+                            &repository,
+                            &FileHistoryRequest {
+                                path: GitPath(path.as_bytes().to_vec()),
+                                limit: 100,
+                            },
+                        )
+                        .map_err(|error| format!("{error:?}"))?;
+                    Ok::<_, String>(commits)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root)
+                    || app.file_history_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok(commits) => {
+                        app.file_history = commits;
+                        app.activity = format!(
+                            "Loaded {} commits for {}.",
+                            app.file_history.len(),
+                            app.file_history_path
+                        );
+                    }
+                    Err(error) => app.activity = format!("File history failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_blame(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let path = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args([
+                            "-e",
+                            "text returned of (display dialog \"Blame path\" default answer \"\")",
+                        ])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| {
+                            String::from_utf8_lossy(&output.stdout)
+                                .trim_end()
+                                .to_owned()
+                        })
+                        .filter(|path| !path.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(path) = path {
+                    app.blame_path = path;
+                    let ShellState::Repository(repository) = &app.state else {
+                        return;
+                    };
+                    let repository = repository.clone();
+                    app.navigate_to(RepositoryView::Blame, cx);
+                    app.load_blame(repository, cx);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn load_blame(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        let load_token = self.blame_load_token;
+        let path = self.blame_path.clone();
+        self.activity = format!("Loading blame for {path}…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let lines = git
+                        .blame(&repository, &GitPath(path.as_bytes().to_vec()))
+                        .map_err(|error| format!("{error:?}"))?;
+                    Ok::<_, String>(lines)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root)
+                    || app.blame_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok(lines) => {
+                        app.blame = lines;
+                        app.activity = format!(
+                            "Loaded blame for {} ({} lines).",
+                            app.blame_path,
+                            app.blame.len()
+                        );
+                    }
+                    Err(error) => app.activity = format!("Blame failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_compare_refs(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let left = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Compare from ref\" default answer \"HEAD\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|name| !name.is_empty())
+                })
+                .await;
+            let right = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Compare to ref\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|name| !name.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                let (Some(left), Some(right)) = (left, right) else {
+                    return;
+                };
+                app.compare_left = left;
+                app.compare_right = right;
+                let ShellState::Repository(repository) = &app.state else {
+                    return;
+                };
+                let repository = repository.clone();
+                app.navigate_to(RepositoryView::Compare, cx);
+                app.load_compare(repository, cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn load_compare(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        let load_token = self.compare_load_token;
+        let left = self.compare_left.clone();
+        let right = self.compare_right.clone();
+        self.activity = format!("Comparing {left}…{right}…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let loaded = git
+                        .diff_refs(&repository, &left, &right)
+                        .map_err(|error| format!("{error:?}"))?;
+                    Ok::<_, String>(loaded)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root)
+                    || app.compare_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok(loaded) => {
+                        app.compare_diff = Some(loaded);
+                        app.activity = format!(
+                            "Compared {}…{} ({} file(s)).",
+                            app.compare_left,
+                            app.compare_right,
+                            app.compare_diff
+                                .as_ref()
+                                .map_or(0, |loaded| loaded.diff.files.len())
+                        );
+                    }
+                    Err(error) => app.activity = format!("Compare failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_browse_tree(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let oid = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Browse tree at commit\" default answer \"HEAD\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|name| !name.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(oid) = oid {
+                    app.tree_oid = oid;
+                    let ShellState::Repository(repository) = &app.state else {
+                        return;
+                    };
+                    let repository = repository.clone();
+                    app.navigate_to(RepositoryView::Tree, cx);
+                    app.tree_path.clear();
+                    app.tree_blob = None;
+                    app.load_tree(repository, cx);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn load_tree(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        let load_token = self.tree_load_token;
+        let oid = self.tree_oid.clone();
+        let path = joined_tree_path(&self.tree_path);
+        self.activity = format!("Loading tree {}…", self.tree_path_label());
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let entries = git
+                        .tree_entries(&repository, &oid, &path)
+                        .map_err(|error| format!("{error:?}"))?;
+                    Ok::<_, String>(entries)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root)
+                    || app.tree_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok(entries) => {
+                        app.tree = entries;
+                        app.activity = format!("Listed {} entries.", app.tree.len());
+                    }
+                    Err(error) => app.activity = format!("Tree load failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn tree_path_label(&self) -> String {
+        joined_tree_path(&self.tree_path)
+            .0
+            .split(|byte| *byte == b'/')
+            .filter(|segment| !segment.is_empty())
+            .map(|segment| String::from_utf8_lossy(segment).into_owned())
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
+    fn select_tree_entry(
+        &mut self,
+        entry: &TreeEntry,
+        repository: WorktreeRepository,
+        cx: &mut Context<Self>,
+    ) {
+        let name = entry.name.clone();
+        match entry.kind {
+            TreeEntryKind::Tree => {
+                self.tree_path.push(name);
+                self.tree_blob = None;
+                self.tree_blob_path = None;
+                self.load_tree(repository, cx);
+            }
+            TreeEntryKind::Blob => {
+                let mut full_path = joined_tree_path(&self.tree_path);
+                if !full_path.0.is_empty() {
+                    full_path.0.push(b'/');
+                }
+                full_path.0.extend_from_slice(&name.0);
+                self.tree_blob_path = Some(full_path.clone());
+                let root = repository.worktree_root.clone();
+                let load_token = self.tree_load_token;
+                let oid = self.tree_oid.clone();
+                self.activity = format!("Reading {}", String::from_utf8_lossy(&full_path.0));
+                cx.spawn(async move |this, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                            let bytes = git
+                                .file_at_revision(&repository, &oid, &full_path)
+                                .map_err(|error| format!("{error:?}"))?;
+                            Ok::<_, String>(bytes)
+                        })
+                        .await;
+                    let _ = this.update(cx, |app, cx| {
+                        if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root)
+                            || app.tree_load_token != load_token
+                        {
+                            return;
+                        }
+                        match result {
+                            Ok(bytes) => {
+                                app.tree_blob = Some(bytes);
+                                app.activity = String::new();
+                            }
+                            Err(error) => app.activity = format!("Blob read failed: {error}"),
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
+            }
+            TreeEntryKind::Commit => {
+                cx.notify();
+            }
+        }
+    }
+
+    fn back_tree_level(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        if self.tree_path.pop().is_some() {
+            self.tree_blob = None;
+            self.tree_blob_path = None;
+            self.load_tree(repository, cx);
+        }
+        cx.notify();
+    }
+
+    fn export_selected_blob(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let destination = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args([
+                            "-e",
+                            "POSIX path of (choose folder with prompt \"Export file to folder\")",
+                        ])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+                        .filter(|path| !path.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                let Some(destination) = destination else {
+                    return;
+                };
+                let Some(blob) = app.tree_blob.as_ref() else {
+                    app.activity = "Select a file in the tree before exporting.".into();
+                    cx.notify();
+                    return;
+                };
+                let Some(file_name) = app.tree_blob_path.as_ref().map(|path| {
+                    let name = path
+                        .0
+                        .iter()
+                        .rposition(|byte| *byte == b'/')
+                        .map_or(&path.0[..], |separator| &path.0[separator + 1..]);
+                    String::from_utf8_lossy(name).into_owned()
+                }) else {
+                    app.activity = "The selected blob has no file name.".into();
+                    cx.notify();
+                    return;
+                };
+                let path = std::path::Path::new(&destination).join(file_name);
+                match std::fs::write(&path, blob) {
+                    Ok(()) => {
+                        app.activity = format!("Exported to {}.", path.display());
+                    }
+                    Err(error) => {
+                        app.activity = format!("Export failed: {error}");
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn show_worktrees(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        self.navigate_to(RepositoryView::Worktrees, cx);
+        if self.worktrees.is_empty() {
+            self.load_worktrees(repository, cx);
+        }
+        cx.notify();
+    }
+
+    fn load_worktrees(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        let load_token = self.worktrees_load_token;
+        self.activity = "Loading worktrees…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let entries = git
+                        .worktree_list(&repository)
+                        .map_err(|error| format!("{error:?}"))?;
+                    Ok::<_, String>(entries)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root)
+                    || app.worktrees_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok(entries) => {
+                        app.worktrees = entries;
+                        app.activity = format!("Loaded {} worktree(s).", app.worktrees.len());
+                    }
+                    Err(error) => app.activity = format!("Worktree load failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn run_worktree_mutation(
+        &mut self,
+        label: String,
+        command: impl FnOnce(&GitExecutable, &WorktreeRepository) -> Result<(), GitStatusError>
+        + Send
+        + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        self.mutation_in_flight = true;
+        self.activity = format!("{label}…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    command(&git, &worker_repository).map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = format!("{label} complete.");
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_refs(repository.clone(), cx);
+                        if app.repository_view == RepositoryView::Worktrees {
+                            app.worktrees_load_token = app.worktrees_load_token.wrapping_add(1);
+                            app.load_worktrees(repository.clone(), cx);
+                        }
+                        if app.repository_view == RepositoryView::Submodules {
+                            app.submodules_load_token = app.submodules_load_token.wrapping_add(1);
+                            app.load_submodules(repository.clone(), cx);
+                        }
+                        if app.repository_view == RepositoryView::Rebase {
+                            app.reload_rebase_plan(&repository, cx);
+                        }
+                    }
+                    Err(error) => app.activity = git_failure_message(&label, &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_add_worktree(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let path = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"New worktree path\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|path| !path.is_empty())
+                })
+                .await;
+            let branch = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"New branch in worktree\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|branch| !branch.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                let (Some(path), Some(branch)) = (path, branch) else {
+                    return;
+                };
+                let path_arg = GitPath(path.as_bytes().to_vec());
+                app.run_worktree_mutation(
+                    format!("Add worktree at {path}"),
+                    move |git, repository| git.add_worktree(repository, &path_arg, &branch),
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_remove_worktree(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let path = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Remove worktree at path\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|path| !path.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(path) = path {
+                    let path_arg = GitPath(path.as_bytes().to_vec());
+                    app.run_worktree_mutation(
+                        format!("Remove worktree at {path}"),
+                        move |git, repository| git.remove_worktree(repository, &path_arg, false),
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn show_submodules(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        self.navigate_to(RepositoryView::Submodules, cx);
+        if self.submodules.is_empty() {
+            self.load_submodules(repository, cx);
+        }
+    }
+
+    fn load_submodules(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        let load_token = self.submodules_load_token;
+        self.activity = "Loading submodules…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    git.submodule_list(&repository)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(
+                    &app.state,
+                    ShellState::Repository(current) if current.worktree_root == root
+                ) || app.submodules_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok(entries) => {
+                        app.submodules = entries;
+                        app.activity = format!("Loaded {} submodule(s).", app.submodules.len());
+                    }
+                    Err(error) => app.activity = format!("Submodule load failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_submodule_update(path: Option<GitPath>, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let confirmed = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "button returned of (display dialog \"Update submodule to its configured commit?\" with title \"Gitronimo\" buttons {\"Cancel\", \"Update\"} default button \"Update\" with icon caution)"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if confirmed.as_deref() != Some("Update") {
+                    return;
+                }
+                app.run_worktree_mutation(
+                    "Update submodule".to_owned(),
+                    move |git, repository| git.submodule_update(repository, path.as_ref()),
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_open_submodule(path: GitPath, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let _ = this.update(cx, |app, _| {
+                let ShellState::Repository(repository) = &app.state else {
+                    return;
+                };
+                let absolute = repository
+                    .worktree_root
+                    .join(PathBuf::from(String::from_utf8_lossy(&path.0).into_owned()));
+                let _ = Command::new("open").arg(&absolute).spawn();
+            });
+        })
+        .detach();
+    }
+
+    fn show_rebase(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        self.navigate_to(RepositoryView::Rebase, cx);
+        self.load_rebase_plan(repository, cx);
+    }
+
+    fn load_rebase_plan(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        let load_token = self.rebase_plan_load_token;
+        self.activity = "Loading rebase plan…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    git.rebase_plan(&repository)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(
+                    &app.state,
+                    ShellState::Repository(current) if current.worktree_root == root
+                ) || app.rebase_plan_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok(plan) => {
+                        app.rebase_plan = plan;
+                        app.activity = format!("Loaded {} rebase step(s).", app.rebase_plan.len());
+                    }
+                    Err(error) => {
+                        app.rebase_plan = Vec::new();
+                        app.activity = format!("Rebase plan load failed: {error}");
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn reload_rebase_plan(&mut self, repository: &WorktreeRepository, cx: &mut Context<Self>) {
+        self.rebase_plan_load_token = self.rebase_plan_load_token.wrapping_add(1);
+        self.load_rebase_plan(repository.clone(), cx);
+    }
+
+    fn save_rebase_plan(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let _ = this.update(cx, |app, cx| {
+                let plan = app.rebase_plan.clone();
+                if plan.is_empty() {
+                    return;
+                }
+                app.run_worktree_mutation(
+                    "Save rebase plan".to_owned(),
+                    move |git, repository| git.save_rebase_plan(repository, &plan),
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_start_rebase(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let base = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Rebase current branch onto\" default answer \"main\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|base| !base.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(base) = base {
+                    app.run_worktree_mutation(
+                        format!("Rebase onto {base}"),
+                        move |git, repository| git.start_rebase(repository, &base),
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_autosquash(squash: bool, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let target = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Fold staged changes into commit\" default answer \"HEAD\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|target| !target.is_empty())
+                })
+                .await;
+            let message = if squash {
+                cx.background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Squash message\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|message| !message.is_empty())
+                })
+                .await
+            } else {
+                None
+            };
+            let _ = this.update(cx, |app, cx| {
+                let Some(target) = target else {
+                    return;
+                };
+                let label = if squash { "Squash into" } else { "Fixup into" };
+                app.run_worktree_mutation(
+                    format!("{label} {target}"),
+                    move |git, repository| git.autosquash(repository, &target, message.as_deref()),
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_drop_commit(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let target = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Drop commit from history (e.g. HEAD~2 or an oid)\" default answer \"HEAD~1\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|target| !target.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(target) = target {
+                    app.run_worktree_mutation(
+                        format!("Drop {target}"),
+                        move |git, repository| git.drop_commit(repository, &target),
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_reword_last_commit(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let subject = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"New commit subject\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|subject| !subject.is_empty())
+                })
+                .await;
+            let body = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"New commit body (optional)\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                let Some(subject) = subject else {
+                    return;
+                };
+                let body = body.unwrap_or_default();
+                app.run_worktree_mutation(
+                    "Reword last commit".to_owned(),
+                    move |git, repository| {
+                        git.commit(
+                            repository,
+                            &CommitRequest {
+                                subject,
+                                body,
+                                amend: true,
+                                sign_off: false,
+                            },
+                        )
+                    },
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    fn show_conflicts(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        self.navigate_to(RepositoryView::Conflicts, cx);
+        self.conflict_path = None;
+        self.conflict_content = None;
+        self.load_working_copy(repository, cx);
+    }
+
+    fn view_conflict(repository: WorktreeRepository, path: GitPath, cx: &mut Context<Self>) {
+        let worker_repository = repository.clone();
+        let worker_path = path.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    git.read_working_file(&worker_repository, &worker_path)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == repository.worktree_root)
+                {
+                    return;
+                }
+                app.conflict_path = Some(path.clone());
+                match result {
+                    Ok(content) => app.conflict_content = Some(content),
+                    Err(error) => {
+                        app.conflict_content = None;
+                        app.activity = format!("Conflict read failed: {error}");
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn resolve_conflict(path: GitPath, side: ConflictSide, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let _ = this.update(cx, |app, cx| {
+                let side_label = match side {
+                    ConflictSide::Ours => "ours",
+                    ConflictSide::Theirs => "theirs",
+                };
+                app.run_worktree_mutation(
+                    format!("Resolve with {side_label}"),
+                    move |git, repository| git.resolve_conflict(repository, &path, side),
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_set_merge_tool(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let tool = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "choose from list {\"opendiff\", \"meld\", \"kdiff3\", \"vimdiff\", \"bc3\"} with title \"Gitronimo merge tool\" with prompt \"Choose a merge tool\""])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+                        .filter(|tool| tool != "false" && !tool.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(tool) = tool {
+                    app.run_worktree_mutation(
+                        format!("Set merge tool to {tool}"),
+                        move |git, repository| git.set_merge_tool(repository, &tool),
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_run_merge_tool(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let path = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Conflicted path, or leave empty for all\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|path| !path.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                let ShellState::Repository(repository) = &app.state else {
+                    app.activity = "Open a repository before using the merge tool.".into();
+                    return;
+                };
+                let repository = repository.clone();
+                let worker_repository = repository.clone();
+                let path_arg = path.map(|path| GitPath(path.as_bytes().to_vec()));
+                app.activity = "Opening merge tool…".into();
+                cx.spawn(async move |this, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                            git.run_merge_tool(&worker_repository, None, path_arg.as_ref())
+                                .map_err(|error| format!("{error:?}"))
+                        })
+                        .await;
+                    let _ = this.update(cx, |app, cx| match result {
+                        Ok(()) => {
+                            app.activity = "Merge tool finished.".into();
+                            app.load_working_copy(repository, cx);
+                        }
+                        Err(error) => app.activity = format!("Merge tool failed: {error}"),
+                    });
+                })
+                .detach();
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_check_commit_signature(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let default_oid = this
+                .read_with(cx, |app, _| {
+                    if app.repository_view == RepositoryView::History {
+                        app.selected_history
+                            .and_then(|index| app.history.get(index))
+                            .map(|commit| commit.oid.clone())
+                    } else {
+                        None
+                    }
+                })
+                .ok()
+                .flatten();
+            let default_oid = default_oid.unwrap_or_else(|| "HEAD".to_owned());
+            let oid = cx
+                .background_spawn(async move {
+                    Command::new("osascript")
+                        .args([
+                            "-e",
+                            &format!(
+                                "text returned of (display dialog \"Commit to verify\" default answer \"{default_oid}\")"
+                            ),
+                        ])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|oid| !oid.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                let Some(oid) = oid else {
+                    return;
+                };
+                let ShellState::Repository(repository) = &app.state else {
+                    app.activity = "Open a repository before verifying a commit.".into();
+                    return;
+                };
+                let repository = repository.clone();
+                let worker_repository = repository.clone();
+                let worker_oid = oid.clone();
+                app.activity = format!("Checking signature of {oid}…");
+                cx.spawn(async move |this, cx| {
+                    let result = cx
+                        .background_spawn(async move {
+                            let git =
+                                GitExecutable::discover().map_err(|error| error.to_string())?;
+                            git.commit_signature(&worker_repository, &worker_oid)
+                                .map_err(|error| format!("{error:?}"))
+                        })
+                        .await;
+                    let _ = this.update(cx, |app, cx| {
+                        match result {
+                            Ok(signature) => {
+                                let label = signature.status.label();
+                                app.activity = if signature.signer.is_empty() {
+                                    format!("Commit {oid} signature: {label}.")
+                                } else {
+                                    format!(
+                                        "Commit {oid} signature: {label} (signed by {}).",
+                                        signature.signer
+                                    )
+                                };
+                            }
+                            Err(error) => {
+                                app.activity =
+                                    git_failure_message(&format!("Verify commit {oid}"), &error);
+                            }
+                        }
+                        cx.notify();
+                    });
+                })
+                .detach();
             });
         })
         .detach();

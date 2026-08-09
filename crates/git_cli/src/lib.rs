@@ -15,11 +15,13 @@ use std::{
 
 use app_core::{RepositoryDiscoverer, RepositoryOpenError};
 use git_domain::{
-    BranchStatus, CommitIdentity, DiffFile, DiffHunk, DiffLine, DiffLineKind, FileStatus, GitPath,
+    BlameLine, BranchStatus, CommitIdentity, CommitSignature, CommitSignatureStatus, ConflictSide,
+    DiffFile, DiffHunk, DiffLine, DiffLineKind, FileHistoryRequest, FileStatus, GitPath,
     HeadStatus, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest, InProgressOperation,
-    NamedRef, RecoveredBranchTip, RecoveryRecord, RefDecoration, RefSnapshot, ReflogEntry,
-    ReflogRequest, Remote, RenameKind, RepositoryLocation, StatusEntry, SubmoduleState,
-    UnifiedDiff, WorktreeRepository, WorktreeStatus, parse_hunk_header, selected_lines_patch,
+    NamedRef, RebaseAction, RebaseTodoItem, RecoveredBranchTip, RecoveryRecord, RefDecoration,
+    RefSnapshot, ReflogEntry, ReflogRequest, Remote, RenameKind, RepositoryLocation, StatusEntry,
+    SubmoduleEntry, SubmoduleState, TreeEntry, TreeEntryKind, UnifiedDiff, WorktreeEntry,
+    WorktreeRepository, WorktreeStatus, parse_hunk_header, selected_lines_patch,
 };
 
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
@@ -144,7 +146,7 @@ impl GitExecutable {
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
-        E: IntoIterator<Item = (&'static str, &'static str)>,
+        E: IntoIterator<Item = (OsString, OsString)>,
     {
         let mut command = self.command(directory, args);
         for (key, value) in envs {
@@ -426,6 +428,511 @@ impl GitExecutable {
             commits,
             next_before,
         })
+    }
+
+    /// Reads the commit history of a single tracked path, newest first,
+    /// following renames with `--follow`.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the path is untracked or does not exist.
+    pub fn file_history(
+        &self,
+        repository: &WorktreeRepository,
+        request: &FileHistoryRequest,
+    ) -> Result<Vec<HistoryCommit>, GitStatusError> {
+        let limit = request.limit.clamp(1, 500);
+        let mut args = vec![
+            OsString::from("log"),
+            OsString::from("--no-decorate"),
+            OsString::from("--follow"),
+            OsString::from(format!("--max-count={limit}")),
+            OsString::from(
+                "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00%b%x1e",
+            ),
+        ];
+        args.push(OsString::from("--"));
+        args.push(OsString::from_vec(request.path.0.clone()));
+        let output = self.run(&repository.worktree_root, args)?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        parse_history_records(&output.stdout)
+    }
+
+    /// Attributes each line of a tracked path to the commit that introduced it,
+    /// parsed from `git blame --line-porcelain`.
+    ///
+    /// # Errors
+    /// Returns Git's refusal for an uncommitted, untracked, or absent path.
+    pub fn blame(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+    ) -> Result<Vec<BlameLine>, GitStatusError> {
+        let mut args = vec![OsString::from("blame"), OsString::from("--line-porcelain")];
+        args.push(OsString::from("--"));
+        args.push(OsString::from_vec(path.0.clone()));
+        let output = self.run(&repository.worktree_root, args)?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        parse_blame(&output.stdout)
+    }
+
+    /// Loads a bounded unified diff between two refs (commits, branches, or
+    /// tags). The two-dot semantics match `git diff A B`.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when either ref cannot be resolved.
+    pub fn diff_refs(
+        &self,
+        repository: &WorktreeRepository,
+        left: &str,
+        right: &str,
+    ) -> Result<LoadedDiff, GitStatusError> {
+        let output = self.run(
+            &repository.worktree_root,
+            [
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--binary",
+                left,
+                right,
+            ],
+        )?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        let truncated = output.stdout.len() > MAX_DISPLAY_DIFF_BYTES;
+        let bytes = &output.stdout[..output.stdout.len().min(MAX_DISPLAY_DIFF_BYTES)];
+        Ok(LoadedDiff {
+            diff: parse_unified_diff(bytes),
+            truncated,
+        })
+    }
+
+    /// Lists the entries of one tree level inside a commit. An empty `path`
+    /// lists the root tree; a non-empty `path` lists that subdirectory.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the oid is not a commit or tree.
+    pub fn tree_entries(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+        path: &GitPath,
+    ) -> Result<Vec<TreeEntry>, GitStatusError> {
+        let mut treeish = oid.to_owned();
+        if !path.0.is_empty() {
+            treeish.push(':');
+            treeish.push_str(&String::from_utf8_lossy(&path.0));
+        }
+        let output = self.run(&repository.worktree_root, ["ls-tree", "-z", &treeish])?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        parse_ls_tree(&output.stdout)
+    }
+
+    /// Reads the bytes of a file at a commit, for browsing or export.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the path is not a blob in that tree.
+    pub fn file_at_revision(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+        path: &GitPath,
+    ) -> Result<Vec<u8>, GitStatusError> {
+        let mut args = vec![OsString::from("show"), OsString::from("--format=")];
+        let mut revision = oid.to_owned();
+        revision.push(':');
+        revision.push_str(&String::from_utf8_lossy(&path.0));
+        args.push(OsString::from(revision));
+        let output = self.run(&repository.worktree_root, args)?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        Ok(output.stdout)
+    }
+
+    /// Lists every worktree managed by the repository, main first.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the worktree query fails.
+    pub fn worktree_list(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<Vec<WorktreeEntry>, GitStatusError> {
+        let output = self.run(
+            &repository.worktree_root,
+            ["worktree", "list", "--porcelain"],
+        )?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        let entries = parse_worktree_list(&output.stdout);
+        let dirty = self
+            .run(
+                &repository.worktree_root,
+                ["status", "--porcelain", "--ignore-submodules"],
+            )
+            .ok()
+            .is_some_and(|output| {
+                output.status.success() && !output.stdout.iter().all(u8::is_ascii_whitespace)
+            });
+        Ok(entries
+            .into_iter()
+            .map(|mut entry| {
+                if entry.main {
+                    entry.dirty = dirty;
+                }
+                entry
+            })
+            .collect())
+    }
+
+    /// Creates a linked worktree at `path` with a new branch `branch`.
+    ///
+    /// # Errors
+    /// Returns Git's refusal for an existing path or branch name.
+    pub fn add_worktree(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        branch: &str,
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![OsString::from("worktree"), OsString::from("add")];
+        args.push(OsString::from_vec(path.0.clone()));
+        args.push(OsString::from(format!("-b{branch}")));
+        self.mutate(repository, args)
+    }
+
+    /// Removes a linked worktree; callers explicitly opt in to force removal.
+    ///
+    /// # Errors
+    /// Returns Git's refusal for a dirty or active worktree unless `force`.
+    pub fn remove_worktree(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        force: bool,
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![OsString::from("worktree"), OsString::from("remove")];
+        if force {
+            args.push(OsString::from("--force"));
+        }
+        args.push(OsString::from_vec(path.0.clone()));
+        self.mutate(repository, args)
+    }
+
+    /// Lists every submodule registered in `.gitmodules`.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the submodule query fails.
+    pub fn submodule_list(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<Vec<SubmoduleEntry>, GitStatusError> {
+        let output = self.run(&repository.worktree_root, ["submodule", "status"])?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        parse_submodule_status(&output.stdout)
+    }
+
+    /// Initializes and updates a submodule from its configured remote.
+    ///
+    /// # Errors
+    /// Returns Git's actionable failure for an invalid submodule path or
+    /// network/authentication problems.
+    pub fn submodule_update(
+        &self,
+        repository: &WorktreeRepository,
+        path: Option<&GitPath>,
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![
+            OsString::from("submodule"),
+            OsString::from("update"),
+            OsString::from("--init"),
+        ];
+        if let Some(path) = path {
+            args.push(OsString::from("--"));
+            args.push(OsString::from_vec(path.0.clone()));
+        }
+        self.mutate(repository, args)
+    }
+
+    /// Starts an interactive rebase onto `base`.
+    ///
+    /// The sequence editor is a no-op so the generated plan is applied without
+    /// spawning an editor; the plan editor view can then adjust the todo during
+    /// any pause (for example a conflict).
+    ///
+    /// # Errors
+    /// Returns Git's actionable failure when the worktree is dirty, `base` is
+    /// invalid, or there is nothing to rebase.
+    pub fn start_rebase(
+        &self,
+        repository: &WorktreeRepository,
+        base: &str,
+    ) -> Result<(), GitStatusError> {
+        let output = self.run_env(
+            &repository.worktree_root,
+            [
+                ("GIT_SEQUENCE_EDITOR".into(), ":".into()),
+                ("GIT_EDITOR".into(), "true".into()),
+            ],
+            ["rebase", "--interactive", base],
+        )?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(command_error(&output))
+        }
+    }
+
+    /// Reads the todo of the rebase currently in progress.
+    ///
+    /// # Errors
+    /// Returns `NoOperationInProgress` when no interactive rebase is paused.
+    pub fn rebase_plan(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<Vec<RebaseTodoItem>, GitStatusError> {
+        let todo_path = repository
+            .git_dir
+            .join("rebase-merge")
+            .join("git-rebase-todo");
+        if !todo_path.is_file() {
+            return Err(GitStatusError::NoOperationInProgress);
+        }
+        let bytes = fs::read(&todo_path)?;
+        Ok(parse_rebase_todo(&bytes))
+    }
+
+    /// Writes an edited todo back to the paused rebase.
+    ///
+    /// # Errors
+    /// Returns `NoOperationInProgress` when no interactive rebase is paused.
+    pub fn save_rebase_plan(
+        &self,
+        repository: &WorktreeRepository,
+        items: &[RebaseTodoItem],
+    ) -> Result<(), GitStatusError> {
+        let todo_path = repository
+            .git_dir
+            .join("rebase-merge")
+            .join("git-rebase-todo");
+        if !todo_path.is_file() {
+            return Err(GitStatusError::NoOperationInProgress);
+        }
+        let mut bytes = Vec::new();
+        for item in items {
+            bytes.extend_from_slice(item.action.verb().as_bytes());
+            if !item.arguments.is_empty() {
+                bytes.push(b' ');
+                bytes.extend_from_slice(item.arguments.as_bytes());
+            }
+            bytes.push(b'\n');
+        }
+        fs::write(&todo_path, bytes)?;
+        Ok(())
+    }
+
+    /// Aborts the rebase in progress and returns to the pre-rebase state.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when no rebase is in progress.
+    pub fn rebase_abort(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["rebase", "--abort"])
+    }
+
+    /// Skips the current patch of a paused rebase.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when no rebase is in progress.
+    pub fn rebase_skip(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["rebase", "--skip"])
+    }
+
+    /// Folds the staged changes into `target` as a squash (with `message`) or a
+    /// fixup (without one).
+    ///
+    /// `target` is resolved to a full oid before the fold so the autosquash
+    /// rebase can replay `target..HEAD`; the sequence editor is a no-op so the
+    /// fold applies without spawning an editor.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when nothing is staged, `target` is invalid, or
+    /// the autosquash rebase conflicts.
+    pub fn autosquash(
+        &self,
+        repository: &WorktreeRepository,
+        target: &str,
+        message: Option<&str>,
+    ) -> Result<(), GitStatusError> {
+        let resolve = self.run(&repository.worktree_root, ["rev-parse", target])?;
+        if !resolve.status.success() {
+            return Err(command_error(&resolve));
+        }
+        let oid = trim_oid(&resolve.stdout).ok_or(GitStatusError::ParseReflog)?;
+        let oid_text = String::from_utf8_lossy(&oid).into_owned();
+        let mut commit_args = vec![OsString::from("commit")];
+        if let Some(message) = message {
+            commit_args.push(OsString::from("--squash"));
+            commit_args.push(OsString::from_vec(oid.clone()));
+            commit_args.push(OsString::from("-m"));
+            commit_args.push(OsString::from(message.to_owned()));
+        } else {
+            commit_args.push(OsString::from("--fixup"));
+            commit_args.push(OsString::from_vec(oid.clone()));
+        }
+        let commit_output = self.run_env(
+            &repository.worktree_root,
+            [("GIT_EDITOR".into(), "true".into())],
+            commit_args,
+        )?;
+        if !commit_output.status.success() {
+            return Err(command_error(&commit_output));
+        }
+        let base = format!("{oid_text}^");
+        let rebase_output = self.run_env(
+            &repository.worktree_root,
+            [
+                ("GIT_SEQUENCE_EDITOR".into(), ":".into()),
+                ("GIT_EDITOR".into(), "true".into()),
+            ],
+            ["rebase", "--autosquash", "--interactive", base.as_str()],
+        )?;
+        if rebase_output.status.success() {
+            Ok(())
+        } else {
+            Err(command_error(&rebase_output))
+        }
+    }
+
+    /// Removes `target` from the current branch by rebasing everything after it
+    /// onto its parent.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the worktree is dirty, `target` is invalid,
+    /// or there is nothing after `target` to rebase.
+    pub fn drop_commit(
+        &self,
+        repository: &WorktreeRepository,
+        target: &str,
+    ) -> Result<(), GitStatusError> {
+        let parent = format!("{target}^");
+        let output = self.run(
+            &repository.worktree_root,
+            ["rebase", "--onto", parent.as_str(), target],
+        )?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(command_error(&output))
+        }
+    }
+
+    /// Resolves a conflicted file to one side and stages it as resolved.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the path is not conflicted or cannot be
+    /// checked out.
+    pub fn resolve_conflict(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        side: ConflictSide,
+    ) -> Result<(), GitStatusError> {
+        let flag = match side {
+            ConflictSide::Ours => "--ours",
+            ConflictSide::Theirs => "--theirs",
+        };
+        let mut checkout = vec![
+            OsString::from("checkout"),
+            OsString::from(flag),
+            OsString::from("--"),
+        ];
+        checkout.push(OsString::from_vec(path.0.clone()));
+        self.mutate(repository, checkout)?;
+        let mut add = vec![OsString::from("add"), OsString::from("--")];
+        add.push(OsString::from_vec(path.0.clone()));
+        self.mutate(repository, add)
+    }
+
+    /// Reads the working-tree copy of a file, marker lines and all.
+    ///
+    /// # Errors
+    /// Returns an I/O error when the file is not present.
+    pub fn read_working_file(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+    ) -> Result<Vec<u8>, GitStatusError> {
+        let absolute = repository
+            .worktree_root
+            .join(PathBuf::from(String::from_utf8_lossy(&path.0).into_owned()));
+        fs::read(&absolute).map_err(GitStatusError::Io)
+    }
+
+    /// Names the merge tool for `git mergetool` and disables the `.orig`
+    /// backup files it leaves behind.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the config cannot be written.
+    pub fn set_merge_tool(
+        &self,
+        repository: &WorktreeRepository,
+        tool: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["config", "merge.tool", tool])?;
+        self.mutate(repository, ["config", "mergetool.keepBackup", "false"])
+    }
+
+    /// Launches the configured (or named) merge tool on every conflicted file,
+    /// or on a single path.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the tool is not configured or the invocation
+    /// fails.
+    pub fn run_merge_tool(
+        &self,
+        repository: &WorktreeRepository,
+        tool: Option<&str>,
+        path: Option<&GitPath>,
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![OsString::from("mergetool"), OsString::from("--no-prompt")];
+        if let Some(tool) = tool {
+            args.push(OsString::from("-t"));
+            args.push(OsString::from(tool));
+        }
+        if let Some(path) = path {
+            args.push(OsString::from("--"));
+            args.push(OsString::from_vec(path.0.clone()));
+        }
+        self.mutate(repository, args)
+    }
+
+    /// Reports the signature status and signer of a commit.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when `oid` does not resolve.
+    pub fn commit_signature(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+    ) -> Result<CommitSignature, GitStatusError> {
+        let output = self.run(
+            &repository.worktree_root,
+            ["show", "--no-patch", "--format=%G?%x00%GS", oid],
+        )?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        Ok(parse_signature(&output.stdout))
     }
 
     /// Loads ref decorations independently from history records.
@@ -1092,7 +1599,7 @@ impl GitExecutable {
             InProgressOperation::Rebase => {
                 let output = self.run_env(
                     &repository.worktree_root,
-                    [("GIT_EDITOR", "true")],
+                    [("GIT_EDITOR".into(), "true".into())],
                     ["rebase", "--continue"],
                 )?;
                 output
@@ -1881,6 +2388,192 @@ pub fn parse_commit_records(bytes: &[u8]) -> Result<Vec<CommitRecord>, &'static 
         .collect()
 }
 
+fn parse_blame(bytes: &[u8]) -> Result<Vec<BlameLine>, GitStatusError> {
+    let mut entries = Vec::new();
+    let mut oid: Option<Vec<u8>> = None;
+    let mut name = Vec::new();
+    let mut email = Vec::new();
+    let mut timestamp: i64 = 0;
+    let mut header_started = false;
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if let Some(content) = line.strip_prefix(b"\t") {
+            if let Some(oid) = oid.take() {
+                entries.push(BlameLine {
+                    oid,
+                    author: CommitIdentity {
+                        name,
+                        email,
+                        timestamp,
+                    },
+                    content: content.to_vec(),
+                });
+            }
+            name = Vec::new();
+            email = Vec::new();
+            header_started = false;
+            continue;
+        }
+        if header_started {
+            if let Some(rest) = line.strip_prefix(b"author ") {
+                name = rest.to_vec();
+            } else if let Some(rest) = line.strip_prefix(b"author-mail ") {
+                email = rest
+                    .strip_prefix(b"<")
+                    .and_then(|rest| rest.strip_suffix(b">"))
+                    .unwrap_or(rest)
+                    .to_vec();
+            } else if let Some(rest) = line.strip_prefix(b"author-time ") {
+                timestamp = std::str::from_utf8(rest)
+                    .map_err(|_| GitStatusError::ParseReflog)?
+                    .trim()
+                    .parse::<i64>()
+                    .map_err(|_| GitStatusError::ParseReflog)?;
+            }
+            continue;
+        }
+        let mut fields = line.split(u8::is_ascii_whitespace);
+        if let Some(hex) = fields.next()
+            && hex.len() == 40
+            && fields.next().is_some()
+        {
+            oid = Some(hex.to_vec());
+            header_started = true;
+        }
+    }
+    Ok(entries)
+}
+
+fn parse_rebase_todo(bytes: &[u8]) -> Vec<RebaseTodoItem> {
+    let mut items = Vec::new();
+    for line in bytes.split(|byte| *byte == b'\n') {
+        let line = line.trim_ascii();
+        if line.is_empty() || line[0] == b'#' {
+            continue;
+        }
+        let verb_end = line
+            .iter()
+            .position(u8::is_ascii_whitespace)
+            .unwrap_or(line.len());
+        let action = RebaseAction::from_verb(&line[..verb_end]);
+        let arguments = String::from_utf8_lossy(line[verb_end..].trim_ascii()).into_owned();
+        items.push(RebaseTodoItem { action, arguments });
+    }
+    items
+}
+
+fn parse_signature(bytes: &[u8]) -> CommitSignature {
+    let record = bytes
+        .split(|byte| *byte == b'\n')
+        .next()
+        .unwrap_or_default();
+    let mut fields = record.split(|byte| *byte == 0);
+    let status = match fields.next().unwrap_or_default() {
+        b"G" => CommitSignatureStatus::Good,
+        b"B" => CommitSignatureStatus::Bad,
+        b"U" => CommitSignatureStatus::Unknown,
+        b"N" => CommitSignatureStatus::None,
+        b"X" => CommitSignatureStatus::Expired,
+        b"Y" => CommitSignatureStatus::GoodExpired,
+        b"R" => CommitSignatureStatus::Revoked,
+        b"E" => CommitSignatureStatus::Error,
+        other => CommitSignatureStatus::Other(String::from_utf8_lossy(other).into_owned()),
+    };
+    let signer = fields
+        .next()
+        .map(|signer| String::from_utf8_lossy(signer).into_owned())
+        .unwrap_or_default();
+    CommitSignature { status, signer }
+}
+
+fn parse_submodule_status(bytes: &[u8]) -> Result<Vec<SubmoduleEntry>, GitStatusError> {
+    let mut entries = Vec::new();
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let flag = line[0];
+        let rest = line
+            .iter()
+            .position(|byte| !byte.is_ascii_whitespace())
+            .map(|index| &line[index..])
+            .unwrap_or_default();
+        let oid_end = rest
+            .iter()
+            .position(u8::is_ascii_whitespace)
+            .ok_or(GitStatusError::ParseReflog)?;
+        let oid = rest[..oid_end].to_vec();
+        let rest = rest[oid_end..].trim_ascii_start();
+        let path_end = rest
+            .iter()
+            .position(u8::is_ascii_whitespace)
+            .unwrap_or(rest.len());
+        let path = GitPath(rest[..path_end].to_vec());
+        let description = String::from_utf8_lossy(rest[path_end..].trim_ascii()).into_owned();
+        entries.push(SubmoduleEntry {
+            path,
+            flag,
+            oid,
+            description,
+        });
+    }
+    Ok(entries)
+}
+
+fn parse_worktree_list(bytes: &[u8]) -> Vec<WorktreeEntry> {
+    let mut entries = Vec::new();
+    for line in bytes.split(|byte| *byte == b'\n') {
+        if let Some(path) = line.strip_prefix(b"worktree ") {
+            entries.push(WorktreeEntry {
+                path: GitPath(path.to_vec()),
+                head: Vec::new(),
+                branch: None,
+                dirty: false,
+                main: false,
+            });
+        } else if let Some(entry) = entries.last_mut() {
+            if let Some(head) = line.strip_prefix(b"HEAD ") {
+                entry.head = head.to_vec();
+            } else if let Some(branch) = line.strip_prefix(b"branch refs/heads/") {
+                entry.branch = Some(GitPath(branch.to_vec()));
+            } else if line == b"detached" {
+                entry.branch = None;
+            }
+        }
+    }
+    if let Some(main) = entries.first_mut() {
+        main.main = true;
+    }
+    entries
+}
+
+fn parse_ls_tree(bytes: &[u8]) -> Result<Vec<TreeEntry>, GitStatusError> {
+    let mut entries = Vec::new();
+    for record in bytes.split(|byte| *byte == 0).filter(|r| !r.is_empty()) {
+        let separator = record
+            .iter()
+            .position(|byte| *byte == b'\t')
+            .ok_or(GitStatusError::ParseReflog)?;
+        let meta = &record[..separator];
+        let name = &record[separator + 1..];
+        let mut fields = meta.split(|byte| *byte == b' ');
+        let mode = String::from_utf8_lossy(fields.next().unwrap_or_default()).into_owned();
+        let kind = match fields.next() {
+            Some(b"blob") => TreeEntryKind::Blob,
+            Some(b"tree") => TreeEntryKind::Tree,
+            Some(b"commit") => TreeEntryKind::Commit,
+            _ => return Err(GitStatusError::ParseReflog),
+        };
+        let oid = fields.next().unwrap_or_default().to_vec();
+        entries.push(TreeEntry {
+            name: GitPath(name.to_vec()),
+            kind,
+            oid,
+            mode,
+        });
+    }
+    Ok(entries)
+}
+
 fn parse_reflog_records(bytes: &[u8]) -> Result<Vec<ReflogEntry>, GitStatusError> {
     bytes
         .split(|byte| *byte == 0x1e)
@@ -2059,13 +2752,14 @@ mod tests {
 
     use super::{
         CommitRequest, GitExecutable, GitStatusError, MAX_PROCESS_OUTPUT_BYTES, RenameKind,
-        git_candidates, parse_commit_records, parse_porcelain_v2_z, parse_unified_diff,
-        read_limited, trim_oid,
+        git_candidates, parse_commit_records, parse_porcelain_v2_z, parse_rebase_todo,
+        parse_signature, parse_unified_diff, read_limited, trim_oid,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
-        DiffLineKind, GitPath, HeadStatus, HistoryReference, HistoryRequest, InProgressOperation,
-        ReflogRequest, RepositoryLocation, StatusEntry, SubmoduleState,
+        CommitSignature, CommitSignatureStatus, ConflictSide, DiffLineKind, FileHistoryRequest,
+        GitPath, HeadStatus, HistoryReference, HistoryRequest, InProgressOperation, RebaseAction,
+        ReflogRequest, RepositoryLocation, StatusEntry, SubmoduleState, TreeEntryKind,
     };
 
     static NEXT_REPOSITORY: AtomicUsize = AtomicUsize::new(0);
@@ -2075,6 +2769,43 @@ mod tests {
         let output = vec![b'x'; MAX_PROCESS_OUTPUT_BYTES + 1];
         let error = read_limited(Cursor::new(output)).expect_err("output should be bounded");
         assert_eq!(error.kind(), std::io::ErrorKind::FileTooLarge);
+    }
+
+    #[test]
+    fn parses_commit_signature_records() {
+        let parse = |payload: &[u8]| parse_signature(payload);
+        let signature = |status, signer: &str| CommitSignature {
+            status,
+            signer: signer.to_owned(),
+        };
+
+        assert_eq!(
+            parse(b"G\0Alice <alice@example.com>\n"),
+            signature(CommitSignatureStatus::Good, "Alice <alice@example.com>")
+        );
+        assert_eq!(
+            parse(b"B\0Bob\n"),
+            signature(CommitSignatureStatus::Bad, "Bob")
+        );
+        assert_eq!(parse(b"U\0"), signature(CommitSignatureStatus::Unknown, ""));
+        assert_eq!(parse(b"N\n"), signature(CommitSignatureStatus::None, ""));
+        assert_eq!(
+            parse(b"X\0Cara\n"),
+            signature(CommitSignatureStatus::Expired, "Cara")
+        );
+        assert_eq!(
+            parse(b"Y\0Dave\n"),
+            signature(CommitSignatureStatus::GoodExpired, "Dave")
+        );
+        assert_eq!(
+            parse(b"R\0Erin\n"),
+            signature(CommitSignatureStatus::Revoked, "Erin")
+        );
+        assert_eq!(parse(b"E\n"), signature(CommitSignatureStatus::Error, ""));
+        assert_eq!(
+            parse(b"Q\0odd\n"),
+            signature(CommitSignatureStatus::Other("Q".into()), "odd")
+        );
     }
 
     #[test]
@@ -3798,6 +4529,718 @@ index 1111111..2222222 100644\n\
     }
 
     #[test]
+    fn file_history_tracks_a_path_newest_first() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("notes.txt"), "one\n").expect("notes should write");
+        repository.success(["add", "notes.txt"]);
+        repository.success(["commit", "-m", "add notes"]);
+        fs::write(repository.path.join("notes.txt"), "one\ntwo\n").expect("notes should write");
+        repository.success(["add", "notes.txt"]);
+        repository.success(["commit", "-m", "grow notes"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let history = repository
+            .git
+            .file_history(
+                &worktree,
+                &FileHistoryRequest {
+                    path: GitPath(b"notes.txt".to_vec()),
+                    limit: 10,
+                },
+            )
+            .expect("file history should load");
+        assert_eq!(history.len(), 2, "both commits touched the file");
+        assert_eq!(
+            String::from_utf8_lossy(&history[0].subject),
+            "grow notes",
+            "history should be newest first"
+        );
+        assert_eq!(String::from_utf8_lossy(&history[1].subject), "add notes");
+        assert!(
+            history[0].oid != history[1].oid,
+            "each commit should carry its own oid"
+        );
+        assert!(
+            !history[0].author.name.is_empty(),
+            "history should carry the author identity"
+        );
+
+        let untouched = repository
+            .git
+            .file_history(
+                &worktree,
+                &FileHistoryRequest {
+                    path: GitPath(b"missing.txt".to_vec()),
+                    limit: 10,
+                },
+            )
+            .expect("a missing path yields empty history, not an error");
+        assert!(
+            untouched.is_empty(),
+            "no commits should touch a missing path"
+        );
+    }
+
+    #[test]
+    fn blame_attributes_each_line_to_its_introducing_commit() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("fixture.txt"), "first line\n")
+            .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "initial"]);
+        fs::write(
+            repository.path.join("fixture.txt"),
+            "first line\nsecond line\n",
+        )
+        .expect("fixture should write");
+        repository.success(["add", "fixture.txt"]);
+        repository.success(["commit", "-m", "extend"]);
+        let first_oid = String::from_utf8_lossy(
+            &repository
+                .git
+                .run(&repository.path, ["rev-list", "-n", "1", "HEAD^"])
+                .expect("parent should resolve")
+                .stdout,
+        )
+        .trim()
+        .to_owned();
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let blame = repository
+            .git
+            .blame(&worktree, &GitPath(b"fixture.txt".to_vec()))
+            .expect("blame should load");
+        let head_oid = String::from_utf8_lossy(
+            &repository
+                .git
+                .run(&repository.path, ["rev-parse", "HEAD"])
+                .expect("HEAD should resolve")
+                .stdout,
+        )
+        .trim()
+        .to_owned();
+        assert_eq!(blame.len(), 2, "one entry per line");
+        assert_eq!(
+            String::from_utf8_lossy(&blame[0].content),
+            "first line",
+            "content should carry the line without a trailing newline"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&blame[0].oid),
+            first_oid,
+            "the untouched first line should blame the initial commit"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&blame[1].oid),
+            head_oid,
+            "the added second line should blame the extending commit"
+        );
+        assert!(
+            !blame[0].author.name.is_empty(),
+            "each line should carry the author"
+        );
+        assert!(
+            blame[0].author.timestamp > 0,
+            "each line should carry a parsed author timestamp"
+        );
+    }
+
+    #[test]
+    fn compares_refs_browses_the_tree_and_reads_a_file_at_a_revision() {
+        let repository = Repository::new();
+        fs::create_dir_all(repository.path.join("dir")).expect("dir should create");
+        fs::write(repository.path.join("dir/notes.txt"), "alpha\n").expect("notes should write");
+        repository.success(["add", "."]);
+        repository.success(["commit", "-m", "add notes"]);
+        fs::write(repository.path.join("dir/notes.txt"), "alpha\nbeta\n")
+            .expect("notes should write");
+        repository.success(["add", "."]);
+        repository.success(["commit", "-m", "extend notes"]);
+        let first_oid = String::from_utf8_lossy(
+            &repository
+                .git
+                .run(&repository.path, ["rev-list", "-n", "1", "HEAD^"])
+                .expect("parent should resolve")
+                .stdout,
+        )
+        .trim()
+        .to_owned();
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let diff = repository
+            .git
+            .diff_refs(&worktree, &first_oid, "HEAD")
+            .expect("ref diff should load");
+        assert!(
+            diff.diff.files.iter().any(|file| {
+                file.old_path
+                    .as_ref()
+                    .is_some_and(|path| path == &GitPath(b"dir/notes.txt".to_vec()))
+            }),
+            "the diff should include the changed file"
+        );
+
+        let root = repository
+            .git
+            .tree_entries(&worktree, "HEAD", &GitPath(Vec::new()))
+            .expect("tree should list");
+        assert!(
+            root.iter()
+                .any(|entry| entry.kind == TreeEntryKind::Tree
+                    && entry.name == GitPath(b"dir".to_vec())),
+            "the root should list the directory tree"
+        );
+
+        let bytes = repository
+            .git
+            .file_at_revision(&worktree, "HEAD", &GitPath(b"dir/notes.txt".to_vec()))
+            .expect("file at revision should read");
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            "alpha\nbeta\n",
+            "HEAD should contain the extended file"
+        );
+        let earlier = repository
+            .git
+            .file_at_revision(&worktree, &first_oid, &GitPath(b"dir/notes.txt".to_vec()))
+            .expect("earlier revision should read");
+        assert_eq!(
+            String::from_utf8_lossy(&earlier),
+            "alpha\n",
+            "the parent revision should contain the shorter file"
+        );
+
+        let missing = repository
+            .git
+            .tree_entries(&worktree, "not-a-real-oid", &GitPath(Vec::new()))
+            .expect_err("an unresolvable oid should be refused");
+        assert!(matches!(missing, GitStatusError::CommandFailed(_)));
+    }
+
+    #[test]
+    fn lists_adds_and_removes_linked_worktrees() {
+        let repository = Repository::new();
+        repository.commit("base");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let linked = repository
+            .path
+            .parent()
+            .expect("temp root should have a parent")
+            .join(format!("gitronimo-linked-{}", std::process::id()));
+
+        let before = repository
+            .git
+            .worktree_list(&worktree)
+            .expect("worktree list should load");
+        assert_eq!(before.len(), 1, "a fresh repository has one worktree");
+        assert!(before[0].main, "the first worktree is the main one");
+        assert!(
+            before[0].branch.is_some(),
+            "the main worktree is attached to a branch"
+        );
+
+        repository
+            .git
+            .add_worktree(
+                &worktree,
+                &GitPath(linked.as_os_str().to_string_lossy().as_bytes().to_vec()),
+                "linked-branch",
+            )
+            .expect("linked worktree should add");
+        let added = repository
+            .git
+            .worktree_list(&worktree)
+            .expect("worktree list should reload");
+        assert_eq!(added.len(), 2, "the linked worktree should appear");
+        let linked_entry = added
+            .iter()
+            .find(|entry| !entry.main)
+            .expect("the linked worktree should be listed");
+        assert_eq!(
+            linked_entry.branch.as_ref().map(|path| path.0.as_slice()),
+            Some(b"linked-branch".as_slice()),
+            "the linked worktree should track its new branch"
+        );
+        assert!(
+            linked_entry
+                .path
+                .0
+                .windows(8)
+                .any(|window| window == b"gitronim"),
+            "the linked path should be recorded"
+        );
+
+        repository
+            .git
+            .remove_worktree(
+                &worktree,
+                &GitPath(linked.as_os_str().to_string_lossy().as_bytes().to_vec()),
+                false,
+            )
+            .expect("linked worktree should remove");
+        let after = repository
+            .git
+            .worktree_list(&worktree)
+            .expect("worktree list should reload");
+        assert_eq!(
+            after.len(),
+            1,
+            "removal should leave only the main worktree"
+        );
+        let _ = std::fs::remove_dir_all(&linked);
+    }
+
+    #[test]
+    fn lists_and_updates_submodules() {
+        let source = Repository::new();
+        fs::write(source.path.join("lib.txt"), "shared\n").expect("submodule file should write");
+        source.success(["add", "lib.txt"]);
+        source.success(["commit", "-m", "shared lib"]);
+        let source_path = source.path.clone();
+
+        let repository = Repository::new();
+        repository.success([
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            &source_path.to_string_lossy(),
+            "lib",
+        ]);
+        repository.success(["commit", "-m", "add submodule"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let before = repository
+            .git
+            .submodule_list(&worktree)
+            .expect("submodule list should load");
+        assert_eq!(before.len(), 1, "one submodule should be registered");
+        assert_eq!(
+            before[0].path,
+            GitPath(b"lib".to_vec()),
+            "the submodule path should parse"
+        );
+        assert!(
+            before[0].flag == b' ' || before[0].flag == b'-',
+            "a freshly added submodule is clean or uninitialized, got flag {}",
+            before[0].flag as char
+        );
+
+        repository
+            .git
+            .submodule_update(&worktree, Some(&GitPath(b"lib".to_vec())))
+            .expect("submodule update should initialize");
+        let after = repository
+            .git
+            .submodule_list(&worktree)
+            .expect("submodule list should reload");
+        assert!(
+            after.iter().all(|entry| entry.flag == b' '),
+            "after init every submodule should be clean"
+        );
+    }
+
+    #[test]
+    fn parses_a_rebase_todo_and_round_trips_it() {
+        let bytes = b"pick a1b2c3d Feature one\n# a comment to ignore\nfixup e5f6a7b Feature two\nreword 1234567 Yet another\n";
+        let items = parse_rebase_todo(bytes);
+        assert_eq!(items.len(), 3, "comment lines are skipped");
+        assert_eq!(items[0].action, RebaseAction::Pick);
+        assert_eq!(items[0].arguments, "a1b2c3d Feature one");
+        assert_eq!(items[1].action, RebaseAction::Fixup);
+        assert_eq!(items[1].arguments, "e5f6a7b Feature two");
+        assert_eq!(items[2].action, RebaseAction::Reword);
+        assert_eq!(items[2].arguments, "1234567 Yet another");
+    }
+
+    #[test]
+    fn edits_the_rebase_plan_mid_conflict_and_continues_the_squash() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("file.txt"), "base line\n").expect("base file should write");
+        repository.success(["add", "file.txt"]);
+        repository.success(["commit", "-m", "base"]);
+
+        repository.success(["checkout", "-b", "feature"]);
+        fs::write(repository.path.join("file.txt"), "feature line\n")
+            .expect("feature file should write");
+        repository.success(["add", "file.txt"]);
+        repository.success(["commit", "-m", "feature one"]);
+        fs::write(repository.path.join("file2.txt"), "extra\n")
+            .expect("second feature file should write");
+        repository.success(["add", "file2.txt"]);
+        repository.success(["commit", "-m", "feature two"]);
+
+        repository.success(["checkout", "main"]);
+        fs::write(repository.path.join("file.txt"), "main change\n")
+            .expect("main file should write");
+        repository.success(["add", "file.txt"]);
+        repository.success(["commit", "-m", "main conflict"]);
+        repository.success(["checkout", "feature"]);
+
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let error = repository
+            .git
+            .rebase_plan(&worktree)
+            .expect_err("no rebase should be in progress yet");
+        assert!(matches!(error, GitStatusError::NoOperationInProgress));
+
+        repository
+            .git
+            .start_rebase(&worktree, "main")
+            .expect_err("the first patch should conflict");
+        let mut plan = repository
+            .git
+            .rebase_plan(&worktree)
+            .expect("the paused rebase should expose its plan");
+        assert_eq!(
+            plan.len(),
+            1,
+            "the paused commit is already in git's done list"
+        );
+        assert_eq!(plan[0].action, RebaseAction::Pick);
+        assert!(
+            plan[0].arguments.contains("feature two"),
+            "the remaining todo replays feature two, got {}",
+            plan[0].arguments
+        );
+
+        plan[0].action = RebaseAction::Fixup;
+        repository
+            .git
+            .save_rebase_plan(&worktree, &plan)
+            .expect("the edited plan should save");
+
+        fs::write(repository.path.join("file.txt"), "resolved\n").expect("conflict should resolve");
+        repository.success(["add", "file.txt"]);
+        repository
+            .git
+            .continue_operation(&worktree, &InProgressOperation::Rebase)
+            .expect("the rebase should continue to a clean squash");
+
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should still be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let log = repository
+            .git
+            .history_page(
+                &worktree,
+                &HistoryRequest {
+                    reference: HistoryReference::Current,
+                    before: None,
+                    limit: 10,
+                },
+            )
+            .expect("history should load");
+        assert_eq!(
+            log.commits.len(),
+            3,
+            "base, main conflict, and the squashed feature"
+        );
+        assert_eq!(
+            &log.commits[0].subject[..],
+            b"feature one",
+            "HEAD is the squashed feature commit"
+        );
+        assert!(
+            repository.path.join("file2.txt").exists(),
+            "the fixup's file survives"
+        );
+    }
+
+    #[test]
+    fn squashes_fixups_and_drops_commits() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("a.txt"), "a\n").expect("a should write");
+        repository.success(["add", "a.txt"]);
+        repository.success(["commit", "-m", "A"]);
+        fs::write(repository.path.join("b.txt"), "b\n").expect("b should write");
+        repository.success(["add", "b.txt"]);
+        repository.success(["commit", "-m", "B"]);
+        fs::write(repository.path.join("c.txt"), "c\n").expect("c should write");
+        repository.success(["add", "c.txt"]);
+        repository.success(["commit", "-m", "C"]);
+
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        fs::write(repository.path.join("c.txt"), "fixup\n").expect("fixup change should write");
+        repository.success(["add", "c.txt"]);
+        repository
+            .git
+            .autosquash(&worktree, "HEAD", None)
+            .expect("fixup should fold into HEAD");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should still be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let history = |repository: &Repository| {
+            repository
+                .git
+                .history_page(
+                    &worktree,
+                    &HistoryRequest {
+                        reference: HistoryReference::Current,
+                        before: None,
+                        limit: 10,
+                    },
+                )
+                .expect("history should load")
+        };
+        let log = history(&repository);
+        assert_eq!(log.commits.len(), 3, "the fixup folds in place");
+        assert_eq!(&log.commits[0].subject[..], b"C", "fixup keeps the subject");
+        assert_eq!(
+            fs::read_to_string(repository.path.join("c.txt")).expect("c should read"),
+            "fixup\n"
+        );
+
+        fs::write(repository.path.join("c.txt"), "squash\n").expect("squash change should write");
+        repository.success(["add", "c.txt"]);
+        repository
+            .git
+            .autosquash(&worktree, "HEAD", Some("squash note"))
+            .expect("squash should fold into HEAD");
+        let log = history(&repository);
+        assert_eq!(log.commits.len(), 3, "the squash folds in place");
+        assert_eq!(
+            &log.commits[0].subject[..],
+            b"C",
+            "squash keeps the subject"
+        );
+        assert!(
+            log.commits[0]
+                .body
+                .windows(b"squash note".len())
+                .any(|w| w == b"squash note"),
+            "the squash message is combined into the commit"
+        );
+
+        repository
+            .git
+            .drop_commit(&worktree, "HEAD~1")
+            .expect("dropping the middle commit should replay the tip");
+        let log = history(&repository);
+        assert_eq!(log.commits.len(), 2, "B is dropped from history");
+        assert_eq!(&log.commits[0].subject[..], b"C", "the tip survives");
+        assert_eq!(&log.commits[1].subject[..], b"A", "the base survives");
+        assert!(
+            !repository.path.join("b.txt").exists(),
+            "dropped commit's file is gone"
+        );
+        assert!(
+            repository.path.join("c.txt").exists(),
+            "the surviving commit's file remains"
+        );
+    }
+
+    #[test]
+    fn resolves_a_conflict_to_either_side_and_stages_it() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("f.txt"), "base\n").expect("base should write");
+        repository.success(["add", "f.txt"]);
+        repository.success(["commit", "-m", "base"]);
+
+        repository.success(["checkout", "-b", "feature"]);
+        fs::write(repository.path.join("f.txt"), "theirs\n").expect("feature should write");
+        repository.success(["add", "f.txt"]);
+        repository.success(["commit", "-m", "feature change"]);
+
+        repository.success(["checkout", "main"]);
+        fs::write(repository.path.join("f.txt"), "ours\n").expect("main should write");
+        repository.success(["add", "f.txt"]);
+        repository.success(["commit", "-m", "main change"]);
+
+        let merge = repository
+            .git
+            .run(&repository.path, ["merge", "feature"])
+            .expect("git should run");
+        assert!(!merge.status.success(), "the merge should conflict");
+
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert!(
+            status
+                .entries
+                .iter()
+                .any(|entry| matches!(entry, StatusEntry::Unmerged { path, .. } if path == &GitPath(b"f.txt".to_vec()))),
+            "the merge should leave f.txt conflicted"
+        );
+        let conflict = repository
+            .git
+            .read_working_file(&worktree, &GitPath(b"f.txt".to_vec()))
+            .expect("the conflicted file should read");
+        assert!(
+            conflict
+                .windows(b"<<<<<<<".len())
+                .any(|window| window == b"<<<<<<<"),
+            "the working copy shows conflict markers"
+        );
+
+        repository
+            .git
+            .resolve_conflict(&worktree, &GitPath(b"f.txt".to_vec()), ConflictSide::Ours)
+            .expect("taking ours should resolve");
+        assert_eq!(
+            repository
+                .git
+                .read_working_file(&worktree, &GitPath(b"f.txt".to_vec()))
+                .expect("resolved file should read"),
+            b"ours\n",
+            "taking ours keeps the current branch version"
+        );
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should reload");
+        assert!(
+            !status
+                .entries
+                .iter()
+                .any(|entry| matches!(entry, StatusEntry::Unmerged { .. })),
+            "staging marks the conflict resolved"
+        );
+
+        repository
+            .git
+            .continue_operation(
+                &worktree,
+                &InProgressOperation::Merge {
+                    oid: Some(b"feature".to_vec()),
+                },
+            )
+            .expect("the merge should complete");
+        assert_eq!(
+            repository
+                .git
+                .read_working_file(&worktree, &GitPath(b"f.txt".to_vec()))
+                .expect("merged file should read"),
+            b"ours\n"
+        );
+    }
+
+    #[test]
+    fn configures_and_runs_an_external_merge_tool() {
+        let repository = Repository::new();
+        fs::write(repository.path.join("f.txt"), "base\n").expect("base should write");
+        repository.success(["add", "f.txt"]);
+        repository.success(["commit", "-m", "base"]);
+
+        repository.success(["checkout", "-b", "feature"]);
+        fs::write(repository.path.join("f.txt"), "theirs\n").expect("feature should write");
+        repository.success(["add", "f.txt"]);
+        repository.success(["commit", "-m", "feature change"]);
+
+        repository.success(["checkout", "main"]);
+        fs::write(repository.path.join("f.txt"), "ours\n").expect("main should write");
+        repository.success(["add", "f.txt"]);
+        repository.success(["commit", "-m", "main change"]);
+
+        let merge = repository
+            .git
+            .run(&repository.path, ["merge", "feature"])
+            .expect("git should run");
+        assert!(!merge.status.success(), "the merge should conflict");
+
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        repository
+            .git
+            .set_merge_tool(&worktree, "noop")
+            .expect("the merge tool should persist");
+        repository.success(["config", "mergetool.noop.cmd", "true"]);
+        repository.success(["config", "mergetool.noop.trustExitCode", "true"]);
+        let configured = repository
+            .git
+            .run(&repository.path, ["config", "merge.tool"])
+            .expect("config should read");
+        assert_eq!(configured.stdout, b"noop\n", "merge.tool is persisted");
+
+        repository
+            .git
+            .run_merge_tool(&worktree, None, Some(&GitPath(b"f.txt".to_vec())))
+            .expect("the merge tool should run");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert!(
+            !status
+                .entries
+                .iter()
+                .any(|entry| matches!(entry, StatusEntry::Unmerged { .. })),
+            "a trusted tool resolves the conflict"
+        );
+        assert!(
+            !repository.path.join("f.txt.orig").exists(),
+            "keepBackup is disabled"
+        );
+    }
+
+    #[test]
     fn cherry_picks_reverts_and_continues_resolved_conflicts() {
         let repository = Repository::new();
         fs::write(repository.path.join("fixture.txt"), "alpha\nbeta\ngamma\n")
@@ -3950,5 +5393,111 @@ index 1111111..2222222 100644\n\
             .continue_operation(&worktree, &InProgressOperation::None)
             .expect_err("continuing nothing should fail");
         assert!(matches!(error, GitStatusError::NoOperationInProgress));
+    }
+
+    #[test]
+    fn reports_commit_signature_statuses() {
+        let repository = Repository::new();
+        repository.commit("plain");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let unsigned = repository
+            .git
+            .commit_signature(&worktree, "HEAD")
+            .expect("signature query should succeed");
+        assert_eq!(unsigned.status, CommitSignatureStatus::None);
+        assert!(unsigned.signer.is_empty());
+
+        if std::process::Command::new("gpg")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let home = std::env::temp_dir().join(format!(
+            "gitronimo-gpg-{}-{}",
+            std::process::id(),
+            NEXT_REPOSITORY.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&home).expect("gpg home should exist");
+        fs::set_permissions(&home, fs::Permissions::from_mode(0o700))
+            .expect("gpg home should be private");
+        let homedir = home.to_str().expect("temp dir should be unicode");
+        let generated = std::process::Command::new("gpg")
+            .args([
+                "--batch",
+                "--homedir",
+                homedir,
+                "--pinentry-mode",
+                "loopback",
+                "--passphrase",
+                "",
+                "--quick-generate-key",
+                "Gitronimo Test <test@gitronimo.invalid>",
+                "default",
+                "default",
+                "never",
+            ])
+            .output();
+        if !generated.is_ok_and(|output| output.status.success()) {
+            let _ = fs::remove_dir_all(&home);
+            return;
+        }
+        let fingerprints = std::process::Command::new("gpg")
+            .args([
+                "--batch",
+                "--homedir",
+                homedir,
+                "--with-colons",
+                "--list-keys",
+            ])
+            .output()
+            .expect("gpg should list keys");
+        let fingerprint = fingerprints
+            .stdout
+            .split(|byte| *byte == b'\n')
+            .find_map(|line| {
+                let mut fields = line.split(|byte| *byte == b':');
+                (fields.next() == Some(b"fpr")).then(|| fields.nth(8).unwrap_or_default().to_vec())
+            })
+            .expect("generated key should expose a fingerprint");
+        repository.success([
+            std::ffi::OsString::from("config"),
+            std::ffi::OsString::from("user.signingkey"),
+            std::ffi::OsString::from(String::from_utf8_lossy(&fingerprint).into_owned()),
+        ]);
+        fs::write(repository.path.join("signed.txt"), "signed\n")
+            .expect("signed fixture should write");
+        repository.success(["add", "signed.txt"]);
+
+        let signed = repository
+            .git
+            .run_env(
+                &repository.path,
+                [("GNUPGHOME".into(), home.clone().into_os_string())],
+                ["commit", "-S", "-m", "signed"],
+            )
+            .expect("signed commit should run");
+        assert!(signed.status.success(), "signed commit failed: {signed:?}");
+
+        let verified = repository
+            .git
+            .run_env(
+                &repository.path,
+                [("GNUPGHOME".into(), home.clone().into_os_string())],
+                ["show", "--no-patch", "--format=%G?%x00%GS", "HEAD"],
+            )
+            .expect("verification should run");
+        let parsed = parse_signature(&verified.stdout);
+        assert_eq!(parsed.status, CommitSignatureStatus::Good);
+        assert_eq!(parsed.signer, "Gitronimo Test <test@gitronimo.invalid>");
+        let _ = fs::remove_dir_all(&home);
     }
 }

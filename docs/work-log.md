@@ -1,5 +1,173 @@
 # Implementation work log
 
+## 2026-08-09 — Phase 8 / signed-commit status
+
+**Intent:** implement the `Signed-commit status` checklist item by exposing Git's `%G?` signature validation per commit.
+
+**Design:** `git_domain` gains `CommitSignatureStatus` (good/bad/unknown/none/expired/good-expired/revoked/error/other with a display label) and `CommitSignature` (status + signer). `git_cli::commit_signature` runs `git show --no-patch --format=%G?%x00%GS <oid>` and parses the two fields. The desktop adds a palette action `Check commit signature…` that prompts for a ref (defaulting to the selected history commit, else `HEAD`) and reports the verdict and signer in the activity line. `GitExecutable::run_env` is generalized from `&'static str` pairs to owned `OsString` pairs so the integration test can sign with a temporary `GNUPGHOME`.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `CommitSignatureStatus`, `CommitSignature`.
+- `crates/git_cli/src/lib.rs` — `commit_signature`, parser, and a unit test of the parser plus a temporary-repository integration test using a real gpg key fixture; `run_env` takes `(OsString, OsString)`.
+- `apps/desktop/src/main.rs` — `prompt_check_commit_signature`, palette entry.
+- `PLAN.md`, `docs/work-log.md` — mark `Signed-commit status` complete.
+
+**Acceptance checks:**
+- `commit_signature` reports the `%G?` verdict and signer for a commit.
+- The desktop prompts for a ref and shows the verdict.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass after this unit. `git_cli::commit_signature` queries `%G?`/`%GS` with a NUL separator; the parser unit test covers every verdict letter plus an unknown one, and a temporary-repository integration test first asserts an unsigned commit reports `None`, then (when `gpg` is available) generates a throwaway key in a `chmod 700` temp homedir, signs a commit with `GNUPGHOME` set via the generalized `run_env`, and asserts the parsed verdict is `Good` with the fixture identity as signer. The desktop adds `Check commit signature…` to the palette, defaulting the prompt to the selected history commit's oid. `Signed-commit status` is now checked in PLAN.md.
+
+## 2026-08-09 — Phase 8 / external merge-tool integration
+
+**Intent:** implement the `External merge-tool integration` checklist item by configuring a named merge tool and launching it on conflicted files.
+
+**Design:** `git_cli` gains `set_merge_tool` (`git config merge.tool <tool>`, with `mergetool.keepBackup false`) and `run_merge_tool` (`git mergetool --no-prompt [-t <tool>] [-- <path>]`). The desktop adds palette actions `Set merge tool…` (choose FileMerge/Meld/KDiff3/VimDiff via osascript) and `Open in merge tool…` (prompt a path, or run for all conflicts when blank), launched on a background task so the window stays responsive while the GUI tool runs.
+
+**Files (planned):**
+- `crates/git_cli/src/lib.rs` — `set_merge_tool`, `run_merge_tool`, and a temporary-repository integration test using a no-op tool.
+- `apps/desktop/src/main.rs` — `prompt_set_merge_tool`, `prompt_run_merge_tool`, palette entries.
+- `PLAN.md`, `docs/work-log.md` — mark `External merge-tool integration` complete.
+
+**Acceptance checks:**
+- `set_merge_tool` persists `merge.tool` in the repository config.
+- `run_merge_tool` invokes the tool on a conflicted file and exits cleanly.
+- The desktop drives tool selection and launch from the palette.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass after this unit. `git_cli::set_merge_tool` writes `merge.tool` and disables `mergetool.keepBackup`; `run_merge_tool` invokes `git mergetool --no-prompt` with an optional tool and path. A temporary-repository integration test creates a merge conflict, persists `merge.tool=noop`, registers a trusted no-op tool command, asserts `git config merge.tool` reads back the name, runs `run_merge_tool` on the conflicted file, and verifies the file is staged (no `Unmerged` entry) with no `.orig` backup left behind. The desktop adds `Set merge tool…` (osascript tool picker: opendiff/meld/kdiff3/vimdiff/bc3) and `Open in merge tool…` (optional path, launched on a background task so the GUI tool never blocks the window). `External merge-tool integration` is now checked in PLAN.md. Workspace suite totals 83 tests (48 git_cli, 17 desktop, 8 app_core, 8 git_domain, 2 ui_kit).
+
+## 2026-08-09 — Phase 8 / conflict-resolution UI
+
+**Intent:** implement the `Conflict-resolution UI` checklist item with a typed resolve boundary and a dedicated desktop view.
+
+**Design:** `git_domain` gains `ConflictSide` (Ours/Theirs). `git_cli::resolve_conflict` runs `git checkout --ours|--theirs -- <path>` followed by `git add -- <path>` to mark the file resolved, and `read_working_file` reads the raw working-tree copy (conflict markers included) for display. The desktop gains a Conflicts view listing the conflicted entries from status, each with `Take ours`, `Take theirs`, and `View` (marker content shown in a Monaco block), plus Refresh; the existing working-copy Continue/Abort flow completes the operation after files are resolved. All resolve actions run through `run_worktree_mutation` so the working copy refreshes and the conflict disappears.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `ConflictSide`.
+- `crates/git_cli/src/lib.rs` — `resolve_conflict`, `read_working_file`, and a temporary-repository integration test.
+- `apps/desktop/src/app_state.rs` — `RepositoryView::Conflicts`, conflict state.
+- `apps/desktop/src/main.rs` — `show_conflicts`, `view_conflict`, `resolve_conflict`, palette entry.
+- `apps/desktop/src/views/conflicts.rs` — the view.
+- `PLAN.md`, `docs/work-log.md` — mark `Conflict-resolution UI` complete.
+
+**Acceptance checks:**
+- `resolve_conflict` keeps the chosen side's content and stages the file so status shows no conflict.
+- The Conflicts view lists unmerged files and drives Take ours/theirs and View.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass after this unit. `git_cli::resolve_conflict` checks out the requested side (`--ours`/`--theirs`) and stages the file; `read_working_file` exposes the marker content. A temporary-repository integration test creates a real merge conflict, asserts the working copy contains `<<<<<<<` markers, resolves to `--ours`, verifies the current-branch content survives and status reports no unmerged entry, then continues the merge. The desktop adds the Conflicts view (`Take ours`, `Take theirs`, `View` with a Monaco marker preview) reachable from the palette. `Conflict-resolution UI` is now checked in PLAN.md. Workspace suite totals 82 tests (47 git_cli, 17 desktop, 8 app_core, 8 git_domain, 2 ui_kit).
+
+## 2026-08-09 — Phase 8 / squash, fixup, reword, and drop
+
+**Intent:** implement the `Squash/fixup/reword/drop` checklist item as typed Git mutations plus command-palette actions.
+
+**Design:** `git_cli` gains `autosquash(repository, target, message)`: it commits staged changes with `git commit --squash=<target> -m <message>` (or `--fixup=<target>` when no message is given, which discards the new commit's message) and then folds them in with `git rebase --autosquash --interactive <target>^` under a no-op sequence editor. It also gains `drop_commit(repository, target)` implemented as `git rebase --onto <target>^ <target>`, which replays the branch without the targeted commit. Reword reuses the existing `commit(CommitRequest { amend: true, .. })` path. The desktop adds four command-palette entries: `Squash staged changes…`, `Fixup staged changes…` (target defaults to `HEAD`), `Drop commit…` (free-form oid/ref), and `Reword last commit…` (amend prompt), all run through `run_worktree_mutation` so the working copy and refs refresh on success.
+
+**Files (planned):**
+- `crates/git_cli/src/lib.rs` — `autosquash`, `drop_commit`, and temporary-repository integration tests.
+- `apps/desktop/src/main.rs` — `prompt_autosquash`, `prompt_drop_commit`, `prompt_reword`, palette entries.
+- `PLAN.md`, `docs/work-log.md` — mark `Squash/fixup/reword/drop` complete.
+
+**Acceptance checks:**
+- `autosquash` folds staged changes into the target commit, keeping the target subject for fixup and combining the message for squash.
+- `drop_commit` removes the targeted commit while keeping later commits.
+- Reword amends HEAD with a new subject/body.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass after this unit. `git_cli::autosquash` resolves `target` to a full oid first (so the fixup commit's HEAD move cannot break the base), commits staged changes with `--squash`/`--fixup` under `GIT_EDITOR=true`, then folds with `git rebase --autosquash --interactive <target>^` under a no-op sequence editor; `drop_commit` runs `git rebase --onto <target>^ <target>`. A temporary-repository integration test stages a change and verifies a fixup folds into HEAD keeping the subject, a squash folds in keeping the subject while combining the "squash note" body, and a `drop_commit("HEAD~1")` removes the middle commit (its file disappears) while the tip and base survive. Reword reuses the existing `commit(CommitRequest { amend: true, .. })`. The desktop adds palette actions `Squash staged changes…`, `Fixup staged changes…` (target prompt defaulting to `HEAD`), `Drop commit…`, and `Reword last commit…` (subject/body prompts). `Squash/fixup/reword/drop` is now checked in PLAN.md. Workspace suite totals 81 tests (46 git_cli, 17 desktop, 8 app_core, 8 git_domain, 2 ui_kit).
+
+## 2026-08-09 — Phase 8 / interactive rebase plan editor
+
+**Intent:** implement the `Interactive rebase plan editor` checklist item as a typed Git boundary plus a desktop view that edits and saves the rebase todo.
+
+**Design:** `git_domain` gains `RebaseAction` (pick/reword/edit/squash/fixup/drop/exec/other with a `next_action` cycler for the UI) and `RebaseTodoItem` carrying the action and its verbatim argument tail. `git_cli` gains `start_rebase` (`git rebase --interactive <base>` with `GIT_SEQUENCE_EDITOR=:` and `GIT_EDITOR=true` so the default plan is generated and applied without spawning an editor), `rebase_plan` (reads `.git/rebase-merge/git-rebase-todo`, the same location the in-progress detector already uses), `save_rebase_plan` (writes the todo verbatim from edited items), and `rebase_abort`/`rebase_skip` for the paused states; `continue_operation(Rebase)` already exists. The desktop gains a Rebase view listing the plan with per-item action cycling and move-up/move-down, plus Save plan / Continue / Abort / Skip / Start rebase actions.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `RebaseAction`, `RebaseTodoItem`.
+- `crates/git_cli/src/lib.rs` — `start_rebase`, `rebase_plan`, `save_rebase_plan`, `rebase_abort`, `rebase_skip`, a `parse_rebase_todo` helper, and unit + temporary-repository integration tests (conflict pause, plan rewrite to squash, continue).
+- `apps/desktop/src/app_state.rs` — `RepositoryView::Rebase`, rebase state.
+- `apps/desktop/src/main.rs` — `show_rebase`, `load_rebase_plan`, `prompt_start_rebase`, `save/continue/abort/skip` wiring, command-palette entry.
+- `apps/desktop/src/views/rebase.rs` — the view.
+- `PLAN.md`, `docs/work-log.md` — mark `Interactive rebase plan editor` complete.
+
+**Acceptance checks:**
+- `rebase_plan` parses a paused interactive rebase's todo; `save_rebase_plan` rewrites it and `git rebase --continue` applies the new plan.
+- The Rebase view lists items, cycles actions, reorders rows, and drives Start/Save/Continue/Abort/Skip.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass after this unit. `git_domain` adds `RebaseAction` (with `verb`, `next` cycle, and `from_verb`) and `RebaseTodoItem`; `git_cli` adds `start_rebase` (interactive rebase with a no-op sequence editor), `rebase_plan`/`save_rebase_plan` (read/write `.git/rebase-merge/git-rebase-todo`), `rebase_abort`, `rebase_skip`, and `parse_rebase_todo`. A unit test round-trips a three-line todo (skipping comments); an integration test starts a conflicting rebase, confirms `rebase_plan` exposes the remaining todo (git moves the paused patch into `done`, matching `--edit-todo` semantics), rewrites `pick` to `fixup`, resolves the conflict, continues, and verifies the final history folds both feature commits into one (base + main conflict + squashed feature = 3 commits, HEAD "feature one"). The desktop gains a Rebase view with action cycling, move up/down, Save plan, Start rebase…, Continue, Abort, and Skip. `Interactive rebase plan editor` is now checked in PLAN.md. Workspace suite totals 80 tests (45 git_cli, 17 desktop, 8 app_core, 8 git_domain, 2 ui_kit).
+
+## 2026-08-09 — Phase 8 / submodule status, update, and open
+
+**Intent:** implement the `Submodule status/update/open` checklist item as a typed Git boundary with a desktop view.
+
+**Design:** `git_domain` gains `SubmoduleEntry` (`path`, status flag, `oid`, `description`). `git_cli::submodule_list` runs `git submodule status` and parses the per-line `<flag> <oid> <path> (<describe>)` format (`-` uninitialized, `+` checked-out differs from the index, `U` conflict, ` ` clean); `submodule_update` runs `git submodule update --init` with an optional path argument. The desktop gains a Submodules view listing entries with status, an Update-all action, and an Open action that reveals the submodule directory in Finder (`open <abs path>`, macOS-only, via typed `Command`).
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `SubmoduleEntry`.
+- `crates/git_cli/src/lib.rs` — `submodule_list`, `submodule_update`, a `parse_submodule_status` helper, and a temporary-repository integration test using a local submodule fixture.
+- `apps/desktop/src/app_state.rs` — `RepositoryView::Submodules`, submodule state.
+- `apps/desktop/src/main.rs` — `show_submodules`, `load_submodules`, `prompt_submodule_update`, `prompt_open_submodule`, command-palette entry.
+- `apps/desktop/src/views/submodules.rs` — the view.
+- `PLAN.md`, `docs/work-log.md` — mark `Submodule status/update/open` complete.
+
+**Acceptance checks:**
+- `submodule_list` reports each submodule with status flag, oid, and path; update initializes a submodule from its remote.
+- The Submodules view lists entries and drives Update/Open from prompts.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the full gates pass after this unit. `git_cli::submodule_list` parses `git submodule status` lines into `SubmoduleEntry` (flag, oid, path, description) and `submodule_update` initializes a submodule from its remote; a temporary-repository integration test registers a local `file://` submodule (using `-c protocol.file.allow=always`), confirms the entry parses as clean/uninitialized, then initializes it via `submodule_update` and re-checks that every submodule is clean. The desktop gains a Submodules view (flag glyph, path, state, oid, per-row Update…/Open buttons plus Update all…) driven through a confirmation prompt and a macOS `open` command resolved against the worktree root. `Submodule status/update/open` is now checked in PLAN.md. Workspace suite totals 78 tests (43 git_cli, 17 desktop, 8 app_core, 8 git_domain, 2 ui_kit).
+
+## 2026-08-09 — Phase 8 / worktree list, create, and remove
+
+**Intent:** implement the `Worktree list/create/remove` checklist item as a typed Git boundary with a desktop view.
+
+**Design:** `git_domain` gains `WorktreeEntry` (`path`, `head` oid, optional `branch`, `dirty`, `main`). `git_cli::worktree_list` runs `git worktree list --porcelain` and parses the `worktree/HEAD/branch/detached` blocks; `add_worktree` runs `git worktree add <path> -b <branch>` and `remove_worktree` runs `git worktree remove <path>` with an explicit force opt-in, both as typed arguments. The desktop gains a `Worktrees` view listing entries with Add (path + branch name prompts) and Remove (path prompt) actions behind the command palette.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `WorktreeEntry`.
+- `crates/git_cli/src/lib.rs` — `worktree_list`, `add_worktree`, `remove_worktree`, a `parse_worktree_list` helper, and temporary-repository integration tests.
+- `apps/desktop/src/app_state.rs` — `RepositoryView::Worktrees`, worktree state.
+- `apps/desktop/src/main.rs` — `show_worktrees`, `load_worktrees`, `prompt_add_worktree`, `prompt_remove_worktree`, command-palette entry.
+- `apps/desktop/src/views/worktrees.rs` — the view.
+- `PLAN.md`, `docs/work-log.md` — mark `Worktree list/create/remove` complete.
+
+**Verification:** the full gates pass after this unit. `git_cli::worktree_list` parses `git worktree list --porcelain` blocks (path, HEAD oid, branch or detached, main flag) and flags the main worktree dirty from `git status --porcelain`; `add_worktree` creates a linked worktree with a new branch and `remove_worktree` removes it, proven by a temporary-repository integration test (1 → 2 → 1 worktrees with the expected branch); the desktop gains a Worktrees view with Add/Remove prompts and a shared `run_worktree_mutation` lifecycle. `Worktree list/create/remove` is now checked in PLAN.md. Workspace suite totals 77 tests (42 git_cli, 17 desktop, 8 app_core, 8 git_domain, 2 ui_kit).
+
+## 2026-08-09 — Phase 8 / compare refs, browse tree at commit, and export file at revision
+
+**Intent:** implement three related commit-inspection checklist items — `Compare refs`, `Browse tree at commit`, and `Export file at revision` — as typed Git boundaries with desktop views.
+
+**Design:** `git_cli::diff_refs` runs `git diff --no-ext-diff --no-textconv --binary <left> <right>` and parses through the existing `parse_unified_diff` into a `LoadedDiff`; the desktop Compare view renders it read-only in monospace. `git_domain` gains `TreeEntry` (`name`, `kind: Tree/Blob/Commit`, `oid`, `mode`); `git_cli::tree_entries` runs `git ls-tree -z <oid>` and `git_cli::file_at_revision` runs `git show <oid>:<path>`, both bounded by the existing output reader. The desktop Tree view lists top-level entries, drills into subdirectories by accumulating path segments, shows blob content when a file is selected, and `Export file at revision…` saves the current blob to a user-chosen folder (osascript `choose folder`) through `std::fs` after the bytes return from Git. Git refs/oids are passed as typed arguments, never shell strings.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `TreeEntry`, `TreeEntryKind`.
+- `crates/git_cli/src/lib.rs` — `diff_refs`, `tree_entries`, `file_at_revision`, and temporary-repository integration tests.
+- `apps/desktop/src/app_state.rs` — `RepositoryView::Compare`, `RepositoryView::Tree`, compare/tree/file state.
+- `apps/desktop/src/main.rs` — `prompt_compare_refs`, `load_compare`, `prompt_browse_tree`, `load_tree`, `load_tree_blob`, `export_selected_blob`, command-palette entries.
+- `apps/desktop/src/views/compare.rs`, `apps/desktop/src/views/tree.rs` — the two views.
+- `PLAN.md`, `docs/work-log.md` — mark `Compare refs`, `Browse tree at commit`, and `Export file at revision` complete.
+
+**Verification:** the full gates pass after this unit. `git_cli::diff_refs` parses a two-ref diff through `parse_unified_diff`; `git_cli::tree_entries` parses `git ls-tree -z` (including `<oid>:<subdir>` drill-down) and `git_cli::file_at_revision` reads blob bytes via `git show <oid>:<path>`, all proven by a temporary-repository integration test (changed-file presence in the diff, a `dir` tree entry at the root, and the correct bytes for HEAD vs. the parent revision); the desktop gains read-only Compare and drill-down Tree views (with blob preview and folder-based export) reachable from the command palette. `Compare refs`, `Browse tree at commit`, and `Export file at revision` are now checked in PLAN.md. Workspace suite totals 76 tests (41 git_cli, 17 desktop, 8 app_core, 8 git_domain, 2 ui_kit).
+
+## 2026-08-09 — Phase 8 / file history and blame
+
+**Intent:** implement the next two Phase 8 checklist items — `File history` and `Blame` — as typed Git boundaries with desktop views, following the reflog unit's pattern.
+
+**Design:** `git_domain` gains `FileHistoryRequest { path, limit }` and `BlameLine { oid, author, content }`; both reuse the existing `HistoryCommit` and `CommitIdentity` types. `git_cli::file_history` runs `git log --no-decorate --follow --max-count=N --format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%s%x00%b%x1e -- <path>` and parses through the existing `parse_history_records` helper. `git_cli::blame` runs `git blame --line-porcelain -- <path>`; a new `parse_blame` helper walks records (headers between `\t`-prefixed content lines), extracting the source oid, `author`, `author-mail`, and `author-time` for each line. The desktop gains a `views/file_history.rs` (bounded commit list for a prompted path) and a `views/blame.rs` (line list with source oid and author), both reachable from the command palette through an osascript path prompt.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `FileHistoryRequest`, `BlameLine`.
+- `crates/git_cli/src/lib.rs` — `file_history`, `blame`, `parse_blame`, and temporary-repository integration tests for both.
+- `apps/desktop/src/app_state.rs` — `RepositoryView::FileHistory`, `RepositoryView::Blame`, state for the loaded entries.
+- `apps/desktop/src/main.rs` — `show_file_history`, `load_file_history`, `show_blame`, `load_blame`, command-palette entries.
+- `apps/desktop/src/views/file_history.rs`, `apps/desktop/src/views/blame.rs` — the two views.
+- `PLAN.md`, `docs/work-log.md` — mark `File history` and `Blame` complete.
+
+**Verification:** the full gates pass after this unit. `git_cli::file_history` reuses `parse_history_records` over `git log --follow`, `git_cli::blame` parses `--line-porcelain` with a new `parse_blame` record walker, both proven by temporary-repository integration tests (newest-first file history with a missing-path empty result, and line attribution to the introducing commit); the desktop gains `FileHistory` and `Blame` views reachable from the command palette with path prompts, plus a Blame↔File-history shortcut. `File history` and `Blame` are now checked in PLAN.md. Workspace suite totals 75 tests (40 git_cli, 17 desktop, 8 app_core, 8 git_domain, 2 ui_kit).
+
 ## 2026-08-09 — Phase 8 / reflog and restore lost branch
 
 **Intent:** implement the first self-contained Phase 8 unit: read a bounded HEAD reflog in the desktop and restore a deleted branch by recreating it at a reflog entry's commit. Covers the `Reflog` and `Restore lost branch from reflog` checklist items.
