@@ -6,15 +6,19 @@
 
 pub(crate) mod blame;
 pub(crate) mod commit_composer;
+pub(crate) mod commit_detail;
 pub(crate) mod compare;
 pub(crate) mod components;
 pub(crate) mod conflicts;
 pub(crate) mod diff_viewer;
 pub(crate) mod file_history;
 pub(crate) mod history;
+pub(crate) mod lfs;
 pub(crate) mod rebase;
 pub(crate) mod reflog;
+pub(crate) mod remotes;
 pub(crate) mod sidebar;
+pub(crate) mod stashes;
 pub(crate) mod submodules;
 pub(crate) mod toolbar;
 pub(crate) mod tree;

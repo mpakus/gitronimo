@@ -134,8 +134,11 @@ impl GitronimoApp {
                         .h_full(),
                     )
                     .cursor_pointer()
-                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                    .on_click(cx.listener(move |app, event: &ClickEvent, _, cx| {
                         app.select_history_commit(history_index, repository.clone(), cx);
+                        if event.click_count() >= 2 {
+                            app.show_commit_detail(&repository, history_index, cx);
+                        }
                     }))
                     .child(label)
                     .into_any_element()

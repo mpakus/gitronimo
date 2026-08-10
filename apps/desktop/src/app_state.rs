@@ -13,9 +13,9 @@ use std::{
 
 use git_cli::LoadedDiff;
 use git_domain::{
-    BlameLine, GitPath, GraphRow, GraphState, HistoryCommit, HistoryReference, RebaseTodoItem,
-    RefDecoration, RefSnapshot, ReflogEntry, SubmoduleEntry, TreeEntry, WorktreeEntry,
-    WorktreeRepository,
+    BlameLine, GitPath, GraphRow, GraphState, HistoryCommit, HistoryReference, LfsEntry,
+    RebaseTodoItem, RefDecoration, RefSnapshot, ReflogEntry, StashEntry, SubmoduleEntry, TreeEntry,
+    WorktreeEntry, WorktreeRepository,
 };
 use gpui::{FocusHandle, ListState, WindowAppearance};
 use notify::RecommendedWatcher;
@@ -53,6 +53,9 @@ pub(crate) enum ThemeMode {
 pub(crate) enum RepositoryView {
     WorkingCopy,
     History,
+    CommitDetail,
+    Stashes,
+    Remotes,
     Reflog,
     FileHistory,
     Blame,
@@ -60,11 +63,20 @@ pub(crate) enum RepositoryView {
     Tree,
     Worktrees,
     Submodules,
+    Lfs,
     Rebase,
     Conflicts,
 }
 
+/// Which panel the Commit Detail view shows for the selected commit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HistoryDetailMode {
+    Changeset,
+    Tree,
+}
+
 pub(crate) struct NetworkOperation {
+    pub label: String,
     pub child: Option<git_cli::GitChild>,
     pub cancelled: bool,
 }
@@ -145,6 +157,7 @@ pub(crate) enum OperationAction {
     Continue,
 }
 
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct GitronimoApp {
     pub focus_handle: FocusHandle,
     pub last_action: Option<LastAction>,
@@ -156,6 +169,8 @@ pub(crate) struct GitronimoApp {
     pub recents: Vec<PathBuf>,
     pub activity: String,
     pub working_copy: Option<git_domain::WorktreeStatus>,
+    pub worktree_show_all_files: bool,
+    pub tracked_files: Vec<git_domain::GitPath>,
     pub refs: RefSnapshot,
     pub expanded_ref_groups: BTreeSet<String>,
     pub ref_context: Option<RefContext>,
@@ -193,6 +208,12 @@ pub(crate) struct GitronimoApp {
     pub history_diff: Option<LoadedDiff>,
     pub history_selection_token: u64,
     pub history_load_token: u64,
+    pub history_reveal_oid: Option<String>,
+    pub history_detail_mode: HistoryDetailMode,
+    pub stashes: Vec<StashEntry>,
+    pub stashes_load_token: u64,
+    pub selected_stash: Option<usize>,
+    pub pending_stash_action_ref: Option<(StashAction, String, String)>,
     pub reflog: Vec<ReflogEntry>,
     pub reflog_load_token: u64,
     pub selected_reflog: Option<usize>,
@@ -216,6 +237,8 @@ pub(crate) struct GitronimoApp {
     pub worktrees_load_token: u64,
     pub submodules: Vec<SubmoduleEntry>,
     pub submodules_load_token: u64,
+    pub lfs: Vec<LfsEntry>,
+    pub lfs_load_token: u64,
     pub rebase_plan: Vec<RebaseTodoItem>,
     pub rebase_plan_load_token: u64,
     pub conflict_path: Option<GitPath>,

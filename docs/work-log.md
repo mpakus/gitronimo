@@ -1,6 +1,51 @@
 # Implementation work log
 
-## 2026-08-09 — UI/UX study and skills registration
+## 2026-08-09 — Phase 8 / Git LFS status
+
+**Intent:** implement the remaining feasible Phase 8 checklist item, `Git LFS status`, without adding a new dependency or treating LFS as a repository mutation.
+
+**Design:** `git_cli` runs `git lfs status --porcelain` with typed arguments and parses each status line into a `LfsEntry` containing the index/worktree status bytes and raw path. The desktop adds an LFS view reachable from the sidebar and command palette, with refresh, status explanations, and the empty state for repositories without changed LFS files. A temporary repository integration test uses the installed Git LFS executable and verifies a modified tracked LFS object is reported.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `LfsEntry`.
+- `crates/git_cli/src/lib.rs` — `lfs_status`, porcelain parser, parser test, and temporary-repository integration test.
+- `apps/desktop/src/app_state.rs` — `RepositoryView::Lfs`, LFS entries, and load token.
+- `apps/desktop/src/main.rs` — LFS loading and palette/navigation wiring.
+- `apps/desktop/src/views/lfs.rs`, `views/mod.rs`, `views/working_copy.rs`, `views/sidebar.rs` — LFS view and navigation.
+
+**Acceptance checks:** the parser preserves raw paths and status columns; a real temporary repository reports a modified LFS file; the view loads in the background and shows loading, empty, success, and failure states; all required workspace gates pass.
+
+**Verification:** `git lfs status --porcelain` is parsed without a new dependency, preserving both status columns and path bytes. Parser tests cover valid raw paths and malformed records; a temporary repository with Git LFS 3.5.1 verifies a modified tracked LFS object. The desktop exposes Git LFS from the sidebar and command palette, with background loading and an empty state. The full format, Clippy, workspace test, and cargo-deny gates pass.
+
+## 2026-08-09 — UI-IMPROVE "now" items (remaining)
+
+**Intent:** finish the remaining `docs/UI-IMPROVE.md` §3 "now" items. Items 2 (Modified-only / All-files toggle), 3 (per-file stage checkbox), 4 (Back/Forward toolbar buttons), 5 (reveal new commit in History after commit), and 8 (remote-activity sidebar footer) were already implemented; this unit covers items 1, 6, 7, and 9.
+
+**Design:**
+- Item 1 — move the commit composer so it sits directly above the Working Copy file groups.
+- Items 6 + 7 — a first-class `Commit Detail` view reached by double-clicking a History row, with a `Changeset / Tree` mode toggle: Changeset shows the commit metadata, changed-file list, and read-only diff; Tree reuses `git ls-tree` browsing at that commit.
+- Item 9 — add `Stashes` and `Remotes` as sidebar destinations with views. `git_cli` gains `stash_list` (NUL-field / 0x1e-record parsing of `git stash list`) plus reference-parameterized `apply_stash`/`pop_stash`/`drop_stash`; the existing "latest stash" helpers delegate to them. The Remotes view lists each remote's name + fetch URL with a per-remote Fetch action.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — `StashEntry { reference, oid, subject }`.
+- `crates/git_cli/src/lib.rs` — `stash_list`, `apply_stash`, `pop_stash`, `drop_stash`, `parse_stash_records`, `GitStatusError::ParseStash`, unit parser test + temporary-repository integration test.
+- `apps/desktop/src/app_state.rs` — `RepositoryView::CommitDetail`/`Stashes`/`Remotes`, `HistoryDetailMode`, `history_detail_mode`, `stashes`, `selected_stash`, `pending_stash_action_ref`.
+- `apps/desktop/src/main.rs` — `show_commit_detail`, `open_commit_detail_from_history`, `toggle_history_detail_mode`, `show_stashes`/`load_stashes`, `show_remotes`, stash apply/pop/drop by reference with confirmation, palette entries, constructor/reset wiring.
+- `apps/desktop/src/views/commit_detail.rs`, `views/stashes.rs`, `views/remotes.rs` — the three views.
+- `apps/desktop/src/views/working_copy.rs` — route new `RepositoryView` variants; move composer above file groups.
+- `apps/desktop/src/views/history.rs` — double-click opens Commit Detail.
+- `apps/desktop/src/views/sidebar.rs` — Working Copy / History / Stashes / Remotes nav destinations with badges.
+- `PLAN.md`, `docs/work-log.md` — no PLAN.md checkboxes are owned by UI-IMPROVE items; work-log only.
+
+**Acceptance checks:**
+- The commit composer renders directly above the file list in Working Copy.
+- Double-clicking a History row opens Commit Detail; the Changeset/Tree toggle switches between changed-files+diff and the commit tree.
+- The Stashes view lists stashes and applies/pops/drops a selected stash (pop/drop require confirmation); Remotes lists remotes and fetches a selected one.
+- `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+**Verification:** the commit composer now sits immediately before the Working Copy file groups. History rows open `Commit Detail` on a double click; its Changeset mode shows metadata, changed paths, and a read-only diff, while Tree mode loads the selected commit through the existing `ls-tree` boundary. The sidebar and command palette expose Stashes and Remotes; stash parsing and reference-specific apply/pop/drop are covered by two parser tests plus a temporary-repository integration test. Final gates pass: formatting, Clippy with warnings denied, 90 workspace tests, and cargo-deny. The rebuilt app is running as `target/debug/gitronimo-desktop` (PID 94254); startup emitted no runtime error.
+
+
 
 **Intent:** prepare professional-UI guidance and enable GPUI skills in opencode.
 

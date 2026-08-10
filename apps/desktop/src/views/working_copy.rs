@@ -1,9 +1,9 @@
 //! Working Copy view: status groups, changes, sync, branch controls, confirmations.
 
-use gpui::{AnyElement, ClickEvent, MouseButton, div, prelude::*};
+use gpui::{AnyElement, ClickEvent, MouseButton, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
-use git_domain::{InProgressOperation, StatusEntry, WorktreeRepository};
+use git_domain::{GitPath, InProgressOperation, StatusEntry, WorktreeRepository};
 
 use crate::app_state::{
     ForcePushState, GitronimoApp, Mutation, OperationAction, RefContext, RepositoryView,
@@ -24,6 +24,17 @@ impl GitronimoApp {
     ) -> impl IntoElement {
         if self.repository_view == RepositoryView::History {
             return self.history_view(repository, colors, cx).into_any_element();
+        }
+        if self.repository_view == RepositoryView::CommitDetail {
+            return self
+                .commit_detail_view(repository, colors, cx)
+                .into_any_element();
+        }
+        if self.repository_view == RepositoryView::Stashes {
+            return self.stashes_view(colors, cx).into_any_element();
+        }
+        if self.repository_view == RepositoryView::Remotes {
+            return self.remotes_view(colors, cx).into_any_element();
         }
         if self.repository_view == RepositoryView::Reflog {
             return self.reflog_view(repository, colors, cx).into_any_element();
@@ -51,6 +62,9 @@ impl GitronimoApp {
             return self
                 .submodules_view(repository, colors, cx)
                 .into_any_element();
+        }
+        if self.repository_view == RepositoryView::Lfs {
+            return self.lfs_view(colors, cx).into_any_element();
         }
         if self.repository_view == RepositoryView::Rebase {
             return self.rebase_view(repository, colors, cx).into_any_element();
@@ -91,10 +105,26 @@ impl GitronimoApp {
                                     .child(repository.worktree_root.display().to_string()),
                             ),
                     )
-                    .child(file_action_button("History", colors, cx, {
-                        let repository = repository.clone();
-                        move |app, cx| app.show_history(repository.clone(), cx)
-                    })),
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(file_action_button(
+                                if self.worktree_show_all_files {
+                                    "Modified only"
+                                } else {
+                                    "All files"
+                                },
+                                colors,
+                                cx,
+                                super::super::app_state::GitronimoApp::toggle_worktree_show_all,
+                            ))
+                            .child(file_action_button("History", colors, cx, {
+                                let repository = repository.clone();
+                                move |app, cx| app.show_history(repository.clone(), cx)
+                            })),
+                    ),
             )
             .children(self.navigation_controls(colors, cx))
             .children(self.operation_banner_view(colors, cx))
@@ -218,12 +248,29 @@ impl GitronimoApp {
             .children(self.stash_drop_confirmation_view(colors, cx))
             .children(self.branch_delete_confirmation_view(colors, cx))
             .children(self.force_with_lease_confirmation_view(colors, cx))
-            .child(self.commit_composer_view(colors, cx))
             .children(self.context_menu_view(repository, colors, cx))
-            .child(self.status_group_view("Staged", &groups.staged, true, colors, cx))
-            .child(self.status_group_view("Unstaged", &groups.unstaged, false, colors, cx))
-            .child(self.status_group_view("Untracked", &groups.untracked, false, colors, cx))
-            .child(self.status_group_view("Conflicts", &groups.conflicts, false, colors, cx))
+            .child(self.commit_composer_view(colors, cx))
+            .when(self.worktree_show_all_files, |this| {
+                this.child(self.all_files_group_view(colors, cx))
+            })
+            .when(!self.worktree_show_all_files, |this| {
+                this.child(self.status_group_view("Staged", &groups.staged, true, colors, cx))
+                    .child(self.status_group_view("Unstaged", &groups.unstaged, false, colors, cx))
+                    .child(self.status_group_view(
+                        "Untracked",
+                        &groups.untracked,
+                        false,
+                        colors,
+                        cx,
+                    ))
+                    .child(self.status_group_view(
+                        "Conflicts",
+                        &groups.conflicts,
+                        false,
+                        colors,
+                        cx,
+                    ))
+            })
             .children(self.diff_view(colors, cx))
             .into_any_element()
     }
@@ -761,36 +808,14 @@ impl GitronimoApp {
                 .flex_col()
                 .gap_1()
                 .children(entries.iter().enumerate().map(|(index, entry)| {
-                    let path = status_path(entry).clone();
-                    let context_path = path.clone();
-                    let selected = self.selected_paths.contains(&path);
-                    div()
-                        .id((title, index))
-                        .px_2()
-                        .py_1()
-                        .bg(if selected {
-                            colors.raised_background
-                        } else {
-                            colors.panel_background
-                        })
-                        .border_1()
-                        .border_color(colors.border)
-                        .cursor_pointer()
-                        .on_click(cx.listener(move |app, event: &ClickEvent, _, cx| {
-                            app.select_status_path(
-                                path.clone(),
-                                event.modifiers().secondary() || event.modifiers().shift,
-                                staged,
-                                cx,
-                            );
-                        }))
-                        .on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |app, _, _, cx| {
-                                app.show_status_context_menu(context_path.clone(), cx);
-                            }),
-                        )
-                        .child(status_label(entry))
+                    self.status_row(
+                        (title, index).into(),
+                        status_path(entry).clone(),
+                        status_label(entry),
+                        staged,
+                        colors,
+                        cx,
+                    )
                 }))
                 .into_any_element()
         };
@@ -810,6 +835,166 @@ impl GitronimoApp {
                 ),
             )
             .child(rows)
+    }
+
+    pub(crate) fn all_files_group_view(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
+        let groups = self.status_groups();
+        let staged: std::collections::HashSet<GitPath> = groups
+            .staged
+            .iter()
+            .map(|entry| status_path(entry).clone())
+            .collect();
+        let unstaged: std::collections::HashSet<GitPath> = groups
+            .unstaged
+            .iter()
+            .map(|entry| status_path(entry).clone())
+            .collect();
+        let conflicts: std::collections::HashSet<GitPath> = groups
+            .conflicts
+            .iter()
+            .map(|entry| status_path(entry).clone())
+            .collect();
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (index, path) in self.tracked_files.iter().enumerate() {
+            let display = String::from_utf8_lossy(&path.0);
+            let (label, staged) = if conflicts.contains(path) {
+                (format!("UU  {display}"), false)
+            } else if staged.contains(path) {
+                (format!("M   {display}"), true)
+            } else if unstaged.contains(path) {
+                (format!(" M  {display}"), false)
+            } else {
+                (format!("    {display}"), false)
+            };
+            rows.push(self.status_row(
+                ("all-file", index).into(),
+                path.clone(),
+                label,
+                staged,
+                colors,
+                cx,
+            ));
+        }
+        for (index, entry) in groups.untracked.iter().enumerate() {
+            let path = status_path(entry).clone();
+            rows.push(self.status_row(
+                ("all-untracked", index).into(),
+                path.clone(),
+                format!("??  {}", String::from_utf8_lossy(&path.0)),
+                false,
+                colors,
+                cx,
+            ));
+        }
+        let count = self.tracked_files.len() + groups.untracked.len();
+        let body = if self.tracked_files.is_empty() && groups.untracked.is_empty() {
+            div()
+                .text_color(colors.text_muted)
+                .child("No tracked files to list.")
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .children(rows)
+                .into_any_element()
+        };
+        div()
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .bg(colors.panel_background)
+            .border_1()
+            .border_color(colors.border)
+            .child(
+                div().flex().justify_between().child("All files").child(
+                    div()
+                        .text_color(colors.text_secondary)
+                        .child(count.to_string()),
+                ),
+            )
+            .child(body)
+    }
+
+    pub(crate) fn status_row(
+        &self,
+        id: gpui::ElementId,
+        path: GitPath,
+        label: String,
+        staged: bool,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let context_path = path.clone();
+        let checkbox_path = path.clone();
+        let checkbox_id = id.clone();
+        let selected = self.selected_paths.contains(&path);
+        div()
+            .id(id)
+            .px_2()
+            .py_1()
+            .bg(if selected {
+                colors.raised_background
+            } else {
+                colors.panel_background
+            })
+            .border_1()
+            .border_color(colors.border)
+            .cursor_pointer()
+            .on_click(cx.listener(move |app, event: &ClickEvent, _, cx| {
+                app.select_status_path(
+                    path.clone(),
+                    event.modifiers().secondary() || event.modifiers().shift,
+                    staged,
+                    cx,
+                );
+            }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |app, _, _, cx| {
+                    app.show_status_context_menu(context_path.clone(), cx);
+                }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .id(gpui::ElementId::from((checkbox_id, label.clone())))
+                            .w(px(16.0))
+                            .h(px(16.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .border_1()
+                            .border_color(if staged {
+                                colors.success
+                            } else {
+                                colors.border
+                            })
+                            .text_color(if staged {
+                                colors.success
+                            } else {
+                                colors.text_muted
+                            })
+                            .cursor_pointer()
+                            .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                                cx.stop_propagation();
+                                app.toggle_path_staged(checkbox_path.clone(), staged, cx);
+                            }))
+                            .child(if staged { "✓" } else { "○" }),
+                    )
+                    .child(div().child(label)),
+            )
+            .into_any_element()
     }
 }
 

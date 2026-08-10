@@ -18,10 +18,10 @@ use git_domain::{
     BlameLine, BranchStatus, CommitIdentity, CommitSignature, CommitSignatureStatus, ConflictSide,
     DiffFile, DiffHunk, DiffLine, DiffLineKind, FileHistoryRequest, FileStatus, GitPath,
     HeadStatus, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest, InProgressOperation,
-    NamedRef, RebaseAction, RebaseTodoItem, RecoveredBranchTip, RecoveryRecord, RefDecoration,
-    RefSnapshot, ReflogEntry, ReflogRequest, Remote, RenameKind, RepositoryLocation, StatusEntry,
-    SubmoduleEntry, SubmoduleState, TreeEntry, TreeEntryKind, UnifiedDiff, WorktreeEntry,
-    WorktreeRepository, WorktreeStatus, parse_hunk_header, selected_lines_patch,
+    LfsEntry, NamedRef, RebaseAction, RebaseTodoItem, RecoveredBranchTip, RecoveryRecord,
+    RefDecoration, RefSnapshot, ReflogEntry, ReflogRequest, Remote, RenameKind, RepositoryLocation,
+    StashEntry, StatusEntry, SubmoduleEntry, SubmoduleState, TreeEntry, TreeEntryKind, UnifiedDiff,
+    WorktreeEntry, WorktreeRepository, WorktreeStatus, parse_hunk_header, selected_lines_patch,
 };
 
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
@@ -935,6 +935,35 @@ impl GitExecutable {
         Ok(parse_signature(&output.stdout))
     }
 
+    /// Resolves the abbreviated-to-full object id of `HEAD`.
+    ///
+    /// # Errors
+    /// Returns an error when the repository has no `HEAD` commit.
+    pub fn head_oid(&self, repository: &WorktreeRepository) -> Result<String, GitStatusError> {
+        let output = self.run(&repository.worktree_root, ["rev-parse", "HEAD"])?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        trim_oid(&output.stdout)
+            .map(|oid| String::from_utf8_lossy(&oid).into_owned())
+            .ok_or(GitStatusError::ParseReflog)
+    }
+
+    /// Lists every tracked path in the index, NUL-delimited.
+    ///
+    /// # Errors
+    /// Returns an error when Git refuses to read the index.
+    pub fn tracked_files(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<Vec<GitPath>, GitStatusError> {
+        let output = self.run(&repository.worktree_root, ["ls-files", "-z"])?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        Ok(parse_nul_paths(&output.stdout))
+    }
+
     /// Loads ref decorations independently from history records.
     ///
     /// # Errors
@@ -1464,6 +1493,75 @@ impl GitExecutable {
         self.mutate(repository, args)
     }
 
+    /// Lists every stash newest-first, with its selector, oid, and subject.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the stash query fails or the output cannot be parsed.
+    pub fn stash_list(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<Vec<StashEntry>, GitStatusError> {
+        let output = self.run(
+            &repository.worktree_root,
+            ["stash", "list", "--format=%gd%x00%H%x00%gs%x1e"],
+        )?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        parse_stash_records(&output.stdout)
+    }
+
+    /// Lists changed Git LFS paths using LFS's script-oriented porcelain format.
+    ///
+    /// # Errors
+    /// Returns the LFS command failure or a malformed porcelain record.
+    pub fn lfs_status(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<Vec<LfsEntry>, GitStatusError> {
+        let output = self.run(&repository.worktree_root, ["lfs", "status", "--porcelain"])?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        parse_lfs_status(&output.stdout)
+    }
+
+    /// Applies the named stash (e.g. `stash@{0}`) while retaining its recovery entry.
+    ///
+    /// # Errors
+    /// Returns Git's conflict or missing-stash failure.
+    pub fn apply_stash(
+        &self,
+        repository: &WorktreeRepository,
+        reference: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["stash", "apply", reference])
+    }
+
+    /// Applies and removes the named stash after caller confirmation.
+    ///
+    /// # Errors
+    /// Returns Git's conflict or missing-stash failure.
+    pub fn pop_stash(
+        &self,
+        repository: &WorktreeRepository,
+        reference: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["stash", "pop", reference])
+    }
+
+    /// Removes the named stash after caller confirmation.
+    ///
+    /// # Errors
+    /// Returns Git's missing-stash failure.
+    pub fn drop_stash(
+        &self,
+        repository: &WorktreeRepository,
+        reference: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["stash", "drop", reference])
+    }
+
     /// Applies the latest stash while retaining its recovery entry.
     ///
     /// # Errors
@@ -1472,7 +1570,7 @@ impl GitExecutable {
         &self,
         repository: &WorktreeRepository,
     ) -> Result<(), GitStatusError> {
-        self.mutate(repository, ["stash", "apply", "stash@{0}"])
+        self.apply_stash(repository, "stash@{0}")
     }
 
     /// Applies and removes the latest stash after caller confirmation.
@@ -1480,7 +1578,7 @@ impl GitExecutable {
     /// # Errors
     /// Returns Git's conflict or missing-stash failure.
     pub fn pop_latest_stash(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
-        self.mutate(repository, ["stash", "pop", "stash@{0}"])
+        self.pop_stash(repository, "stash@{0}")
     }
 
     /// Removes the latest stash after caller confirmation.
@@ -1488,7 +1586,7 @@ impl GitExecutable {
     /// # Errors
     /// Returns Git's missing-stash failure.
     pub fn drop_latest_stash(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
-        self.mutate(repository, ["stash", "drop", "stash@{0}"])
+        self.drop_stash(repository, "stash@{0}")
     }
 
     /// Merges the named branch into the current branch. A conflicting merge leaves
@@ -1963,6 +2061,8 @@ pub enum GitStatusError {
     ParseHistoryFields,
     ParseHistoryTimestamp,
     ParseReflog,
+    ParseStash,
+    ParseLfs,
 }
 
 fn command_error(output: &Output) -> GitStatusError {
@@ -2461,6 +2561,14 @@ fn parse_rebase_todo(bytes: &[u8]) -> Vec<RebaseTodoItem> {
     items
 }
 
+fn parse_nul_paths(bytes: &[u8]) -> Vec<GitPath> {
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| GitPath(path.to_vec()))
+        .collect()
+}
+
 fn parse_signature(bytes: &[u8]) -> CommitSignature {
     let record = bytes
         .split(|byte| *byte == b'\n')
@@ -2572,6 +2680,51 @@ fn parse_ls_tree(bytes: &[u8]) -> Result<Vec<TreeEntry>, GitStatusError> {
         });
     }
     Ok(entries)
+}
+
+fn parse_lfs_status(bytes: &[u8]) -> Result<Vec<LfsEntry>, GitStatusError> {
+    bytes
+        .split(|byte| *byte == b'\n')
+        .filter(|line| line.iter().any(|byte| !byte.is_ascii_whitespace()))
+        .map(|line| {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            if line.len() < 4 || line[2] != b' ' || line[3..].is_empty() {
+                return Err(GitStatusError::ParseLfs);
+            }
+            Ok(LfsEntry {
+                index_status: line[0],
+                worktree_status: line[1],
+                path: GitPath(line[3..].to_vec()),
+            })
+        })
+        .collect()
+}
+
+fn parse_stash_records(bytes: &[u8]) -> Result<Vec<StashEntry>, GitStatusError> {
+    bytes
+        .split(|byte| *byte == 0x1e)
+        .filter(|record| record.iter().any(|byte| !byte.is_ascii_whitespace()))
+        .map(|record| {
+            let record = record.strip_prefix(b"\n").unwrap_or(record);
+            let fields = record.split(|byte| *byte == 0).collect::<Vec<_>>();
+            if fields.len() < 3 {
+                return Err(GitStatusError::ParseStash);
+            }
+            let reference = std::str::from_utf8(fields[0])
+                .map_err(|_| GitStatusError::ParseStash)?
+                .trim()
+                .to_owned();
+            let oid = std::str::from_utf8(fields[1])
+                .map_err(|_| GitStatusError::ParseStash)?
+                .trim()
+                .to_owned();
+            Ok(StashEntry {
+                reference,
+                oid,
+                subject: fields[2].to_vec(),
+            })
+        })
+        .collect()
 }
 
 fn parse_reflog_records(bytes: &[u8]) -> Result<Vec<ReflogEntry>, GitStatusError> {
@@ -2752,8 +2905,9 @@ mod tests {
 
     use super::{
         CommitRequest, GitExecutable, GitStatusError, MAX_PROCESS_OUTPUT_BYTES, RenameKind,
-        git_candidates, parse_commit_records, parse_porcelain_v2_z, parse_rebase_todo,
-        parse_signature, parse_unified_diff, read_limited, trim_oid,
+        git_candidates, parse_commit_records, parse_lfs_status, parse_nul_paths,
+        parse_porcelain_v2_z, parse_rebase_todo, parse_signature, parse_stash_records,
+        parse_unified_diff, read_limited, trim_oid,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
@@ -2769,6 +2923,57 @@ mod tests {
         let output = vec![b'x'; MAX_PROCESS_OUTPUT_BYTES + 1];
         let error = read_limited(Cursor::new(output)).expect_err("output should be bounded");
         assert_eq!(error.kind(), std::io::ErrorKind::FileTooLarge);
+    }
+
+    #[test]
+    fn parses_stash_list_records() {
+        let records = parse_stash_records(
+            b"stash@{0}\0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b\0WIP on main: 1a2b3c initial\0\x1e\
+              stash@{1}\09f8e7d6c5b4a39281706050403020100ffeeddcc\0WIP on main: 1a2b3c first commit\0\x1e",
+        )
+        .expect("records should parse");
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].reference, "stash@{0}");
+        assert_eq!(records[0].oid, "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b");
+        assert_eq!(records[0].subject, b"WIP on main: 1a2b3c initial".to_vec());
+        assert_eq!(records[1].reference, "stash@{1}");
+    }
+
+    #[test]
+    fn parses_stash_list_records_with_truncated_fields() {
+        let error = parse_stash_records(b"stash@{0}\0only-two-fields").expect_err("should fail");
+        assert!(matches!(error, GitStatusError::ParseStash));
+    }
+
+    #[test]
+    fn parses_lfs_porcelain_status_and_raw_paths() {
+        let entries = parse_lfs_status(b" M assets/large file.bin\nA  new.bin\r\n")
+            .expect("LFS status should parse");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].index_status, b' ');
+        assert_eq!(entries[0].worktree_status, b'M');
+        assert_eq!(entries[0].path, GitPath(b"assets/large file.bin".to_vec()));
+        assert_eq!(entries[1].index_status, b'A');
+        assert_eq!(entries[1].worktree_status, b' ');
+    }
+
+    #[test]
+    fn rejects_malformed_lfs_porcelain_status() {
+        let error = parse_lfs_status(b"M missing-status-column\n").expect_err("should fail");
+        assert!(matches!(error, GitStatusError::ParseLfs));
+    }
+
+    #[test]
+    fn parses_nul_delimited_tracked_paths() {
+        assert_eq!(parse_nul_paths(b""), Vec::<GitPath>::new());
+        assert_eq!(
+            parse_nul_paths(b"a.txt\0dir/b.txt\0"),
+            vec![GitPath(b"a.txt".to_vec()), GitPath(b"dir/b.txt".to_vec())]
+        );
+        assert_eq!(
+            parse_nul_paths(b"only.txt\0"),
+            vec![GitPath(b"only.txt".to_vec())]
+        );
     }
 
     #[test]
@@ -3511,6 +3716,116 @@ index 1111111..2222222 100644\n\
             .worktree_status(&worktree, false)
             .expect("status should load");
         assert_eq!(status.stash_count, 1);
+    }
+
+    #[test]
+    fn lists_stashes_and_applies_pops_drops_by_reference() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        fs::write(repository.path.join("fixture.txt"), "first change")
+            .expect("fixture should write");
+        repository
+            .git
+            .create_stash(&worktree, false)
+            .expect("first change should stash");
+        fs::write(repository.path.join("fixture.txt"), "second change")
+            .expect("fixture should write");
+        repository
+            .git
+            .create_stash(&worktree, false)
+            .expect("second change should stash");
+        let stashes = repository
+            .git
+            .stash_list(&worktree)
+            .expect("stash list should load");
+        assert_eq!(stashes.len(), 2);
+        assert_eq!(stashes[0].reference, "stash@{0}");
+        assert_eq!(stashes[1].reference, "stash@{1}");
+        assert!(!stashes[0].subject.is_empty());
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(status.stash_count, 2);
+        repository
+            .git
+            .apply_stash(&worktree, &stashes[1].reference)
+            .expect("older stash should apply");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(status.stash_count, 2);
+        assert_eq!(
+            fs::read_to_string(repository.path.join("fixture.txt")).expect("file should exist"),
+            "first change"
+        );
+        fs::write(repository.path.join("fixture.txt"), "initial").expect("fixture should write");
+        repository
+            .git
+            .drop_stash(&worktree, &stashes[1].reference)
+            .expect("older stash should drop");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(status.stash_count, 1);
+        repository
+            .git
+            .pop_stash(&worktree, &stashes[0].reference)
+            .expect("newest stash should pop");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(status.stash_count, 0);
+        assert_eq!(
+            fs::read_to_string(repository.path.join("fixture.txt")).expect("file should exist"),
+            "second change"
+        );
+    }
+
+    #[test]
+    fn reports_modified_lfs_files_in_a_temporary_repository() {
+        let repository = Repository::new();
+        let probe = repository
+            .git
+            .run(&repository.path, ["lfs", "version"])
+            .expect("Git LFS probe should run");
+        if !probe.status.success() {
+            return;
+        }
+        repository.success(["lfs", "track", "*.bin"]);
+        fs::write(repository.path.join("large.bin"), b"initial LFS content")
+            .expect("LFS file should write");
+        repository.success(["add", ".gitattributes", "large.bin"]);
+        repository.success(["commit", "-m", "add LFS file"]);
+        fs::write(repository.path.join("large.bin"), b"changed LFS content")
+            .expect("LFS file should change");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        let entries = repository
+            .git
+            .lfs_status(&worktree)
+            .expect("LFS status should load");
+        let entry = entries
+            .iter()
+            .find(|entry| entry.path.0 == b"large.bin")
+            .expect("modified LFS file should be listed");
+        assert_eq!(entry.index_status, b' ');
+        assert_eq!(entry.worktree_status, b'M');
     }
 
     #[test]
@@ -5499,5 +5814,34 @@ index 1111111..2222222 100644\n\
         assert_eq!(parsed.status, CommitSignatureStatus::Good);
         assert_eq!(parsed.signer, "Gitronimo Test <test@gitronimo.invalid>");
         let _ = fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn lists_tracked_files_from_the_index() {
+        let repository = Repository::new();
+        fs::create_dir_all(repository.path.join("src")).expect("src should exist");
+        fs::write(repository.path.join("README.md"), "readme\n").expect("readme should write");
+        fs::write(repository.path.join("src/lib.rs"), "fn main() {}\n").expect("lib should write");
+        fs::write(repository.path.join("ignored.tmp"), "temp\n").expect("temp should write");
+        repository.success(["add", "README.md", "src/lib.rs"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+
+        let files = repository
+            .git
+            .tracked_files(&worktree)
+            .expect("tracked files should list");
+        assert_eq!(
+            files,
+            vec![
+                GitPath(b"README.md".to_vec()),
+                GitPath(b"src/lib.rs".to_vec())
+            ]
+        );
     }
 }

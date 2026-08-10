@@ -2012,7 +2012,7 @@ Expand local Git capability without compromising repository safety.
 - [x] Conflict-resolution UI.
 - [x] External merge-tool integration.
 - [x] Signed-commit status.
-- [ ] Git LFS status.
+- [x] Git LFS status.
 
 ---
 

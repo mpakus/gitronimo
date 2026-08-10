@@ -604,6 +604,28 @@ pub struct Remote {
     pub fetch_url: Vec<u8>,
 }
 
+/// One entry in the stash reflog, e.g. `stash@{0}`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StashEntry {
+    /// The git selector, e.g. `stash@{0}`.
+    pub reference: String,
+    /// The stash commit oid.
+    pub oid: String,
+    /// The stash subject (`%gs`), typically "WIP on <branch>: <oid> <subject>".
+    pub subject: Vec<u8>,
+}
+
+/// A changed Git LFS path reported by `git lfs status --porcelain`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LfsEntry {
+    /// The index-side status column, or a space when unchanged.
+    pub index_status: u8,
+    /// The worktree-side status column, or a space when unchanged.
+    pub worktree_status: u8,
+    /// The path bytes after the two status columns and separator.
+    pub path: GitPath,
+}
+
 /// Lane state carried between bounded history pages.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GraphState {

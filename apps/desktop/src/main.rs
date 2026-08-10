@@ -44,10 +44,11 @@ use crate::actions::{
     OpenRepository, Refresh, ShortcutReference, ToggleAppearance, WidenInspector, WidenSidebar,
 };
 use crate::app_state::{
-    ForcePushState, GitronimoApp, LastAction, Mutation, NetworkOperation, OpenedRepository,
-    OperationAction, RefContext, RepositoryView, ShellState, ShortcutReferenceState, ThemeMode,
-    appearance_from_window, discard_selected, git_failure_message, network_failure_message,
-    repository_is_available, repository_unavailable_message, resize_width,
+    ForcePushState, GitronimoApp, HistoryDetailMode, LastAction, Mutation, NetworkOperation,
+    OpenedRepository, OperationAction, RefContext, RepositoryView, ShellState,
+    ShortcutReferenceState, StashAction, ThemeMode, appearance_from_window, discard_selected,
+    git_failure_message, network_failure_message, repository_is_available,
+    repository_unavailable_message, resize_width,
 };
 
 const INITIAL_WINDOW_SIZE: (f32, f32) = (1200.0, 800.0);
@@ -208,6 +209,7 @@ fn window_options(cx: &App, geometry: Option<WindowGeometry>) -> WindowOptions {
 }
 
 impl GitronimoApp {
+    #[allow(clippy::too_many_lines)]
     fn welcome(
         recents: Vec<PathBuf>,
         store: RecentRepositoryStore,
@@ -230,6 +232,8 @@ impl GitronimoApp {
             recents,
             activity: "Choose a repository to begin.".into(),
             working_copy: None,
+            worktree_show_all_files: false,
+            tracked_files: Vec::new(),
             refs: RefSnapshot::default(),
             expanded_ref_groups,
             ref_context: None,
@@ -267,6 +271,12 @@ impl GitronimoApp {
             history_diff: None,
             history_selection_token: 0,
             history_load_token: 0,
+            history_reveal_oid: None,
+            history_detail_mode: HistoryDetailMode::Changeset,
+            stashes: Vec::new(),
+            stashes_load_token: 0,
+            selected_stash: None,
+            pending_stash_action_ref: None,
             reflog: Vec::new(),
             reflog_load_token: 0,
             selected_reflog: None,
@@ -290,6 +300,8 @@ impl GitronimoApp {
             worktrees_load_token: 0,
             submodules: Vec::new(),
             submodules_load_token: 0,
+            lfs: Vec::new(),
+            lfs_load_token: 0,
             rebase_plan: Vec::new(),
             rebase_plan_load_token: 0,
             conflict_path: None,
@@ -333,6 +345,7 @@ impl GitronimoApp {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn new_shell(
         state: ShellState,
         recents: Vec<PathBuf>,
@@ -357,6 +370,8 @@ impl GitronimoApp {
             recents,
             activity,
             working_copy: None,
+            worktree_show_all_files: false,
+            tracked_files: Vec::new(),
             refs: RefSnapshot::default(),
             expanded_ref_groups,
             ref_context: None,
@@ -394,6 +409,12 @@ impl GitronimoApp {
             history_diff: None,
             history_selection_token: 0,
             history_load_token: 0,
+            history_reveal_oid: None,
+            history_detail_mode: HistoryDetailMode::Changeset,
+            stashes: Vec::new(),
+            stashes_load_token: 0,
+            selected_stash: None,
+            pending_stash_action_ref: None,
             reflog: Vec::new(),
             reflog_load_token: 0,
             selected_reflog: None,
@@ -417,6 +438,8 @@ impl GitronimoApp {
             worktrees_load_token: 0,
             submodules: Vec::new(),
             submodules_load_token: 0,
+            lfs: Vec::new(),
+            lfs_load_token: 0,
             rebase_plan: Vec::new(),
             rebase_plan_load_token: 0,
             conflict_path: None,
@@ -530,6 +553,13 @@ impl GitronimoApp {
                 self.history_diff = None;
                 self.history_selection_token = self.history_selection_token.wrapping_add(1);
                 self.history_load_token = self.history_load_token.wrapping_add(1);
+                self.history_detail_mode = HistoryDetailMode::Changeset;
+                self.stashes.clear();
+                self.stashes_load_token = self.stashes_load_token.wrapping_add(1);
+                self.selected_stash = None;
+                self.pending_stash_action_ref = None;
+                self.lfs.clear();
+                self.lfs_load_token = self.lfs_load_token.wrapping_add(1);
                 if let ShellState::Repository(repository) = &self.state {
                     let repository = repository.clone();
                     self.load_working_copy(repository.clone(), cx);
@@ -586,7 +616,7 @@ impl GitronimoApp {
             let command = cx
                 .background_spawn(async {
                     Command::new("osascript")
-                        .args(["-e", "choose from list {\"Refresh working copy\", \"Show history\", \"Show reflog\", \"File history…\", \"Blame…\", \"Compare refs…\", \"Browse tree at commit…\", \"Worktrees…\", \"Submodules…\", \"Rebase plan…\", \"Squash staged changes…\", \"Fixup staged changes…\", \"Drop commit…\", \"Reword last commit…\", \"Conflicts…\", \"Set merge tool…\", \"Open in merge tool…\", \"Check commit signature…\", \"Show working copy\", \"Show keyboard shortcuts\"} with title \"Gitronimo commands\" with prompt \"Choose an action\""])
+                        .args(["-e", "choose from list {\"Refresh working copy\", \"Show history\", \"Commit detail…\", \"Show stashes\", \"Show remotes\", \"Git LFS status\", \"Show reflog\", \"File history…\", \"Blame…\", \"Compare refs…\", \"Browse tree at commit…\", \"Worktrees…\", \"Submodules…\", \"Rebase plan…\", \"Squash staged changes…\", \"Fixup staged changes…\", \"Drop commit…\", \"Reword last commit…\", \"Conflicts…\", \"Set merge tool…\", \"Open in merge tool…\", \"Check commit signature…\", \"Show working copy\", \"Show keyboard shortcuts\"} with title \"Gitronimo commands\" with prompt \"Choose an action\""])
                         .output()
                         .ok()
                         .filter(|output| output.status.success())
@@ -606,6 +636,29 @@ impl GitronimoApp {
                 Some("Show history") => {
                     if let ShellState::Repository(repository) = &app.state {
                         app.show_history(repository.clone(), cx);
+                    }
+                }
+                Some("Commit detail…") => {
+                    if let ShellState::Repository(repository) = &app.state {
+                        if let Some(index) = app.selected_history {
+                            let repository = repository.clone();
+                            app.show_commit_detail(&repository, index, cx);
+                        } else {
+                            app.activity = "Select a history commit first.".into();
+                        }
+                    }
+                }
+                Some("Show stashes") => {
+                    if let ShellState::Repository(repository) = &app.state {
+                        app.show_stashes(repository.clone(), cx);
+                    }
+                }
+                Some("Show remotes") => {
+                    app.show_remotes(cx);
+                }
+                Some("Git LFS status") => {
+                    if let ShellState::Repository(repository) = &app.state {
+                        app.show_lfs(repository.clone(), cx);
                     }
                 }
                 Some("Show reflog") => {
@@ -660,6 +713,8 @@ impl GitronimoApp {
     fn history_previous(&mut self, _: &HistoryPrevious, _: &mut Window, cx: &mut Context<Self>) {
         if self.repository_view == RepositoryView::Reflog {
             self.move_reflog_selection(-1, cx);
+        } else if self.repository_view == RepositoryView::Stashes {
+            self.move_stash_selection(-1, cx);
         } else {
             self.move_history_selection(-1, cx);
         }
@@ -668,6 +723,8 @@ impl GitronimoApp {
     fn history_next(&mut self, _: &HistoryNext, _: &mut Window, cx: &mut Context<Self>) {
         if self.repository_view == RepositoryView::Reflog {
             self.move_reflog_selection(1, cx);
+        } else if self.repository_view == RepositoryView::Stashes {
+            self.move_stash_selection(1, cx);
         } else {
             self.move_history_selection(1, cx);
         }
@@ -726,6 +783,46 @@ impl GitronimoApp {
         cx.notify();
     }
 
+    fn show_commit_detail(
+        &mut self,
+        repository: &WorktreeRepository,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(oid) = self.history.get(index).map(|commit| commit.oid.clone()) else {
+            return;
+        };
+        self.navigate_to(RepositoryView::CommitDetail, cx);
+        self.history_detail_mode = HistoryDetailMode::Changeset;
+        self.tree_oid = oid;
+        self.tree.clear();
+        self.tree_path.clear();
+        self.tree_blob = None;
+        self.tree_blob_path = None;
+        if self.history_paths.is_empty() {
+            self.select_history_commit(index, repository.clone(), cx);
+        }
+        cx.notify();
+    }
+
+    fn toggle_history_detail_mode(
+        &mut self,
+        mode: HistoryDetailMode,
+        repository: WorktreeRepository,
+        cx: &mut Context<Self>,
+    ) {
+        if self.history_detail_mode == mode {
+            return;
+        }
+        self.history_detail_mode = mode;
+        self.tree.clear();
+        self.tree_blob = None;
+        if mode == HistoryDetailMode::Tree {
+            self.load_tree(repository, cx);
+        }
+        cx.notify();
+    }
+
     fn change_history_reference(
         &mut self,
         reference: HistoryReference,
@@ -733,6 +830,11 @@ impl GitronimoApp {
         cx: &mut Context<Self>,
     ) {
         self.history_reference = reference;
+        self.reset_history();
+        self.load_history(repository, None, cx);
+    }
+
+    fn reset_history(&mut self) {
         self.history.clear();
         self.history_rows.clear();
         self.history_state = GraphState::default();
@@ -744,7 +846,6 @@ impl GitronimoApp {
         self.history_diff = None;
         self.history_selection_token = self.history_selection_token.wrapping_add(1);
         self.history_load_token = self.history_load_token.wrapping_add(1);
-        self.load_history(repository, None, cx);
     }
 
     fn load_history(
@@ -775,6 +876,10 @@ impl GitronimoApp {
                         let rows = layout_history_graph(&commits, &mut app.history_state);
                         app.history.extend(commits); app.history_rows.extend(rows); app.history_next = next_before; app.history_decorations = decorations; app.activity = format!("Loaded {} history commits.", app.history.len());
                         app.history_list_state.reset(app.history_row_count());
+                        if let Some(oid) = app.history_reveal_oid.take() {
+                            app.selected_history =
+                                app.history.iter().position(|commit| commit.oid == oid);
+                        }
                     }
                     Err(error) => app.activity = format!("History load failed: {error}"),
                 }
@@ -1534,6 +1639,45 @@ impl GitronimoApp {
                         app.activity = format!("Loaded {} submodule(s).", app.submodules.len());
                     }
                     Err(error) => app.activity = format!("Submodule load failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn show_lfs(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        self.navigate_to(RepositoryView::Lfs, cx);
+        self.load_lfs(repository, cx);
+    }
+
+    fn load_lfs(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        self.lfs_load_token = self.lfs_load_token.wrapping_add(1);
+        let load_token = self.lfs_load_token;
+        self.activity = "Loading Git LFS status…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    git.lfs_status(&repository)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(
+                    &app.state,
+                    ShellState::Repository(current) if current.worktree_root == root
+                ) || app.lfs_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok(entries) => {
+                        app.lfs = entries;
+                        app.activity = format!("Loaded {} Git LFS change(s).", app.lfs.len());
+                    }
+                    Err(error) => app.activity = git_failure_message("Git LFS status", &error),
                 }
                 cx.notify();
             });
@@ -2465,6 +2609,7 @@ impl GitronimoApp {
         };
         let repository = repository.clone();
         let operation = Arc::new(Mutex::new(NetworkOperation {
+            label: label.clone(),
             child: None,
             cancelled: false,
         }));
@@ -2903,6 +3048,60 @@ impl GitronimoApp {
 
     fn show_status_context_menu(&mut self, path: GitPath, cx: &mut Context<Self>) {
         self.context_path = Some(path);
+        cx.notify();
+    }
+
+    fn toggle_path_staged(
+        &mut self,
+        path: GitPath,
+        currently_staged: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mutation_in_flight {
+            return;
+        }
+        self.selected_paths = vec![path];
+        let operation = if currently_staged {
+            Mutation::UnstageSelected
+        } else {
+            Mutation::StageSelected
+        };
+        self.mutate(operation, cx);
+    }
+
+    fn toggle_worktree_show_all(&mut self, cx: &mut Context<Self>) {
+        self.worktree_show_all_files = !self.worktree_show_all_files;
+        if self.worktree_show_all_files {
+            let ShellState::Repository(repository) = &self.state else {
+                self.worktree_show_all_files = false;
+                return;
+            };
+            let repository = repository.clone();
+            let worker_repository = repository.clone();
+            cx.spawn(async move |this, cx| {
+                let files = cx
+                    .background_spawn(async move {
+                        let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                        git.tracked_files(&worker_repository)
+                            .map_err(|error| format!("{error:?}"))
+                    })
+                    .await;
+                let _ = this.update(cx, |app, cx| {
+                    if app.worktree_show_all_files {
+                        match files {
+                            Ok(files) => app.tracked_files = files,
+                            Err(error) => {
+                                app.activity = git_failure_message("List all files", &error);
+                            }
+                        }
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+        } else {
+            self.tracked_files.clear();
+        }
         cx.notify();
     }
 
@@ -3431,6 +3630,192 @@ impl GitronimoApp {
         .detach();
     }
 
+    fn show_stashes(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        self.navigate_to(RepositoryView::Stashes, cx);
+        self.load_stashes(repository, cx);
+    }
+
+    fn load_stashes(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+        let root = repository.worktree_root.clone();
+        self.stashes_load_token = self.stashes_load_token.wrapping_add(1);
+        let load_token = self.stashes_load_token;
+        self.activity = "Loading stashes…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .stash_list(&repository)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root)
+                    || app.stashes_load_token != load_token
+                {
+                    return;
+                }
+                match result {
+                    Ok(stashes) => {
+                        app.stashes = stashes;
+                        app.selected_stash = None;
+                        app.activity = format!("Loaded {} stash entr(ies).", app.stashes.len());
+                    }
+                    Err(error) => app.activity = git_failure_message("List stashes", &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn move_stash_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.repository_view != RepositoryView::Stashes || self.stashes.is_empty() {
+            return;
+        }
+        let current = self.selected_stash.unwrap_or(0);
+        let index = if delta.is_negative() {
+            current.saturating_sub(delta.unsigned_abs())
+        } else {
+            current
+                .saturating_add(delta.unsigned_abs())
+                .min(self.stashes.len() - 1)
+        };
+        self.selected_stash = Some(index);
+        cx.notify();
+    }
+
+    fn selected_stash(&self) -> Option<(String, String)> {
+        self.selected_stash.and_then(|index| {
+            self.stashes.get(index).map(|entry| {
+                (
+                    entry.reference.clone(),
+                    String::from_utf8_lossy(&entry.subject).into_owned(),
+                )
+            })
+        })
+    }
+
+    fn apply_stash_by_selection(&mut self, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let Some((reference, _)) = self.selected_stash() else {
+            self.activity = "Select a stash first.".into();
+            cx.notify();
+            return;
+        };
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let worker_reference = reference.clone();
+        self.mutation_in_flight = true;
+        self.activity = format!("Applying {reference}…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .apply_stash(&worker_repository, &worker_reference)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = format!("{reference} applied; its recovery entry remains.");
+                        app.load_working_copy(repository.clone(), cx);
+                        app.load_stashes(repository, cx);
+                    }
+                    Err(error) => app.activity = git_failure_message("Apply stash", &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn request_stash_action(&mut self, action: StashAction, cx: &mut Context<Self>) {
+        let Some((reference, subject)) = self.selected_stash() else {
+            self.activity = "Select a stash first.".into();
+            cx.notify();
+            return;
+        };
+        self.pending_stash_action_ref = Some((action, reference, subject));
+        self.activity = match action {
+            StashAction::Pop => "Confirm before removing the stash recovery entry.".into(),
+            StashAction::Drop => "Confirm before permanently removing the stash.".into(),
+        };
+        cx.notify();
+    }
+
+    fn cancel_stash_action_ref(&mut self, cx: &mut Context<Self>) {
+        self.pending_stash_action_ref = None;
+        cx.notify();
+    }
+
+    fn confirm_stash_action_ref(&mut self, cx: &mut Context<Self>) {
+        let Some((action, reference, _)) = self.pending_stash_action_ref.take() else {
+            return;
+        };
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let worker_reference = reference.clone();
+        self.mutation_in_flight = true;
+        let action_label = match action {
+            StashAction::Pop => "Pop stash",
+            StashAction::Drop => "Drop stash",
+        };
+        self.activity = format!("{action_label} {reference}…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let outcome = match action {
+                        StashAction::Pop => git.pop_stash(&worker_repository, &worker_reference),
+                        StashAction::Drop => git.drop_stash(&worker_repository, &worker_reference),
+                    };
+                    outcome.map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = format!("{action_label} {reference} complete.");
+                        app.load_working_copy(repository.clone(), cx);
+                        app.load_stashes(repository, cx);
+                    }
+                    Err(error) => app.activity = git_failure_message(action_label, &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn show_remotes(&mut self, cx: &mut Context<Self>) {
+        self.navigate_to(RepositoryView::Remotes, cx);
+        cx.notify();
+    }
+
+    fn fetch_remote(&mut self, name: String, cx: &mut Context<Self>) {
+        self.run_network_command(
+            format!("Fetching {name}"),
+            vec!["fetch".into(), "--progress".into(), name.into()],
+            cx,
+        );
+    }
+
     fn create_stash(&mut self, include_untracked: bool, cx: &mut Context<Self>) {
         if self.mutation_in_flight {
             return;
@@ -3651,20 +4036,27 @@ impl GitronimoApp {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    GitExecutable::discover()
-                        .map_err(|error| error.to_string())?
-                        .commit(&worker_repository, &request)
-                        .map_err(|error| format!("{error:?}"))
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    git.commit(&worker_repository, &request)
+                        .map_err(|error| format!("{error:?}"))?;
+                    let oid = git
+                        .head_oid(&worker_repository)
+                        .map_err(|error| format!("{error:?}"))?;
+                    Ok::<_, String>(oid)
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
                 app.mutation_in_flight = false;
                 match result {
-                    Ok(()) => {
+                    Ok(oid) => {
                         app.commit_subject.clear();
                         app.commit_body.clear();
                         app.activity = "Commit complete.".into();
-                        app.load_working_copy(repository, cx);
+                        app.load_working_copy(repository.clone(), cx);
+                        app.history_reveal_oid = Some(oid);
+                        app.navigate_to(RepositoryView::History, cx);
+                        app.reset_history();
+                        app.load_history(repository, None, cx);
                     }
                     Err(error) => app.activity = git_failure_message("Commit", &error),
                 }
