@@ -4,6 +4,8 @@ members = [
     "crates/app_core",
     "crates/git_cli",
     "crates/git_domain",
+    "crates/hosting_github",
+    "crates/platform_macos",
     "crates/test_support",
     "crates/ui_kit",
 ]

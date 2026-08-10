@@ -6,7 +6,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use git_domain::{RecoveryRecord, RepositoryLocation, WorktreeRepository};
+use git_domain::{
+    HostedRepository, MergeMethod, PullRequestComment, PullRequestDetail, PullRequestSummary,
+    RecoveryRecord, RepositoryLocation, ServiceAccount, WorktreeRepository,
+};
 use serde::{Deserialize, Serialize};
 
 const STORE_SCHEMA_VERSION: u32 = 1;
@@ -22,6 +25,116 @@ pub trait RepositoryDiscoverer {
     ///
     /// Returns an actionable error when `path` cannot be opened as a repository.
     fn discover_repository(&self, path: &Path) -> Result<RepositoryLocation, RepositoryOpenError>;
+}
+
+/// Non-secret lookup key for a credential held by platform storage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SecretKey {
+    pub service: String,
+    pub account: String,
+}
+
+/// Platform-owned secret storage boundary.
+pub trait SecretStore {
+    /// Reads a secret without exposing it in application state.
+    ///
+    /// # Errors
+    /// Returns a platform storage failure.
+    fn read(&self, key: &SecretKey) -> Result<Option<String>, SecretStoreError>;
+    /// Stores a secret in the platform credential store.
+    ///
+    /// # Errors
+    /// Returns a platform storage failure.
+    fn write(&self, key: &SecretKey, value: &str) -> Result<(), SecretStoreError>;
+    /// Deletes a secret from the platform credential store.
+    ///
+    /// # Errors
+    /// Returns a platform storage failure.
+    fn delete(&self, key: &SecretKey) -> Result<(), SecretStoreError>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SecretStoreError {
+    Unavailable,
+    CommandFailed,
+}
+
+/// Provider-neutral hosting API port. Tokens exist only during calls and are
+/// never part of the returned application models.
+pub trait HostingService {
+    /// Validates a provider token and returns non-secret account metadata.
+    ///
+    /// # Errors
+    /// Returns authentication, rate-limit, transport, API, or parse failures.
+    fn authenticate(&self, token: &str) -> Result<ServiceAccount, HostingError>;
+    /// Lists repositories visible to the authenticated account.
+    ///
+    /// # Errors
+    /// Returns authentication, rate-limit, transport, API, or parse failures.
+    fn repositories(&self, token: &str) -> Result<Vec<HostedRepository>, HostingError>;
+    /// Lists open pull requests for one hosted repository.
+    ///
+    /// # Errors
+    /// Returns authentication, rate-limit, transport, API, or parse failures.
+    fn pull_requests(
+        &self,
+        token: &str,
+        repository: &HostedRepository,
+    ) -> Result<Vec<PullRequestSummary>, HostingError>;
+    /// Loads one pull request's description, files, and comments.
+    ///
+    /// # Errors
+    /// Returns authentication, rate-limit, transport, API, or parse failures.
+    fn pull_request_detail(
+        &self,
+        token: &str,
+        repository: &HostedRepository,
+        number: u64,
+    ) -> Result<PullRequestDetail, HostingError>;
+    /// Creates a pull request from `head` into `base`.
+    ///
+    /// # Errors
+    /// Returns authentication, rate-limit, transport, API, or parse failures.
+    fn create_pull_request(
+        &self,
+        token: &str,
+        repository: &HostedRepository,
+        title: &str,
+        body: &str,
+        head: &str,
+        base: &str,
+    ) -> Result<PullRequestSummary, HostingError>;
+    /// Adds a comment to a pull request.
+    ///
+    /// # Errors
+    /// Returns authentication, rate-limit, transport, API, or parse failures.
+    fn comment_pull_request(
+        &self,
+        token: &str,
+        repository: &HostedRepository,
+        number: u64,
+        body: &str,
+    ) -> Result<PullRequestComment, HostingError>;
+    /// Merges a pull request using an explicit method.
+    ///
+    /// # Errors
+    /// Returns authentication, rate-limit, transport, API, or parse failures.
+    fn merge_pull_request(
+        &self,
+        token: &str,
+        repository: &HostedRepository,
+        number: u64,
+        method: MergeMethod,
+    ) -> Result<(), HostingError>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HostingError {
+    Authentication,
+    RateLimited { retry_after_seconds: Option<u64> },
+    Network,
+    Api(String),
+    Parse,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

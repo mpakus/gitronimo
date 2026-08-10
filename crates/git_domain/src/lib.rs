@@ -626,6 +626,96 @@ pub struct LfsEntry {
     pub path: GitPath,
 }
 
+/// Authentication state for a configured hosting service account.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ServiceAuthState {
+    SignedOut,
+    Loading,
+    Connected,
+    Expired,
+    RateLimited,
+    Error(String),
+}
+
+/// Non-secret identity metadata returned by a hosting provider.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServiceAccount {
+    pub provider: String,
+    pub login: String,
+    pub display_name: Option<String>,
+}
+
+/// A repository hosted by a provider. Credentials are intentionally absent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostedRepository {
+    pub id: u64,
+    pub owner: String,
+    pub name: String,
+    pub full_name: String,
+    pub clone_url: String,
+    pub ssh_url: Option<String>,
+    pub private: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PullRequestState {
+    Open,
+    Closed,
+    Merged,
+    Other(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MergeMethod {
+    Merge,
+    Squash,
+    Rebase,
+}
+
+impl MergeMethod {
+    #[must_use]
+    pub fn api_name(self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::Squash => "squash",
+            Self::Rebase => "rebase",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PullRequestSummary {
+    pub number: u64,
+    pub title: String,
+    pub author: String,
+    pub updated_at: String,
+    pub state: PullRequestState,
+    pub head_ref: String,
+    pub base_ref: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PullRequestFile {
+    pub path: String,
+    pub additions: u64,
+    pub deletions: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PullRequestComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PullRequestDetail {
+    pub summary: PullRequestSummary,
+    pub body: String,
+    pub files: Vec<PullRequestFile>,
+    pub comments: Vec<PullRequestComment>,
+}
+
 /// Lane state carried between bounded history pages.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GraphState {

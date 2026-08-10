@@ -1,5 +1,58 @@
 # Implementation work log
 
+## 2026-08-09 — UI-IMPROVE item 12 / Pull Requests
+
+**Intent:** complete the Pull Requests collaboration surface after stabilizing the Services provider boundary.
+
+**Design:** extend the provider-neutral hosting port with list/detail/create/comment/merge operations and explicit `MergeMethod` values. The GitHub adapter maps files, comments, state, rate limits, and API errors without exposing tokens. The desktop adds a split list/detail Pull Requests view, selected hosted-repository context, background stale-result guards, explicit merge confirmation/method choice, comment/create prompts, and checkout through a typed GitHub pull-ref fetch followed by local branch creation.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs`, `crates/app_core/src/lib.rs` — PR models and hosting operations.
+- `crates/hosting_github/src/lib.rs` — GitHub PR endpoints and fixture parser tests.
+- `crates/git_cli/src/lib.rs` — typed pull-request ref fetch and local-bare integration test.
+- `apps/desktop/src/app_state.rs`, `main.rs`, `views/pull_requests.rs`, `views/services.rs`, `views/mod.rs`, `views/working_copy.rs` — PR state, actions, and UI.
+- `PLAN.md`, `docs/UI-IMPROVE.md`, `docs/work-log.md` — checklist/status updates.
+
+**Acceptance checks:** open PRs list and load details; create/comment/merge use background provider calls; merge requires an explicit method and confirmation; checkout fetches `pull/<number>/head` through typed Git arguments; no public-network test or credential is used; full workspace gates pass.
+
+**Verification:** GitHub fixture tests cover PR summaries, files, comments, HTTP response parsing, and provider repository parsing. A local bare repository test verifies typed pull-request ref fetching. The desktop exposes the split PR list/detail view and all requested actions without public-network tests or real credentials. Full formatting, Clippy, workspace tests, and cargo-deny gates pass.
+
+## 2026-08-09 — UI-IMPROVE item 11 / Services vertical slice
+
+**Intent:** implement the first real Services slice: GitHub account connection, secure token persistence, account/repository listing, and clone handoff to the existing Git CLI boundary.
+
+**Design:** `git_domain` owns provider-neutral non-secret account and hosted-repository models. `app_core` owns `SecretStore` and `HostingService` ports. `platform_macos` implements the Keychain port through the macOS `security` tool without persisting tokens in app preferences or state. `hosting_github` owns GitHub API endpoints, response parsing, authentication/rate-limit mapping, and a typed curl transport; no UI or Git logic enters that crate. The desktop Services view stores only account metadata and hosted repositories, never the token.
+
+**Files (planned):**
+- `crates/git_domain/src/lib.rs` — provider-neutral service/account/repository models.
+- `crates/app_core/src/lib.rs` — `SecretStore`, `HostingService`, secret key, and hosting errors.
+- `crates/platform_macos/` — Keychain-backed `SecretStore` implementation.
+- `crates/hosting_github/` — GitHub API adapter and JSON/HTTP parser tests.
+- `Cargo.toml`, `apps/desktop/Cargo.toml`, `Cargo.lock` — workspace and exact dependencies.
+- `apps/desktop/src/app_state.rs`, `main.rs`, `views/services.rs`, `views/mod.rs`, `views/working_copy.rs`, `views/sidebar.rs` — Services state, background flows, and view.
+- `docs/UI-IMPROVE.md`, `docs/work-log.md` — status and security notes.
+
+**Acceptance checks:** token entry uses an obscured prompt and is stored only in Keychain; account validation and repository listing use a background GitHub request; rate-limit/auth errors become explicit UI states; hosted repository clone uses the existing typed Git boundary; parser and workspace gates pass without public-network tests.
+
+**Verification:** `hosting_github` parses GitHub response headers and repository JSON through fixture tests; `platform_macos` scopes the Keychain item by provider and account without exposing a secret in models. The Services view connects, refreshes, signs out, reports expired/rate-limited states, lists repositories, and hands selected clones to `git_cli::clone_repository`. Full formatting, Clippy, workspace tests, and cargo-deny gates pass. No public GitHub request or real token was used during tests.
+
+## 2026-08-09 — UI-IMPROVE item 10 / Repositories view
+
+**Intent:** finish the Repositories welcome-surface item from `docs/UI-IMPROVE.md` before beginning provider-backed Services or Pull Requests.
+
+**Design:** replace the welcome-only recent list with a Repositories surface that groups local recents by parent folder when enabled, keeps a flat recent view when disabled, exposes Add existing / Create new / Clone entry points, and shows the current open state. Create new initializes a selected folder through the typed Git CLI boundary, then opens the resulting repository. Clone prompts for a URL or local path and destination parent, runs the typed Git clone boundary, and opens the resulting repository.
+
+**Files (planned):**
+- `crates/git_cli/src/lib.rs` — typed `init_repository` mutation and temporary-repository integration test.
+- `apps/desktop/src/app_state.rs` — repository grouping state.
+- `apps/desktop/src/main.rs` — create-repository folder flow and palette/navigation wiring.
+- `apps/desktop/src/views/welcome.rs` — Repositories surface, grouping toggle, create/add/clone actions, and recent metadata.
+- `docs/UI-IMPROVE.md`, `docs/work-log.md` — record completion and clone behavior.
+
+**Acceptance checks:** recents render grouped and flat; grouping toggles without losing recents; Create new initializes and opens a repository; Add existing still opens a selected repository; Clone completes for a local source and opens the result; parser/mutation and workspace gates pass.
+
+**Verification:** local clone and initialization integration tests pass, including canonical path handling. The Repositories view now renders grouped or flat recents and exposes Add existing, Create new, and Clone. The complete workspace gates pass.
+
 ## 2026-08-09 — Phase 8 / Git LFS status
 
 **Intent:** implement the remaining feasible Phase 8 checklist item, `Git LFS status`, without adding a new dependency or treating LFS as a repository mutation.

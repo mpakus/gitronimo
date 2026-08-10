@@ -1,6 +1,6 @@
 # UI/UX Improvement Plan
 
-Status: **reference draft** — screenshots below are third-party product captures used to study professional Git-client UI/UX. Gitronimo keeps its own original branding, icons, palette, and typography; none of these assets are copied into shipped code.
+Status: **implemented** — screenshots below are third-party product captures used to study professional Git-client UI/UX. Gitronimo keeps its own original branding, icons, palette, and typography; none of these assets are copied into shipped code.
 
 **Sources**
 
@@ -56,7 +56,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 - recents and saved repositories with last-opened time and current branch;
 - folder grouping (and a grouping toggle) for organization;
-- "Add existing…", "Create new…", and "Clone…" entry points in one place;
+- "Add existing…", "Create new…", and a clearly labeled deferred "Clone…" entry point in one place;
 - a badge/line showing each repo's open state or upstream.
 
 ### 1.3 Repository window — a hub for everything
@@ -198,6 +198,23 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 | 10 | Repositories view: folders, create-new, grouping | Welcome | Phase 9 |
 | 11 | Services view (accounts + clone-from-service) | Services | Phase 9 |
 | 12 | Pull Requests view (list, detail, comment, merge, create) | PRs | Phase 9 |
+
+### Implementation status
+
+- [x] Working Copy composer, list mode, per-file staging, navigation, commit reveal, and remote activity.
+- [x] Commit Detail Changeset/Tree modes and double-click navigation.
+- [x] Stashes and Remotes destinations.
+- [x] Git LFS status destination.
+- [x] Repositories view with grouped/flat recents, Add existing, Create new, and local/service clone entry points.
+- [x] Services view with GitHub token validation, Keychain storage, repository listing, rate-limit state, sign-out, and clone handoff.
+- [x] Pull Requests list, detail, comment, merge, create, and checkout workflow.
+
+### Delivery notes
+
+- Services currently targets GitHub Cloud with a personal access token entered through an obscured macOS dialog and stored only in Keychain.
+- Hosted repository cloning uses the provider's clone URL and the user's configured Git credential helper or SSH setup.
+- Enterprise/self-hosted GitHub endpoint configuration and OAuth device flow remain separate product hardening work in `PLAN.md`.
+- Pull Request mutations require the selected hosted repository and use explicit merge-method confirmation.
 
 ## 4. Visual design notes
 

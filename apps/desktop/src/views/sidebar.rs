@@ -132,6 +132,15 @@ impl GitronimoApp {
                     .child("Git LFS")
                     .child(self.lfs.len().to_string()),
             )
+            .child(
+                div()
+                    .id("sidebar-services")
+                    .cursor_pointer()
+                    .on_click(cx.listener(|app, _, _, cx| {
+                        app.show_services(cx);
+                    }))
+                    .child("Services"),
+            )
             .children(
                 self.refs
                     .remotes

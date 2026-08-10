@@ -13,8 +13,9 @@ use std::{
 
 use git_cli::LoadedDiff;
 use git_domain::{
-    BlameLine, GitPath, GraphRow, GraphState, HistoryCommit, HistoryReference, LfsEntry,
-    RebaseTodoItem, RefDecoration, RefSnapshot, ReflogEntry, StashEntry, SubmoduleEntry, TreeEntry,
+    BlameLine, GitPath, GraphRow, GraphState, HistoryCommit, HistoryReference, HostedRepository,
+    LfsEntry, PullRequestDetail, PullRequestSummary, RebaseTodoItem, RefDecoration, RefSnapshot,
+    ReflogEntry, ServiceAccount, ServiceAuthState, StashEntry, SubmoduleEntry, TreeEntry,
     WorktreeEntry, WorktreeRepository,
 };
 use gpui::{FocusHandle, ListState, WindowAppearance};
@@ -56,6 +57,8 @@ pub(crate) enum RepositoryView {
     CommitDetail,
     Stashes,
     Remotes,
+    Services,
+    PullRequests,
     Reflog,
     FileHistory,
     Blame,
@@ -167,6 +170,7 @@ pub(crate) struct GitronimoApp {
     pub inspector_width: f32,
     pub state: ShellState,
     pub recents: Vec<PathBuf>,
+    pub repositories_grouped: bool,
     pub activity: String,
     pub working_copy: Option<git_domain::WorktreeStatus>,
     pub worktree_show_all_files: bool,
@@ -239,6 +243,17 @@ pub(crate) struct GitronimoApp {
     pub submodules_load_token: u64,
     pub lfs: Vec<LfsEntry>,
     pub lfs_load_token: u64,
+    pub service_auth_state: ServiceAuthState,
+    pub service_account: Option<ServiceAccount>,
+    pub hosted_repositories: Vec<HostedRepository>,
+    pub selected_hosted_repository: Option<usize>,
+    pub services_load_token: u64,
+    pub pull_requests: Vec<PullRequestSummary>,
+    pub selected_pull_request: Option<usize>,
+    pub pull_request_detail: Option<PullRequestDetail>,
+    pub pull_request_repository: Option<HostedRepository>,
+    pub pull_requests_load_token: u64,
+    pub pull_request_detail_token: u64,
     pub rebase_plan: Vec<RebaseTodoItem>,
     pub rebase_plan_load_token: u64,
     pub conflict_path: Option<GitPath>,

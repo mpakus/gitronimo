@@ -142,6 +142,42 @@ impl GitExecutable {
         self.run_env(directory, std::iter::empty(), args)
     }
 
+    /// Initializes an empty worktree repository in `directory`.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the directory is not writable or already has
+    /// an incompatible repository layout.
+    pub fn init_repository(&self, directory: &Path) -> Result<(), GitStatusError> {
+        let output = self.run(directory, ["init", "--initial-branch=main", "."])?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(command_error(&output))
+        }
+    }
+
+    /// Clones `source` into a typed destination path.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the source cannot be read or the destination
+    /// cannot be created.
+    pub fn clone_repository(&self, source: &str, destination: &Path) -> Result<(), GitStatusError> {
+        let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+        let output = self.run(
+            parent,
+            [
+                OsString::from("clone"),
+                OsString::from(source),
+                destination.as_os_str().to_os_string(),
+            ],
+        )?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(command_error(&output))
+        }
+    }
+
     fn run_env<I, E, S>(&self, directory: &Path, envs: E, args: I) -> io::Result<Output>
     where
         I: IntoIterator<Item = S>,
@@ -1137,6 +1173,28 @@ impl GitExecutable {
         remote: &str,
     ) -> Result<(), GitStatusError> {
         self.mutate(repository, ["fetch", "--progress", remote])
+    }
+
+    /// Fetches a GitHub pull request head into a remote-tracking ref.
+    ///
+    /// # Errors
+    /// Returns Git's actionable authentication or transport failure.
+    pub fn fetch_pull_request(
+        &self,
+        repository: &WorktreeRepository,
+        remote: &str,
+        number: u64,
+    ) -> Result<(), GitStatusError> {
+        let refspec = format!("pull/{number}/head:refs/remotes/{remote}/pr/{number}");
+        self.mutate(
+            repository,
+            [
+                OsString::from("fetch"),
+                OsString::from("--progress"),
+                OsString::from(remote),
+                OsString::from(refspec),
+            ],
+        )
     }
 
     /// Pulls the configured upstream for the current branch.
@@ -3124,6 +3182,57 @@ mod tests {
     }
 
     #[test]
+    fn initializes_a_new_repository_in_a_selected_directory() {
+        let repository = Repository::new();
+        let created = repository.path.join("new-project");
+        fs::create_dir(&created).expect("new project directory should exist");
+        repository
+            .git
+            .init_repository(&created)
+            .expect("Git should initialize the selected directory");
+        let location = repository
+            .git
+            .discover_repository(&created)
+            .expect("initialized directory should be discoverable");
+        let RepositoryLocation::Worktree(worktree) = location else {
+            panic!("initialized directory should be a worktree");
+        };
+        assert_eq!(
+            worktree.worktree_root,
+            created
+                .canonicalize()
+                .expect("created path should canonicalize")
+        );
+    }
+
+    #[test]
+    fn clones_a_local_repository_into_a_typed_destination() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let remote = repository.path.with_extension("clone.git");
+        repository.success([
+            "clone",
+            "--bare",
+            ".",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        let destination = repository.path.with_extension("cloned");
+        repository
+            .git
+            .clone_repository(
+                remote.to_str().expect("temporary path is UTF-8"),
+                &destination,
+            )
+            .expect("local clone should complete");
+        assert_eq!(
+            fs::read_to_string(destination.join("fixture.txt")).expect("cloned file should exist"),
+            "initial"
+        );
+        let _ = fs::remove_dir_all(remote);
+        let _ = fs::remove_dir_all(destination);
+    }
+
+    #[test]
     fn reads_status_with_unusual_filenames() {
         let repository = Repository::new();
         let filename = "sp ace\tand\nunicode-é.txt";
@@ -4244,6 +4353,49 @@ index 1111111..2222222 100644\n\
             .expect("pull should apply the configured upstream");
         let _ = fs::remove_dir_all(remote);
         let _ = fs::remove_dir_all(collaborator);
+    }
+
+    #[test]
+    fn fetches_a_pull_request_ref_into_a_remote_tracking_branch() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let remote = repository.path.with_extension("pull-request.git");
+        repository.success([
+            "clone",
+            "--bare",
+            ".",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        repository.success([
+            "--git-dir",
+            remote.to_str().expect("temporary path is UTF-8"),
+            "update-ref",
+            "refs/pull/7/head",
+            "HEAD",
+        ]);
+        repository.success([
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("worktree should resolve")
+        else {
+            panic!("fixture should be a worktree");
+        };
+        repository
+            .git
+            .fetch_pull_request(&worktree, "origin", 7)
+            .expect("pull request ref should fetch");
+        let fetched = repository
+            .git
+            .run(&repository.path, ["rev-parse", "refs/remotes/origin/pr/7"])
+            .expect("fetched ref should resolve");
+        assert!(fetched.status.success());
+        let _ = fs::remove_dir_all(remote);
     }
 
     #[test]

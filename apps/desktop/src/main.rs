@@ -23,8 +23,8 @@ use std::{
 };
 
 use app_core::{
-    RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError, WindowGeometry,
-    open_repository,
+    HostingError, HostingService, RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError,
+    SecretStore, WindowGeometry, open_repository,
 };
 use git_cli::{CommitRequest, GitExecutable, GitStatusError, read_stderr_limited};
 use git_domain::{
@@ -36,7 +36,9 @@ use gpui::{
     App, Application, Bounds, ClipboardItem, Context, ExternalPaths, ListAlignment, ListState,
     PathPromptOptions, Window, WindowBounds, WindowOptions, point, prelude::*, px, size,
 };
+use hosting_github::GitHubService;
 use notify::{RecursiveMode, Watcher};
+use platform_macos::MacKeychainStore;
 use ui_kit::Appearance;
 
 use crate::actions::{
@@ -53,6 +55,11 @@ use crate::app_state::{
 
 const INITIAL_WINDOW_SIZE: (f32, f32) = (1200.0, 800.0);
 const MINIMUM_WINDOW_SIZE: (f32, f32) = (800.0, 560.0);
+const CREATE_PULL_REQUEST_SCRIPT: &str = r#"set title_text to text returned of (display dialog "Pull request title" default answer "")
+set body_text to text returned of (display dialog "Pull request description" default answer "")
+set head_text to text returned of (display dialog "Head branch" default answer "")
+set base_text to text returned of (display dialog "Base branch" default answer "main")
+return title_text & linefeed & body_text & linefeed & head_text & linefeed & base_text"#;
 fn main() {
     install_panic_reporter();
     Application::new().run(|cx: &mut App| {
@@ -149,6 +156,16 @@ fn joined_tree_path(segments: &[GitPath]) -> GitPath {
     GitPath(bytes)
 }
 
+fn service_auth_state(error: &HostingError) -> git_domain::ServiceAuthState {
+    match error {
+        HostingError::Authentication => git_domain::ServiceAuthState::Expired,
+        HostingError::RateLimited { .. } => git_domain::ServiceAuthState::RateLimited,
+        HostingError::Network | HostingError::Api(_) | HostingError::Parse => {
+            git_domain::ServiceAuthState::Error("GitHub could not be loaded.".into())
+        }
+    }
+}
+
 fn install_panic_reporter() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -230,6 +247,7 @@ impl GitronimoApp {
             inspector_width: 320.0,
             state: ShellState::Welcome,
             recents,
+            repositories_grouped: true,
             activity: "Choose a repository to begin.".into(),
             working_copy: None,
             worktree_show_all_files: false,
@@ -302,6 +320,17 @@ impl GitronimoApp {
             submodules_load_token: 0,
             lfs: Vec::new(),
             lfs_load_token: 0,
+            service_auth_state: git_domain::ServiceAuthState::SignedOut,
+            service_account: None,
+            hosted_repositories: Vec::new(),
+            selected_hosted_repository: None,
+            services_load_token: 0,
+            pull_requests: Vec::new(),
+            selected_pull_request: None,
+            pull_request_detail: None,
+            pull_request_repository: None,
+            pull_requests_load_token: 0,
+            pull_request_detail_token: 0,
             rebase_plan: Vec::new(),
             rebase_plan_load_token: 0,
             conflict_path: None,
@@ -368,6 +397,7 @@ impl GitronimoApp {
             inspector_width: 320.0,
             state,
             recents,
+            repositories_grouped: true,
             activity,
             working_copy: None,
             worktree_show_all_files: false,
@@ -440,6 +470,17 @@ impl GitronimoApp {
             submodules_load_token: 0,
             lfs: Vec::new(),
             lfs_load_token: 0,
+            service_auth_state: git_domain::ServiceAuthState::SignedOut,
+            service_account: None,
+            hosted_repositories: Vec::new(),
+            selected_hosted_repository: None,
+            services_load_token: 0,
+            pull_requests: Vec::new(),
+            selected_pull_request: None,
+            pull_request_detail: None,
+            pull_request_repository: None,
+            pull_requests_load_token: 0,
+            pull_request_detail_token: 0,
             rebase_plan: Vec::new(),
             rebase_plan_load_token: 0,
             conflict_path: None,
@@ -560,6 +601,17 @@ impl GitronimoApp {
                 self.pending_stash_action_ref = None;
                 self.lfs.clear();
                 self.lfs_load_token = self.lfs_load_token.wrapping_add(1);
+                self.service_auth_state = git_domain::ServiceAuthState::SignedOut;
+                self.service_account = None;
+                self.hosted_repositories.clear();
+                self.selected_hosted_repository = None;
+                self.services_load_token = self.services_load_token.wrapping_add(1);
+                self.pull_requests.clear();
+                self.selected_pull_request = None;
+                self.pull_request_detail = None;
+                self.pull_request_repository = None;
+                self.pull_requests_load_token = self.pull_requests_load_token.wrapping_add(1);
+                self.pull_request_detail_token = self.pull_request_detail_token.wrapping_add(1);
                 if let ShellState::Repository(repository) = &self.state {
                     let repository = repository.clone();
                     self.load_working_copy(repository.clone(), cx);
@@ -586,6 +638,86 @@ impl GitronimoApp {
             self.activity = "Open a repository before refreshing its working copy.".into();
         }
         cx.notify();
+    }
+
+    fn toggle_repositories_grouped(&mut self, cx: &mut Context<Self>) {
+        self.repositories_grouped = !self.repositories_grouped;
+        cx.notify();
+    }
+
+    fn prompt_create_repository(&mut self, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose a folder for the new repository".into()),
+        });
+        let store = self.store.clone();
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let outcome = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover()
+                        .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+                    git.init_repository(&path)
+                        .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+                    discover_and_record(&path, &store)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| app.apply_open_outcome(outcome, cx));
+        })
+        .detach();
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn prompt_clone_repository(&mut self, cx: &mut Context<Self>) {
+        const SCRIPT: &str = r#"set remote_url to text returned of (display dialog "Clone URL or local path" default answer "")
+set parent_folder to choose folder with prompt "Choose destination parent folder"
+set parent_path to POSIX path of parent_folder
+return remote_url & linefeed & parent_path"#;
+        let store = self.store.clone();
+        cx.spawn(async move |this, cx| {
+            let choice = cx
+                .background_spawn(async {
+                    let output = Command::new("osascript")
+                        .args(["-e", SCRIPT])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())?;
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    let mut lines = text.lines();
+                    let source = lines.next()?.trim().to_owned();
+                    let parent = lines.next()?.trim().to_owned();
+                    (!source.is_empty() && !parent.is_empty()).then_some((source, parent))
+                })
+                .await;
+            let Some((source, parent)) = choice else {
+                return;
+            };
+            let name = source
+                .trim_end_matches('/')
+                .rsplit('/')
+                .find(|part| !part.is_empty())
+                .unwrap_or("repository")
+                .trim_end_matches(".git");
+            let destination = PathBuf::from(parent).join(name);
+            let outcome = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover()
+                        .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+                    git.clone_repository(&source, &destination)
+                        .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+                    discover_and_record(&destination, &store)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| app.apply_open_outcome(outcome, cx));
+        })
+        .detach();
     }
 
     fn focus_composer(&mut self, _: &FocusComposer, _: &mut Window, cx: &mut Context<Self>) {
@@ -616,7 +748,7 @@ impl GitronimoApp {
             let command = cx
                 .background_spawn(async {
                     Command::new("osascript")
-                        .args(["-e", "choose from list {\"Refresh working copy\", \"Show history\", \"Commit detail…\", \"Show stashes\", \"Show remotes\", \"Git LFS status\", \"Show reflog\", \"File history…\", \"Blame…\", \"Compare refs…\", \"Browse tree at commit…\", \"Worktrees…\", \"Submodules…\", \"Rebase plan…\", \"Squash staged changes…\", \"Fixup staged changes…\", \"Drop commit…\", \"Reword last commit…\", \"Conflicts…\", \"Set merge tool…\", \"Open in merge tool…\", \"Check commit signature…\", \"Show working copy\", \"Show keyboard shortcuts\"} with title \"Gitronimo commands\" with prompt \"Choose an action\""])
+                        .args(["-e", "choose from list {\"Refresh working copy\", \"Show history\", \"Commit detail…\", \"Show stashes\", \"Show remotes\", \"Git LFS status\", \"Services\", \"Show reflog\", \"File history…\", \"Blame…\", \"Compare refs…\", \"Browse tree at commit…\", \"Worktrees…\", \"Submodules…\", \"Rebase plan…\", \"Squash staged changes…\", \"Fixup staged changes…\", \"Drop commit…\", \"Reword last commit…\", \"Conflicts…\", \"Set merge tool…\", \"Open in merge tool…\", \"Check commit signature…\", \"Show working copy\", \"Show keyboard shortcuts\"} with title \"Gitronimo commands\" with prompt \"Choose an action\""])
                         .output()
                         .ok()
                         .filter(|output| output.status.success())
@@ -660,6 +792,9 @@ impl GitronimoApp {
                     if let ShellState::Repository(repository) = &app.state {
                         app.show_lfs(repository.clone(), cx);
                     }
+                }
+                Some("Services") => {
+                    app.show_services(cx);
                 }
                 Some("Show reflog") => {
                     if let ShellState::Repository(repository) = &app.state {
@@ -1678,6 +1813,488 @@ impl GitronimoApp {
                         app.activity = format!("Loaded {} Git LFS change(s).", app.lfs.len());
                     }
                     Err(error) => app.activity = git_failure_message("Git LFS status", &error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn show_services(&mut self, cx: &mut Context<Self>) {
+        self.navigate_to(RepositoryView::Services, cx);
+        self.load_services(cx);
+    }
+
+    fn load_services(&mut self, cx: &mut Context<Self>) {
+        self.services_load_token = self.services_load_token.wrapping_add(1);
+        let load_token = self.services_load_token;
+        self.service_auth_state = git_domain::ServiceAuthState::Loading;
+        self.activity = "Loading GitHub account…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async {
+                    let keychain = MacKeychainStore;
+                    let key = MacKeychainStore::github_key("default");
+                    let Some(token) = keychain.read(&key).map_err(|_| HostingError::Network)?
+                    else {
+                        return Ok::<_, HostingError>(None);
+                    };
+                    let service = GitHubService::default();
+                    let account = service.authenticate(&token)?;
+                    let repositories = service.repositories(&token)?;
+                    Ok(Some((account, repositories)))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if app.services_load_token != load_token {
+                    return;
+                }
+                match result {
+                    Ok(Some((account, repositories))) => {
+                        app.service_auth_state = git_domain::ServiceAuthState::Connected;
+                        app.service_account = Some(account);
+                        app.hosted_repositories = repositories;
+                        app.selected_hosted_repository = None;
+                        app.activity = format!(
+                            "Loaded {} GitHub repositories.",
+                            app.hosted_repositories.len()
+                        );
+                    }
+                    Ok(None) => {
+                        app.service_auth_state = git_domain::ServiceAuthState::SignedOut;
+                        app.service_account = None;
+                        app.hosted_repositories.clear();
+                        app.activity = "Connect a GitHub account to list repositories.".into();
+                    }
+                    Err(error) => {
+                        app.service_auth_state = service_auth_state(&error);
+                        app.activity = format!("GitHub service failed: {error:?}");
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_connect_github(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let token = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"GitHub personal access token\" default answer \"\" with hidden answer true)"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|token| !token.is_empty())
+                })
+                .await;
+            let Some(token) = token else {
+                return;
+            };
+            let result = cx
+                .background_spawn(async move {
+                    let keychain = MacKeychainStore;
+                    let key = MacKeychainStore::github_key("default");
+                    keychain
+                        .write(&key, &token)
+                        .map_err(|_| HostingError::Network)?;
+                    let service = GitHubService::default();
+                    let account = service.authenticate(&token)?;
+                    let repositories = service.repositories(&token)?;
+                    Ok::<_, HostingError>((account, repositories))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                match result {
+                    Ok((account, repositories)) => {
+                        app.service_auth_state = git_domain::ServiceAuthState::Connected;
+                        app.service_account = Some(account);
+                        app.hosted_repositories = repositories;
+                        app.activity = format!(
+                            "Connected GitHub and loaded {} repositories.",
+                            app.hosted_repositories.len()
+                        );
+                    }
+                    Err(error) => {
+                        app.service_auth_state = service_auth_state(&error);
+                        app.activity = format!("GitHub connection failed: {error:?}");
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn sign_out_github(&mut self, cx: &mut Context<Self>) {
+        let result = MacKeychainStore.delete(&MacKeychainStore::github_key("default"));
+        self.service_auth_state = git_domain::ServiceAuthState::SignedOut;
+        self.service_account = None;
+        self.hosted_repositories.clear();
+        self.selected_hosted_repository = None;
+        self.activity = if result.is_ok() {
+            "GitHub account disconnected.".into()
+        } else {
+            "GitHub account cleared from this session; Keychain removal failed.".into()
+        };
+        cx.notify();
+    }
+
+    fn prompt_clone_hosted_repository(&mut self, cx: &mut Context<Self>) {
+        let Some(index) = self.selected_hosted_repository else {
+            self.activity = "Select a hosted repository first.".into();
+            cx.notify();
+            return;
+        };
+        let Some(repository) = self.hosted_repositories.get(index).cloned() else {
+            return;
+        };
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose the clone destination parent folder".into()),
+        });
+        let store = self.store.clone();
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(parent) = paths.into_iter().next() else {
+                return;
+            };
+            let destination = parent.join(&repository.name);
+            let outcome = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover()
+                        .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+                    git.clone_repository(&repository.clone_url, &destination)
+                        .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+                    discover_and_record(&destination, &store)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| app.apply_open_outcome(outcome, cx));
+        })
+        .detach();
+    }
+
+    fn show_pull_requests(
+        &mut self,
+        repository: git_domain::HostedRepository,
+        cx: &mut Context<Self>,
+    ) {
+        self.pull_request_repository = Some(repository.clone());
+        self.pull_requests.clear();
+        self.selected_pull_request = None;
+        self.pull_request_detail = None;
+        self.navigate_to(RepositoryView::PullRequests, cx);
+        self.load_pull_requests(repository, cx);
+    }
+
+    fn load_pull_requests(
+        &mut self,
+        repository: git_domain::HostedRepository,
+        cx: &mut Context<Self>,
+    ) {
+        self.pull_requests_load_token = self.pull_requests_load_token.wrapping_add(1);
+        let load_token = self.pull_requests_load_token;
+        self.activity = "Loading pull requests…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let keychain = MacKeychainStore;
+                    let token = keychain
+                        .read(&MacKeychainStore::github_key("default"))
+                        .map_err(|_| HostingError::Network)?
+                        .ok_or(HostingError::Authentication)?;
+                    GitHubService::default().pull_requests(&token, &repository)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if app.pull_requests_load_token != load_token {
+                    return;
+                }
+                match result {
+                    Ok(entries) => {
+                        app.pull_requests = entries;
+                        app.selected_pull_request = None;
+                        app.pull_request_detail = None;
+                        app.activity =
+                            format!("Loaded {} open pull request(s).", app.pull_requests.len());
+                    }
+                    Err(error) => app.activity = format!("Pull request load failed: {error:?}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn select_pull_request(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(request) = self.pull_requests.get(index) else {
+            return;
+        };
+        let Some(repository) = self.pull_request_repository.clone() else {
+            return;
+        };
+        self.selected_pull_request = Some(index);
+        self.pull_request_detail = None;
+        self.pull_request_detail_token = self.pull_request_detail_token.wrapping_add(1);
+        let detail_token = self.pull_request_detail_token;
+        let number = request.number;
+        self.activity = format!("Loading pull request #{number}…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let keychain = MacKeychainStore;
+                    let token = keychain
+                        .read(&MacKeychainStore::github_key("default"))
+                        .map_err(|_| HostingError::Network)?
+                        .ok_or(HostingError::Authentication)?;
+                    GitHubService::default().pull_request_detail(&token, &repository, number)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if app.pull_request_detail_token != detail_token {
+                    return;
+                }
+                match result {
+                    Ok(detail) => {
+                        app.pull_request_detail = Some(detail);
+                        app.activity = format!("Loaded pull request #{number}.");
+                    }
+                    Err(error) => app.activity = format!("Pull request detail failed: {error:?}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn prompt_create_pull_request(&mut self, cx: &mut Context<Self>) {
+        let Some(repository) = self.pull_request_repository.clone() else {
+            self.activity = "Select a hosted repository from Services first.".into();
+            cx.notify();
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let fields = cx
+                .background_spawn(async {
+                    let output = Command::new("osascript")
+                        .args(["-e", CREATE_PULL_REQUEST_SCRIPT])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())?;
+                    let fields = String::from_utf8_lossy(&output.stdout)
+                        .lines()
+                        .map(str::trim_end)
+                        .map(ToOwned::to_owned)
+                        .collect::<Vec<_>>();
+                    (fields.len() == 4).then_some(fields)
+                })
+                .await;
+            let Some(fields) = fields else {
+                return;
+            };
+            if fields.iter().any(String::is_empty) {
+                return;
+            }
+            let worker_repository = repository.clone();
+            let result = cx
+                .background_spawn(async move {
+                    let keychain = MacKeychainStore;
+                    let token = keychain
+                        .read(&MacKeychainStore::github_key("default"))
+                        .map_err(|_| HostingError::Network)?
+                        .ok_or(HostingError::Authentication)?;
+                    GitHubService::default().create_pull_request(
+                        &token,
+                        &worker_repository,
+                        &fields[0],
+                        &fields[1],
+                        &fields[2],
+                        &fields[3],
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                match result {
+                    Ok(request) => {
+                        app.activity = format!("Created pull request #{}.", request.number);
+                        app.load_pull_requests(repository, cx);
+                    }
+                    Err(error) => app.activity = format!("Create pull request failed: {error:?}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn prompt_comment_pull_request(&mut self, cx: &mut Context<Self>) {
+        let Some(index) = self.selected_pull_request else {
+            self.activity = "Select a pull request first.".into();
+            cx.notify();
+            return;
+        };
+        let Some(repository) = self.pull_request_repository.clone() else {
+            return;
+        };
+        let Some(request) = self.pull_requests.get(index) else {
+            return;
+        };
+        let number = request.number;
+        cx.spawn(async move |this, cx| {
+            let body = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"Comment on pull request\" default answer \"\")"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|body| !body.is_empty())
+                })
+                .await;
+            let Some(body) = body else {
+                return;
+            };
+            let worker_repository = repository.clone();
+            let result = cx
+                .background_spawn(async move {
+                    let keychain = MacKeychainStore;
+                    let token = keychain
+                        .read(&MacKeychainStore::github_key("default"))
+                        .map_err(|_| HostingError::Network)?
+                        .ok_or(HostingError::Authentication)?;
+                    GitHubService::default()
+                        .comment_pull_request(&token, &worker_repository, number, &body)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                match result {
+                    Ok(_) => {
+                        app.activity = format!("Commented on pull request #{number}.");
+                        app.load_pull_requests(repository, cx);
+                    }
+                    Err(error) => app.activity = format!("Comment failed: {error:?}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn prompt_merge_pull_request(&mut self, cx: &mut Context<Self>) {
+        let Some(index) = self.selected_pull_request else {
+            self.activity = "Select a pull request first.".into();
+            cx.notify();
+            return;
+        };
+        let Some(repository) = self.pull_request_repository.clone() else {
+            return;
+        };
+        let Some(request) = self.pull_requests.get(index) else {
+            return;
+        };
+        let number = request.number;
+        cx.spawn(async move |this, cx| {
+            let method = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "set choice to choose from list {\"Merge commit\", \"Squash\", \"Rebase\"} with title \"Merge pull request\"; if choice is false then return \"\"; set confirmation to button returned of (display dialog (\"Merge using \" & (item 1 of choice) & \"?\") buttons {\"Cancel\", \"Merge\"} default button \"Cancel\" with icon caution); if confirmation is \"Merge\" then return item 1 of choice"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+                        .filter(|method| !method.is_empty() && method != "false")
+                })
+                .await;
+            let Some(method) = method else {
+                return;
+            };
+            let Some(method) = (match method.as_str() {
+                "Merge commit" => Some(git_domain::MergeMethod::Merge),
+                "Squash" => Some(git_domain::MergeMethod::Squash),
+                "Rebase" => Some(git_domain::MergeMethod::Rebase),
+                _ => None,
+            }) else {
+                return;
+            };
+            let worker_repository = repository.clone();
+            let result = cx
+                .background_spawn(async move {
+                    let keychain = MacKeychainStore;
+                    let token = keychain
+                        .read(&MacKeychainStore::github_key("default"))
+                        .map_err(|_| HostingError::Network)?
+                        .ok_or(HostingError::Authentication)?;
+                    GitHubService::default()
+                        .merge_pull_request(&token, &worker_repository, number, method)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                match result {
+                    Ok(()) => {
+                        app.activity = format!("Merged pull request #{number}.");
+                        app.load_pull_requests(repository, cx);
+                    }
+                    Err(error) => app.activity = format!("Merge failed: {error:?}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn checkout_pull_request(&mut self, cx: &mut Context<Self>) {
+        let Some(index) = self.selected_pull_request else {
+            self.activity = "Select a pull request first.".into();
+            cx.notify();
+            return;
+        };
+        let Some(request) = self.pull_requests.get(index) else {
+            return;
+        };
+        let number = request.number;
+        let branch = format!("pr/{number}");
+        let Some(remote) = self.default_remote() else {
+            self.activity = "Add a Git remote before checking out a pull request.".into();
+            cx.notify();
+            return;
+        };
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let worker_branch = branch.clone();
+        self.mutation_in_flight = true;
+        self.activity = format!("Checking out pull request #{number}…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    git.fetch_pull_request(&worker_repository, &remote, number)
+                        .map_err(|error| format!("{error:?}"))?;
+                    let start = format!("refs/remotes/{remote}/pr/{number}");
+                    git.create_branch(&worker_repository, &worker_branch, Some(&start))
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.activity = format!("Checked out pull request #{number} as {branch}.");
+                        app.load_working_copy(repository.clone(), cx);
+                        GitronimoApp::load_refs(repository, cx);
+                    }
+                    Err(error) => app.activity = format!("Checkout failed: {error}"),
                 }
                 cx.notify();
             });

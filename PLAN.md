@@ -2020,20 +2020,20 @@ Expand local Git capability without compromising repository safety.
 
 ## Checklist
 
-- [ ] Define provider-neutral service trait.
-- [ ] GitHub authentication.
-- [ ] Store tokens in macOS Keychain.
-- [ ] List repositories.
-- [ ] Clone from service.
-- [ ] List pull requests.
-- [ ] View pull-request details.
-- [ ] Create pull request.
-- [ ] Comment.
-- [ ] Checkout pull-request branch.
-- [ ] Merge with explicit method.
+- [x] Define provider-neutral service trait.
+- [x] GitHub authentication.
+- [x] Store tokens in macOS Keychain.
+- [x] List repositories.
+- [x] Clone from service.
+- [x] List pull requests.
+- [x] View pull-request details.
+- [x] Create pull request.
+- [x] Comment.
+- [x] Checkout pull-request branch.
+- [x] Merge with explicit method.
 - [ ] Handle enterprise/self-hosted instances.
-- [ ] Add provider API rate-limit handling.
-- [ ] Add privacy documentation.
+- [x] Add provider API rate-limit handling.
+- [x] Add privacy documentation.
 
 ---
 
