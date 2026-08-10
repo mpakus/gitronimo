@@ -24,7 +24,6 @@ use ui_kit::Appearance;
 
 pub(crate) const MINIMUM_PANE_WIDTH: f32 = 180.0;
 pub(crate) const MAXIMUM_PANE_WIDTH: f32 = 440.0;
-pub(crate) const MINIMUM_CONTENT_WIDTH: f32 = 360.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LastAction {
@@ -167,9 +166,10 @@ pub(crate) struct GitronimoApp {
     pub appearance: Appearance,
     pub theme_mode: ThemeMode,
     pub sidebar_width: f32,
-    pub inspector_width: f32,
     pub state: ShellState,
     pub recents: Vec<PathBuf>,
+    pub selected_recent: Option<usize>,
+    #[allow(dead_code)]
     pub repositories_grouped: bool,
     pub activity: String,
     pub working_copy: Option<git_domain::WorktreeStatus>,
@@ -179,6 +179,7 @@ pub(crate) struct GitronimoApp {
     pub expanded_ref_groups: BTreeSet<String>,
     pub ref_context: Option<RefContext>,
     pub selected_paths: Vec<GitPath>,
+    pub last_selected_path_index: Option<usize>,
     pub context_path: Option<GitPath>,
     pub loaded_diff: Option<LoadedDiff>,
     pub selected_diff: Option<(GitPath, bool)>,
@@ -199,6 +200,7 @@ pub(crate) struct GitronimoApp {
     pub repository_view: RepositoryView,
     pub navigation_back: Vec<RepositoryView>,
     pub navigation_forward: Vec<RepositoryView>,
+    pub came_from_welcome: bool,
     pub history: Vec<HistoryCommit>,
     pub history_rows: Vec<GraphRow>,
     pub history_state: GraphState,
@@ -265,6 +267,7 @@ pub(crate) struct GitronimoApp {
     pub store: app_core::RecentRepositoryStore,
     pub diagnostics: String,
     pub subscriptions: Vec<gpui::Subscription>,
+    pub column_width: f32,
 }
 
 impl GitronimoApp {
@@ -340,14 +343,6 @@ pub(crate) fn window_title(state: &ShellState, has_commit_draft: bool) -> String
 
 pub(crate) fn resize_width(width: f32) -> f32 {
     (width + 20.0).clamp(MINIMUM_PANE_WIDTH, MAXIMUM_PANE_WIDTH)
-}
-
-pub(crate) fn shows_inspector(
-    viewport_width: f32,
-    sidebar_width: f32,
-    inspector_width: f32,
-) -> bool {
-    viewport_width >= sidebar_width + inspector_width + MINIMUM_CONTENT_WIDTH
 }
 
 pub(crate) fn discard_selected(

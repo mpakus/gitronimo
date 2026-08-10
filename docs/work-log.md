@@ -1,5 +1,171 @@
 # Implementation work log
 
+## 2026-08-10 — Tower UI polish: sidebar, working copy, branch menu, toolbar
+
+**Intent:** match Tower's UI across all major views based on new screenshots (001-004) and Tower documentation.
+
+**Design:** 
+- **Sidebar (001)**: Added "Repositories" and "Services" sections. Repositories section header; Services section shows connected account (GitHub/GitLab) or "Add Service" placeholder. Branch tree retains expand/collapse with "›"/"⌄" indicators.
+- **Working Copy (004)**: Branch breadcrumb uses 🐘 (branch icon) + bold branch-name › tracking). Commit composer: subject field with accent border when filled, description field expands on content, action buttons (Description, Amend ✓/Amend, Sign-off ✓/Sign-off, Author, Commit primary). File list shows status badges (M/A/D/?), file icons, paths with ellipsis. Diff view retains Staged/Unstaged tabs, chunk info, hunk actions.
+- **Branch Context Menu (003)**: Local Branch: Checkout, View History, Merge into Current…, Rebase Current onto…, Rename…, Delete. Remote Branch: New Branch from Here…, View History, Pull, Delete. Tag: New Branch from Here…, View History, Delete. Remote: Fetch. Sections separated by dividers.
+- **Toolbar (002)**: Center shows repo name › branch › tracking (ahead ↑, behind ↓). Subtitle shows view + changed file count. Right side: Fetch/Pull/Push/Sync, Palette, Open.
+
+**Files changed:**
+- `apps/desktop/src/views/sidebar.rs` — Repositories/Services sections, ServiceAccount display
+- `apps/desktop/src/views/working_copy.rs` — branch_context_view (branch icon), commit_composer_view (subject/body fields, action buttons), ref_context_menu_view (Pull for remote branches)
+- `apps/desktop/src/views/commit_composer.rs` — subject/body fields with placeholder, accent borders, Amend/Sign-off toggle labels
+- `apps/desktop/src/views/toolbar.rs` — branch_info with ahead/behind arrows, subtitle with changed count
+- `apps/desktop/src/main.rs` — pull_branch method for remote branch pulling
+
+**Acceptance checks:** sidebar shows Repositories/Services; working copy has branch breadcrumb, commit composer, file list, diff; branch right-click shows Tower-style menu with Pull for remotes; toolbar shows branch sync status; all gates pass; app rebuilds and launches.
+
+**Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
+
+## 2026-08-10 — Toolbar, navigation, context menu, column proportions
+
+**Intent:** match Tower's toolbar layout, back/forward navigation including return to repos list, branch context menu with full Tower-style items, and 50/50 column split.
+
+**Design:** add repo switcher icon on toolbar far left, add `return_to_welcome` method that clears state and returns to Welcome, set `came_from_welcome` flag when opening a repo from Welcome so Back button returns there. Rewrite `ref_context_menu_view` with Tower-style items: Checkout, View History, separator, Merge into Current, Rebase Current onto, separator, Rename, Delete for local branches; New Branch from Here, View History, Delete for remote/tag; Fetch for remotes. Add `menu_item` (24px height, hover highlight) and `menu_separator` helpers. Add `request_branch_delete`, `merge_branch_into_current`, `rebase_current_onto`, `prompt_rename_branch` action methods. Balance column min-widths to 340px each.
+
+**Files changed:**
+- `apps/desktop/src/views/toolbar.rs` — repo switcher icon, removed clickable repo name div, too_many_lines allow
+- `apps/desktop/src/app_state.rs` — `came_from_welcome: bool` field
+- `apps/desktop/src/main.rs` — `return_to_welcome`, `request_branch_delete`, `merge_branch_into_current`, `rebase_current_onto`, `prompt_rename_branch`, `came_from_welcome` init, `begin_open_path` sets flag, `navigate_back` checks flag
+- `apps/desktop/src/views/working_copy.rs` — full Tower-style context menu with 7 items per local branch, `menu_item`/`menu_separator` helpers, balanced column widths
+
+**Acceptance checks:** toolbar has repo switcher icon far left + back/forward + centered repo name + action icons far right; back button returns to repos list when opened from Welcome; branch right-click shows Checkout, View History, Merge, Rebase, Rename, Delete with separators; columns are 50/50; all gates pass; app rebuilds and launches.
+
+**Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
+
+## 2026-08-10 — Button/spacing consistency pass
+
+**Intent:** audit all button sizes, column widths, and spacing across every view to ensure Tower-level consistency.
+
+**Design:** standardize all action buttons to h=26px, px=2, text_sm, rounded(4px). Fix primary_window_action_button and window_action_button which used px=3 py=2 (~32px) and had border_1. Fix validated_action_button disabled variant which used px=2 py=1 (~18px). Fix diff hunk buttons from py_0.5 to py_1 for better readability. Add font_weight::MEDIUM to Staged/Unstaged tabs. Fix column header Status width from 36px to 44px to match row content (checkbox 14 + badge 14 + gap 8 + padding 8).
+
+**Files changed:**
+- `apps/desktop/src/views/components.rs` — `primary_window_action_button`, `window_action_button`, `validated_action_button` all standardized to h=26 px=2
+- `apps/desktop/src/views/diff_viewer.rs` — hunk buttons py_0.5→py_1, tabs get font_weight MEDIUM
+- `apps/desktop/src/views/working_copy.rs` — column header Status width 36→44px
+
+**Acceptance checks:** all buttons in the same area are identical height/padding; column headers align with row content; no visual gaps between sections; all gates pass; app rebuilds and launches.
+
+**Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
+
+## 2026-08-10 — Welcome page + Working Copy Tower alignment
+
+**Intent:** match Tower's Welcome page (centered drop zone) and Working Copy (branch breadcrumb, inline chunk buttons).
+
+**Design:** replace the Welcome repo-detail card with a centered dashed-border drop zone showing a folder icon and "Drop Folder or URL to Add Git Repository" with Add/Create/Clone buttons below. Simplify the welcome sidebar to use folder icons. Rewrite branch_context_view as a Tower-style breadcrumb (branch > tracking). Move Discard Chunk / Stage Chunk buttons into each hunk header row inline (removing the separate controls row).
+
+**Files changed:**
+- `apps/desktop/src/views/welcome.rs` — rewritten to centered drop zone, free function `welcome_drop_zone`
+- `apps/desktop/src/views/sidebar.rs` — folder icon `📁` for welcome repo list
+- `apps/desktop/src/views/working_copy.rs` — Tower-style branch breadcrumb, dead code suppression
+- `apps/desktop/src/views/diff_viewer.rs` — inline Discard Chunk / Stage Chunk buttons per hunk, removed `hunk_controls_row`
+- `apps/desktop/src/app_state.rs` — `#[allow(dead_code)]` on `repositories_grouped`
+- `apps/desktop/src/main.rs` — `#[allow(dead_code)]` on 5 temporarily unused methods
+
+**Acceptance checks:** Welcome page shows centered drop zone with folder icon and Add/Create/Clone buttons; sidebar shows folder icons for repos; Working Copy shows branch breadcrumb (branch > tracking); diff hunk headers have inline Discard/Stage Chunk buttons; all gates pass; app rebuilds and launches.
+
+**Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
+
+## 2026-08-10 — Diff pane Tower alignment (Staged/Unstaged tabs, chunk info)
+
+**Intent:** add the Tower-style diff pane header with filename, Staged/Unstaged tab toggle, chunk/insertion/deletion counts, and clean up clippy errors from the broader Tower alignment pass.
+
+**Design:** extract the diff header and selection controls into dedicated helpers, add tab toggle between Staged and Unstaged views, and count additions/deletions per diff. Fix all clippy warnings (`dead_code`, `too_many_lines`, `redundant_closure`, `too_many_arguments`, `map_or_else`).
+
+**Files changed:**
+- `apps/desktop/src/views/diff_viewer.rs` — Staged/Unstaged tabs, chunk info bar, filename header, extracted `diff_header`/`selection_controls`/`staged_unstaged_tabs` helpers, `px` import, `new_path` fix
+- `apps/desktop/src/views/toolbar.rs` — `icon_toolbar_button` takes `disabled` flag instead of `.opacity(0.3)`, `#[allow(clippy::redundant_closure)]`
+- `apps/desktop/src/views/working_copy.rs` — removed unused `count` variable, extracted `file_type_icon()` helper
+- `apps/desktop/src/main.rs` — `#[allow(dead_code)]` on `prompt_fetch_remote`, `publish_current`, `request_force_with_lease`
+- `apps/desktop/src/views/sidebar.rs` — `#[allow(clippy::too_many_arguments)]` on `nav_row_with_badge`
+
+**Acceptance checks:** diff pane shows filename header with Staged/Unstaged tab toggle; chunk/insertion/deletion counts displayed; all clippy warnings resolved; `cargo fmt`, `cargo clippy -D warnings`, 100 tests, `cargo deny check` all pass; app rebuilds and launches.
+
+**Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
+
+## 2026-08-09 — Tower reference pass / Repositories surface redesign
+
+**Intent:** replace the remaining card-heavy welcome surface after comparing the running UI with Tower's Repositories screenshots.
+
+**Design:** model the welcome state as a repository browser: a narrow left repository tree with compact grouped recents and bottom Add/Create/Clone actions, plus a wide right detail workspace for the selected repository. Remove the feature-card dashboard treatment, keep the existing original Gitronimo palette, and make repository selection visually distinct from opening.
+
+**Files (planned):**
+- `apps/desktop/src/app_state.rs` — selected recent repository state.
+- `apps/desktop/src/main.rs` — selection/reset helpers and open-selected action.
+- `apps/desktop/src/views/sidebar.rs` — repository-browser welcome sidebar.
+- `apps/desktop/src/views/welcome.rs` — repository detail workspace and empty state.
+- `docs/UI-IMPROVE.md`, `docs/work-log.md` — record the Tower-inspired information-architecture change.
+
+**Acceptance checks:** welcome renders as a repository browser rather than stacked feature cards; recents can be selected and opened; Add/Create/Clone remain available; empty/loading/error states remain clear; all workspace gates pass.
+
+**Verification:** the welcome state now has a compact repository tree sidebar with selectable recents, double-click open behavior, and bottom Add/Create/Clone actions. The main pane shows the selected repository's path and open action instead of feature cards. Full formatting, Clippy, workspace tests, and cargo-deny gates pass; the rebuilt app is running as `target/debug/gitronimo-desktop` (PID 69259).
+
+## 2026-08-09 — UI reference alignment / dense Working Copy shell
+
+**Intent:** align Gitronimo's visual hierarchy with `docs/screens/t-vs-g.png` without copying third-party assets or branding.
+
+**Design:** keep the current original palette, but make the shell denser and more intentional: compact toolbar chrome, a tighter content gutter, a sidebar with clear navigation grouping, and a horizontal Working Copy workspace with the file list as the primary pane and the selected diff as the adjacent detail pane. Branch/sync controls remain available but are visually subordinate to the commit-and-review workflow.
+
+**Files (planned):**
+- `apps/desktop/src/views/workspace.rs` — reduce shell padding and strengthen the content/inspector split.
+- `apps/desktop/src/views/toolbar.rs` — compact repository toolbar hierarchy.
+- `apps/desktop/src/views/sidebar.rs` — denser navigation grouping and active-state treatment.
+- `apps/desktop/src/views/working_copy.rs` — horizontal file-list/diff layout and compact action grouping.
+- `apps/desktop/src/views/components.rs` — shared compact control styling.
+- `docs/UI-IMPROVE.md`, `docs/work-log.md` — record the visual alignment and its original-design boundary.
+
+**Acceptance checks:** Working Copy presents files and diff side by side at normal desktop widths, the layout remains readable at the existing narrow-window fallback, toolbar/sidebar hierarchy is visibly denser, no third-party assets are added, and all workspace gates pass.
+
+**Verification:** the Working Copy now uses a responsive wrapping two-pane review workspace, with the commit composer and file groups in the leading pane and the selected diff in the adjacent pane. Branch context is compact, sync actions are promoted to an icon-oriented toolbar, the commit area is a subject/action strip, and the former large Branch/Sync cards no longer push the review surface below the fold. Shell padding, sidebar glyphs/grouping, shared action buttons, section cards, and active destinations were tightened to match the compact professional reference without copying its assets or branding. Format, Clippy, workspace tests, and cargo-deny pass; the rebuilt app is running as `target/debug/gitronimo-desktop` (PID 22837).
+
+**Follow-up verification:** the repository browser now replaces the remaining feature-card welcome dashboard, with a compact selectable repository tree and a selected-repository detail workspace. The latest rebuilt app is running as `target/debug/gitronimo-desktop` (PID 7141).
+
+## 2026-08-09 — Tower-style UI overhaul
+
+**Intent:** ground-up redesign of the desktop shell to match Tower's clean native macOS aesthetic, not just incremental polish.
+
+**Design:**
+- Sidebar: clean source-list navigation with compact rows, subtle headers, active-state highlighting, no heavy borders.
+- Toolbar: compact unified bar with navigation, repository context, and action buttons.
+- Working Copy: compact branch/tracking strip, dense commit subject/action area, clean file list with status icons and stage checkboxes, adjacent diff pane.
+- Commit composer: compact subject field + commit button + options row.
+- Components: rounded controls, consistent height, no card-based grouping.
+- Welcome: compact repository browser with selectable recents and detail workspace.
+
+**Files:**
+- `apps/desktop/src/views/sidebar.rs` — source-list redesign.
+- `apps/desktop/src/views/toolbar.rs` — compact unified toolbar.
+- `apps/desktop/src/views/working_copy.rs` — Tower-style Working Copy hierarchy.
+- `apps/desktop/src/views/commit_composer.rs` — compact commit area.
+- `apps/desktop/src/views/components.rs` — rounded compact controls.
+- `apps/desktop/src/views/welcome.rs` — repository browser welcome.
+- `docs/work-log.md` — this entry.
+
+**Acceptance checks:** clean native-style chrome, dense file list with stage checkboxes, compact commit area, repository browser welcome, all gates pass.
+
+**Verification:** full formatting, Clippy with warnings denied, workspace tests, and cargo-deny pass. The rebuilt app is running as `target/debug/gitronimo-desktop` (PID 71496).
+
+## 2026-08-09 — Tower-like visual alignment pass
+
+**Intent:** close remaining visual gaps between Gitronimo and Tower's information architecture by adopting tighter density, flush sidebar-content surfaces, colored status badges, and a two-pane commit detail layout.
+
+**Changes:**
+- **workspace.rs** — removed `p_4` from content area so sidebar and content share a flush surface.
+- **working_copy.rs** — restructured `file_review_workspace` to place the branch context, commit composer, and file list in the left column with the diff adjacent on the right; added a 1px divider between panes.
+- **commit_composer.rs** — redesigned the commit area to show the subject field full-width at the top, the description inline when present, and the amend/sign-off/author/commit controls in a single bottom row.
+- **sidebar.rs** — reorganized to match Tower's Workspace/Branches structure; added Pull Requests, Reflog, and Settings nav rows; moved the change count into a badge on the Working Copy row; removed the separate Status section.
+- **history.rs** — restructured into a two-pane layout with a compact toolbar row at the top, a scrollable commit list on the left, and the selected commit's metadata and changed-file summary on the right.
+- **toolbar.rs** — reduced toolbar height and button sizes to match Tower's compact icon-toolbar density.
+- **components.rs** — added `status_badge_info` to map git status codes to colored badge characters and background/foreground colors.
+
+**Acceptance checks:** flush sidebar-to-content surface, compact toolbar, colored status badges, two-pane commit detail, all gates pass.
+
+**Verification:** formatting, Clippy with warnings denied, 100 workspace tests, and cargo-deny pass. The rebuilt app is running as `target/debug/gitronimo-desktop` (PID 31111).
+
 ## 2026-08-09 — UI-IMPROVE item 12 / Pull Requests
 
 **Intent:** complete the Pull Requests collaboration surface after stabilizing the Services provider boundary.

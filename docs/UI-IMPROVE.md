@@ -215,6 +215,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - Hosted repository cloning uses the provider's clone URL and the user's configured Git credential helper or SSH setup.
 - Enterprise/self-hosted GitHub endpoint configuration and OAuth device flow remain separate product hardening work in `PLAN.md`.
 - Pull Request mutations require the selected hosted repository and use explicit merge-method confirmation.
+- The `t-vs-g.png` reference informed density, grouping, and two-pane hierarchy only; Gitronimo does not ship its screenshots, icons, copy, or branding.
 
 ## 4. Visual design notes
 

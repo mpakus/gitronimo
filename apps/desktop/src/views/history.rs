@@ -5,8 +5,8 @@ use ui_kit::ThemeColors;
 
 use git_domain::{HistoryReference, WorktreeRepository};
 
-use crate::app_state::{GitronimoApp, RepositoryView};
-use crate::views::components::file_action_button;
+use crate::app_state::GitronimoApp;
+use crate::views::components::{file_action_button, state_panel};
 
 impl GitronimoApp {
     pub(crate) fn history_row_count(&self) -> usize {
@@ -77,7 +77,7 @@ impl GitronimoApp {
         let selected = self.selected_history;
         let list_colors = *colors;
         let list_repository = repository.clone();
-        let rows = list(
+        let commit_list = list(
             self.history_list_state.clone(),
             cx.processor(move |_app, visible_index: usize, _, cx| {
                 let (history_index, lane, parent_lanes, label) = rows[visible_index].clone();
@@ -89,7 +89,7 @@ impl GitronimoApp {
                     .flex()
                     .items_center()
                     .bg(if selected == Some(history_index) {
-                        list_colors.raised_background
+                        list_colors.selection
                     } else {
                         list_colors.panel_background
                     })
@@ -144,35 +144,77 @@ impl GitronimoApp {
                     .into_any_element()
             }),
         )
-        .h(px(360.0));
-        let inspector = self
+        .h_full();
+        let detail = self
             .selected_history
             .and_then(|index| self.history.get(index))
-            .map(|commit| {
-                div()
-                    .p_2()
-                    .border_1()
-                    .border_color(colors.border)
-                    .child(format!(
-                        "{}\n{}\n{}\nChanged: {}",
-                        commit.oid,
-                        String::from_utf8_lossy(&commit.body),
-                        commit.parents.join(" "),
-                        self.history_paths
-                            .iter()
-                            .map(|path| String::from_utf8_lossy(&path.0))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    ))
-                    .children(self.history_diff.as_ref().map(|diff| {
-                        div().child(format!(
-                            "Selected diff: {} file(s){}",
-                            diff.diff.files.len(),
-                            if diff.truncated { " (truncated)" } else { "" }
-                        ))
-                    }))
+            .map_or_else(
+                || {
+                    state_panel(
+                        "No commit selected",
+                        "Choose a commit to inspect its details.",
+                        colors.text_muted,
+                        colors,
+                    )
                     .into_any_element()
-            });
+                },
+                |commit| {
+                    div()
+                        .p_3()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(div().text_sm().text_color(colors.text_muted).child(format!(
+                            "Author: {}",
+                            String::from_utf8_lossy(&commit.author.name)
+                        )))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(colors.text_muted)
+                                .child(format!("Date: {}", commit.author.timestamp)),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .child(String::from_utf8_lossy(&commit.subject).to_string()),
+                        )
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(colors.text_secondary)
+                                .child(String::from_utf8_lossy(&commit.body).to_string()),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(colors.text_muted)
+                                .child(format!("SHA: {}", commit.oid)),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(colors.text_muted)
+                                .child(format!("Parents: {}", commit.parents.join(" "))),
+                        )
+                        .child(div().text_xs().text_color(colors.text_muted).child(format!(
+                            "Changed: {}",
+                            self.history_paths
+                                .iter()
+                                .map(|path| String::from_utf8_lossy(&path.0))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )))
+                        .children(self.history_diff.as_ref().map(|diff| {
+                            div().text_xs().text_color(colors.text_muted).child(format!(
+                                "Selected diff: {} file(s){}",
+                                diff.diff.files.len(),
+                                if diff.truncated { " (truncated)" } else { "" }
+                            ))
+                        }))
+                        .into_any_element()
+                },
+            );
         let load_more = self.history_next.as_ref().map(|before| {
             let repository = repository.clone();
             let before = before.clone();
@@ -185,65 +227,80 @@ impl GitronimoApp {
         div()
             .flex()
             .flex_col()
-            .gap_3()
-            .child(div().text_xl().child("History"))
-            .child(file_action_button("Working Copy", colors, cx, |app, cx| {
-                app.navigate_to(RepositoryView::WorkingCopy, cx);
-            }))
-            .child(file_action_button(
-                "Current branch",
-                colors,
-                cx,
-                move |app, cx| {
-                    app.change_history_reference(
-                        HistoryReference::Current,
-                        current_repository.clone(),
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(colors.border)
+                    .child(file_action_button(
+                        "Current branch",
+                        colors,
                         cx,
-                    );
-                },
-            ))
-            .child(file_action_button(
-                "All refs",
-                colors,
-                cx,
-                move |app, cx| {
-                    app.change_history_reference(HistoryReference::All, all_repository.clone(), cx);
-                },
-            ))
-            .child(file_action_button(
-                "Branch or tag…",
-                colors,
-                cx,
-                |_, cx| GitronimoApp::prompt_history_reference(cx),
-            ))
-            .child(format!(
-                "Search: {}",
-                if self.history_search.is_empty() {
-                    "(all loaded commits)"
-                } else {
-                    &self.history_search
-                }
-            ))
-            .child(file_action_button("Search history", colors, cx, |_, cx| {
-                GitronimoApp::prompt_history_search(cx);
-            }))
-            .child(file_action_button("Reveal HEAD", colors, cx, |app, cx| {
-                app.reveal_history_head(cx);
-            }))
-            .child(file_action_button(
-                "Copy selected OID",
-                colors,
-                cx,
-                GitronimoApp::copy_selected_history_oid,
-            ))
-            .child(file_action_button(
-                "New branch from selected commit…",
-                colors,
-                cx,
-                |_, cx| GitronimoApp::prompt_branch_from_selected(cx),
-            ))
-            .child(rows)
-            .children(load_more)
-            .children(inspector)
+                        move |app, cx| {
+                            app.change_history_reference(
+                                HistoryReference::Current,
+                                current_repository.clone(),
+                                cx,
+                            );
+                        },
+                    ))
+                    .child(file_action_button(
+                        "All refs",
+                        colors,
+                        cx,
+                        move |app, cx| {
+                            app.change_history_reference(
+                                HistoryReference::All,
+                                all_repository.clone(),
+                                cx,
+                            );
+                        },
+                    ))
+                    .child(file_action_button(
+                        "Branch or tag…",
+                        colors,
+                        cx,
+                        |_, cx| GitronimoApp::prompt_history_reference(cx),
+                    ))
+                    .child(file_action_button("Search history", colors, cx, |_, cx| {
+                        GitronimoApp::prompt_history_search(cx);
+                    }))
+                    .child(file_action_button("Reveal HEAD", colors, cx, |app, cx| {
+                        app.reveal_history_head(cx);
+                    }))
+                    .child(file_action_button(
+                        "Copy selected OID",
+                        colors,
+                        cx,
+                        GitronimoApp::copy_selected_history_oid,
+                    ))
+                    .child(file_action_button(
+                        "New branch from commit…",
+                        colors,
+                        cx,
+                        |_, cx| GitronimoApp::prompt_branch_from_selected(cx),
+                    )),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .items_start()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(300.0))
+                            .flex()
+                            .flex_col()
+                            .child(commit_list)
+                            .children(load_more),
+                    )
+                    .child(div().w(px(1.0)).h_full().bg(colors.border))
+                    .child(div().flex_1().min_w(px(360.0)).child(detail)),
+            )
     }
 }

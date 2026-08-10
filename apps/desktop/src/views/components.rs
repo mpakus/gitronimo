@@ -3,7 +3,7 @@
 //! These are presentational only: they never touch Git or domain logic.
 
 use git_domain::StatusEntry;
-use gpui::{IntoElement, Render, Window, div, prelude::*};
+use gpui::{IntoElement, Render, Window, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use crate::app_state::{GitronimoApp, Mutation};
@@ -16,25 +16,17 @@ pub(crate) struct StatusGroups<'a> {
     pub conflicts: Vec<&'a StatusEntry>,
 }
 
+#[allow(dead_code)]
 pub(crate) fn workspace_section(
     title: &'static str,
     content: impl IntoElement,
     colors: &ThemeColors,
 ) -> gpui::AnyElement {
     div()
-        .p_3()
         .flex()
         .flex_col()
-        .gap_2()
-        .bg(colors.panel_background)
-        .border_1()
-        .border_color(colors.border)
-        .child(
-            div()
-                .text_sm()
-                .text_color(colors.text_secondary)
-                .child(title),
-        )
+        .gap_1()
+        .child(div().text_xs().text_color(colors.text_muted).child(title))
         .child(content)
         .into_any_element()
 }
@@ -49,11 +41,12 @@ pub(crate) fn mutation_button(
     let tooltip_colors = *colors;
     div()
         .id(label)
+        .h(px(26.0))
         .px_2()
-        .py_1()
+        .flex()
+        .items_center()
         .bg(colors.raised_background)
-        .border_1()
-        .border_color(colors.border)
+        .rounded(px(4.0))
         .cursor_pointer()
         .tooltip(move |_, cx| {
             cx.new(|_| ActionTooltip {
@@ -67,6 +60,7 @@ pub(crate) fn mutation_button(
                 app.mutate(operation, cx);
             }
         }))
+        .text_sm()
         .child(label)
         .into_any_element()
 }
@@ -80,11 +74,12 @@ pub(crate) fn file_action_button(
     let tooltip_colors = *colors;
     div()
         .id(label)
+        .h(px(26.0))
         .px_2()
-        .py_1()
-        .bg(colors.panel_background)
-        .border_1()
-        .border_color(colors.border)
+        .flex()
+        .items_center()
+        .bg(colors.raised_background)
+        .rounded(px(4.0))
         .cursor_pointer()
         .tooltip(move |_, cx| {
             cx.new(|_| ActionTooltip {
@@ -94,10 +89,12 @@ pub(crate) fn file_action_button(
             .into()
         })
         .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)))
+        .text_sm()
         .child(label)
         .into_any_element()
 }
 
+#[allow(dead_code)]
 pub(crate) fn window_action_button(
     label: &'static str,
     colors: &ThemeColors,
@@ -107,11 +104,12 @@ pub(crate) fn window_action_button(
     let tooltip_colors = *colors;
     div()
         .id(label)
-        .px_3()
-        .py_2()
+        .h(px(26.0))
+        .px_2()
+        .flex()
+        .items_center()
         .bg(colors.raised_background)
-        .border_1()
-        .border_color(colors.border)
+        .rounded(px(4.0))
         .cursor_pointer()
         .tooltip(move |_, cx| {
             cx.new(|_| ActionTooltip {
@@ -121,6 +119,7 @@ pub(crate) fn window_action_button(
             .into()
         })
         .on_click(cx.listener(move |app, _, window, cx| on_click(app, window, cx)))
+        .text_sm()
         .child(label)
         .into_any_element()
 }
@@ -134,11 +133,12 @@ pub(crate) fn primary_window_action_button(
     let tooltip_colors = *colors;
     div()
         .id(label)
-        .px_3()
-        .py_2()
+        .h(px(26.0))
+        .px_2()
+        .flex()
+        .items_center()
         .bg(colors.accent)
-        .border_1()
-        .border_color(colors.accent)
+        .rounded(px(4.0))
         .text_color(colors.panel_background)
         .cursor_pointer()
         .tooltip(move |_, cx| {
@@ -149,10 +149,12 @@ pub(crate) fn primary_window_action_button(
             .into()
         })
         .on_click(cx.listener(move |app, _, window, cx| on_click(app, window, cx)))
+        .text_sm()
         .child(label)
         .into_any_element()
 }
 
+#[allow(dead_code)]
 pub(crate) fn validated_action_button(
     label: &'static str,
     enabled: bool,
@@ -167,11 +169,12 @@ pub(crate) fn validated_action_button(
     let tooltip_colors = *colors;
     div()
         .id(label)
+        .h(px(26.0))
         .px_2()
-        .py_1()
+        .flex()
+        .items_center()
         .bg(colors.raised_background)
-        .border_1()
-        .border_color(colors.border)
+        .rounded(px(4.0))
         .text_color(colors.text_muted)
         .tooltip(move |_, cx| {
             cx.new(|_| ActionTooltip {
@@ -180,6 +183,7 @@ pub(crate) fn validated_action_button(
             })
             .into()
         })
+        .text_sm()
         .child(label)
         .into_any_element()
 }
@@ -212,6 +216,21 @@ pub(crate) fn status_label(entry: &StatusEntry) -> String {
         StatusEntry::Unmerged { .. } => format!("UU  {path}"),
         StatusEntry::Untracked(_) => format!("??  {path}"),
         StatusEntry::Ignored(_) => format!("!!  {path}"),
+    }
+}
+
+pub(crate) fn status_badge_info(label: &str) -> (&str, gpui::Rgba, gpui::Rgba) {
+    let code = label.trim_start();
+    let ch = code.chars().next().unwrap_or(' ');
+    match ch {
+        'M' => ("M", gpui::rgb(0x43_9a_ff), gpui::rgb(0xff_ff_ff)),
+        'A' => ("A", gpui::rgb(0x12_8a_4b), gpui::rgb(0xff_ff_ff)),
+        'D' => ("D", gpui::rgb(0xc7_28_3b), gpui::rgb(0xff_ff_ff)),
+        'U' => ("U", gpui::rgb(0xa8_60_00), gpui::rgb(0xff_ff_ff)),
+        '?' => ("?", gpui::rgb(0x7e_8c_9d), gpui::rgb(0xff_ff_ff)),
+        'R' => ("R", gpui::rgb(0x7a_43_c8), gpui::rgb(0xff_ff_ff)),
+        'C' => ("C", gpui::rgb(0xa8_60_00), gpui::rgb(0xff_ff_ff)),
+        _ => (" ", gpui::rgb(0x7e_8c_9d), gpui::rgb(0xff_ff_ff)),
     }
 }
 
@@ -259,6 +278,7 @@ pub(crate) fn state_panel(
         .into_any_element()
 }
 
+#[allow(dead_code)]
 pub(crate) fn empty_status_message(title: &str) -> &'static str {
     match title {
         "Staged" => "No staged files. Select a change, then stage it when it is ready to commit.",

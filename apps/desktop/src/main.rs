@@ -43,7 +43,7 @@ use ui_kit::Appearance;
 
 use crate::actions::{
     CommandPalette, FocusComposer, HistoryNext, HistoryPrevious, NavigateBack, NavigateForward,
-    OpenRepository, Refresh, ShortcutReference, ToggleAppearance, WidenInspector, WidenSidebar,
+    OpenRepository, Refresh, ShortcutReference, ToggleAppearance, WidenSidebar,
 };
 use crate::app_state::{
     ForcePushState, GitronimoApp, HistoryDetailMode, LastAction, Mutation, NetworkOperation,
@@ -52,6 +52,7 @@ use crate::app_state::{
     git_failure_message, network_failure_message, repository_is_available,
     repository_unavailable_message, resize_width,
 };
+use crate::views::components::status_path;
 
 const INITIAL_WINDOW_SIZE: (f32, f32) = (1200.0, 800.0);
 const MINIMUM_WINDOW_SIZE: (f32, f32) = (800.0, 560.0);
@@ -238,15 +239,16 @@ impl GitronimoApp {
             .unwrap_or_default()
             .into_iter()
             .collect();
+        let selected_recent = (!recents.is_empty()).then_some(0);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
             last_action: None,
             appearance: appearance_from_window(window.appearance()),
             theme_mode: ThemeMode::System,
             sidebar_width: 220.0,
-            inspector_width: 320.0,
             state: ShellState::Welcome,
             recents,
+            selected_recent,
             repositories_grouped: true,
             activity: "Choose a repository to begin.".into(),
             working_copy: None,
@@ -256,6 +258,7 @@ impl GitronimoApp {
             expanded_ref_groups,
             ref_context: None,
             selected_paths: Vec::new(),
+            last_selected_path_index: None,
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
@@ -276,6 +279,7 @@ impl GitronimoApp {
             repository_view: RepositoryView::WorkingCopy,
             navigation_back: Vec::new(),
             navigation_forward: Vec::new(),
+            came_from_welcome: false,
             history: Vec::new(),
             history_rows: Vec::new(),
             history_state: GraphState::default(),
@@ -342,6 +346,7 @@ impl GitronimoApp {
             store,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
+            column_width: 400.0,
         };
         app.observe_system_appearance(window, cx);
         app.observe_window_geometry(window, cx);
@@ -394,9 +399,9 @@ impl GitronimoApp {
             appearance: appearance_from_window(window.appearance()),
             theme_mode: ThemeMode::System,
             sidebar_width: 220.0,
-            inspector_width: 320.0,
             state,
             recents,
+            selected_recent: None,
             repositories_grouped: true,
             activity,
             working_copy: None,
@@ -406,6 +411,7 @@ impl GitronimoApp {
             expanded_ref_groups,
             ref_context: None,
             selected_paths: Vec::new(),
+            last_selected_path_index: None,
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
@@ -426,6 +432,7 @@ impl GitronimoApp {
             repository_view: RepositoryView::WorkingCopy,
             navigation_back: Vec::new(),
             navigation_forward: Vec::new(),
+            came_from_welcome: false,
             history: Vec::new(),
             history_rows: Vec::new(),
             history_state: GraphState::default(),
@@ -492,6 +499,7 @@ impl GitronimoApp {
             store,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
+            column_width: 400.0,
         };
         app.observe_system_appearance(window, cx);
         app.observe_window_geometry(window, cx);
@@ -556,6 +564,7 @@ impl GitronimoApp {
             Ok(opened) => {
                 self.state = ShellState::Repository(opened.repository);
                 self.recents = opened.recents;
+                self.selected_recent = None;
                 self.activity = "Repository opened.".into();
                 self.working_copy = None;
                 self.refs = RefSnapshot::default();
@@ -640,6 +649,7 @@ impl GitronimoApp {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     fn toggle_repositories_grouped(&mut self, cx: &mut Context<Self>) {
         self.repositories_grouped = !self.repositories_grouped;
         cx.notify();
@@ -866,6 +876,15 @@ return remote_url & linefeed & parent_path"#;
     }
 
     fn navigate_back(&mut self, _: &NavigateBack, _: &mut Window, cx: &mut Context<Self>) {
+        if self.came_from_welcome {
+            self.came_from_welcome = false;
+            self.navigation_forward.clear();
+            self.state = ShellState::Welcome;
+            self.working_copy = None;
+            self.refs = RefSnapshot::default();
+            cx.notify();
+            return;
+        }
         let Some(view) = self.navigation_back.pop() else {
             return;
         };
@@ -890,6 +909,79 @@ return remote_url & linefeed & parent_path"#;
             self.repository_view = view;
             cx.notify();
         }
+    }
+
+    fn return_to_welcome(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.state, ShellState::Welcome) {
+            return;
+        }
+        self.navigation_forward.clear();
+        self.navigation_back.clear();
+        self.came_from_welcome = false;
+        self.state = ShellState::Welcome;
+        self.working_copy = None;
+        self.refs = RefSnapshot::default();
+        self.repository_view = RepositoryView::WorkingCopy;
+        cx.notify();
+    }
+
+    fn request_branch_delete(&mut self, branch: String, cx: &mut Context<Self>) {
+        self.activity = format!("Review deletion choices for branch {branch}.");
+        self.pending_branch_delete = Some(branch);
+        cx.notify();
+    }
+
+    fn merge_branch_into_current(&mut self, branch: String, cx: &mut Context<Self>) {
+        self.run_branch_command(
+            format!("Merging {branch} into current"),
+            move |git, repository| git.merge_branch(repository, &branch),
+            cx,
+        );
+    }
+
+    fn rebase_current_onto(&mut self, branch: String, cx: &mut Context<Self>) {
+        self.run_branch_command(
+            format!("Rebasing current onto {branch}"),
+            move |git, repository| git.rebase_branch(repository, &branch),
+            cx,
+        );
+    }
+
+    #[allow(clippy::unused_self)]
+    fn prompt_rename_branch(&mut self, current: String, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let prompt = format!("Rename branch '{current}' to:");
+            let name = cx
+                .background_spawn(async move {
+                    Command::new("osascript")
+                        .args([
+                            "-e",
+                            &format!(
+                                "text returned of (display dialog \"{prompt}\" default answer \"\")"
+                            ),
+                        ])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| {
+                            String::from_utf8_lossy(&output.stdout)
+                                .trim_end()
+                                .to_owned()
+                        })
+                        .filter(|name| !name.is_empty())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(name) = name {
+                    app.run_branch_command(
+                        format!("Renaming branch to {name}"),
+                        move |git, repository| git.rename_branch(repository, &current, &name),
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
     }
 
     fn move_history_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -2775,11 +2867,6 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
-    fn widen_inspector(&mut self, _: &WidenInspector, _: &mut Window, cx: &mut Context<Self>) {
-        self.inspector_width = resize_width(self.inspector_width);
-        cx.notify();
-    }
-
     fn dropped_paths(
         &mut self,
         paths: &ExternalPaths,
@@ -2794,6 +2881,24 @@ return remote_url & linefeed & parent_path"#;
 
     fn open_recent(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         self.open_path(path, window, cx);
+    }
+
+    fn select_recent(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.recents.len() {
+            self.selected_recent = Some(index);
+            cx.notify();
+        }
+    }
+
+    #[allow(dead_code)]
+    fn open_selected_recent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(index) = self.selected_recent else {
+            return;
+        };
+        let Some(path) = self.recents.get(index).cloned() else {
+            return;
+        };
+        self.open_recent(path, window, cx);
     }
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -2837,6 +2942,9 @@ return remote_url & linefeed & parent_path"#;
     }
 
     fn begin_open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.state, ShellState::Welcome) {
+            self.came_from_welcome = true;
+        }
         self.state = ShellState::Loading(path.clone());
         self.stop_watcher();
         self.activity = "Opening repository…".into();
@@ -2928,6 +3036,7 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
+    #[allow(dead_code)]
     fn prompt_branch_name(create: bool, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let name = cx
@@ -2977,10 +3086,12 @@ return remote_url & linefeed & parent_path"#;
         );
     }
 
+    #[allow(dead_code)]
     fn create_branch(&mut self, branch: String, cx: &mut Context<Self>) {
         self.create_branch_from(branch, None, cx);
     }
 
+    #[allow(dead_code)]
     fn prompt_rename_current_branch(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let name = cx
@@ -3011,6 +3122,7 @@ return remote_url & linefeed & parent_path"#;
         }).detach();
     }
 
+    #[allow(dead_code)]
     fn prompt_delete_local_branch(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let branch = cx
@@ -3100,12 +3212,7 @@ return remote_url & linefeed & parent_path"#;
             .and_then(|remote| String::from_utf8(remote.name.0.clone()).ok())
     }
 
-    fn has_upstream(&self) -> bool {
-        self.working_copy
-            .as_ref()
-            .is_some_and(|status| status.branch.upstream.is_some())
-    }
-
+    #[allow(dead_code)]
     fn has_attached_branch(&self) -> bool {
         self.working_copy
             .as_ref()
@@ -3125,6 +3232,7 @@ return remote_url & linefeed & parent_path"#;
         );
     }
 
+    #[allow(dead_code)]
     fn prompt_fetch_remote(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let remote = cx.background_spawn(async {
@@ -3158,6 +3266,14 @@ return remote_url & linefeed & parent_path"#;
         );
     }
 
+    fn pull_branch(&mut self, branch: String, cx: &mut Context<Self>) {
+        self.run_network_command(
+            format!("Pulling {branch}"),
+            vec!["pull".into(), "--progress".into(), branch.into()],
+            cx,
+        );
+    }
+
     fn push_current(&mut self, cx: &mut Context<Self>) {
         self.run_network_command(
             "Pushing current branch".into(),
@@ -3166,6 +3282,7 @@ return remote_url & linefeed & parent_path"#;
         );
     }
 
+    #[allow(dead_code)]
     fn publish_current(&mut self, cx: &mut Context<Self>) {
         let Some(remote) = self.default_remote() else {
             self.activity = "No configured remote to publish to.".into();
@@ -3197,6 +3314,7 @@ return remote_url & linefeed & parent_path"#;
         );
     }
 
+    #[allow(dead_code)]
     fn request_force_with_lease(&mut self, cx: &mut Context<Self>) {
         self.force_push_state = ForcePushState::AwaitingConfirmation;
         self.activity =
@@ -3605,10 +3723,36 @@ return remote_url & linefeed & parent_path"#;
         &mut self,
         path: GitPath,
         additive: bool,
+        shift: bool,
         staged: bool,
         cx: &mut Context<Self>,
     ) {
-        if additive {
+        let path_for_index = path.clone();
+        if shift {
+            if let Some(last_index) = self.last_selected_path_index {
+                let all_paths = self.all_status_paths();
+                if let Some(current_index) = all_paths.iter().position(|p| p == &path) {
+                    let start = last_index.min(current_index);
+                    let end = last_index.max(current_index);
+                    for i in start..=end {
+                        let p = all_paths[i].clone();
+                        if !self.selected_paths.contains(&p) {
+                            self.selected_paths.push(p);
+                        }
+                    }
+                }
+            } else {
+                if let Some(index) = self
+                    .selected_paths
+                    .iter()
+                    .position(|selected| selected == &path)
+                {
+                    self.selected_paths.remove(index);
+                } else {
+                    self.selected_paths.push(path.clone());
+                }
+            }
+        } else if additive {
             if let Some(index) = self
                 .selected_paths
                 .iter()
@@ -3616,12 +3760,15 @@ return remote_url & linefeed & parent_path"#;
             {
                 self.selected_paths.remove(index);
             } else {
-                self.selected_paths.push(path);
+                self.selected_paths.push(path.clone());
             }
         } else {
             self.selected_paths = vec![path];
         }
-        if !additive && let ShellState::Repository(repository) = &self.state {
+        if !additive
+            && !shift
+            && let ShellState::Repository(repository) = &self.state
+        {
             self.selected_diff = Some((self.selected_paths[0].clone(), staged));
             Self::load_diff(
                 repository.clone(),
@@ -3631,7 +3778,19 @@ return remote_url & linefeed & parent_path"#;
                 cx,
             );
         }
+        self.last_selected_path_index = self.all_status_paths().iter().position(|p| p == &path_for_index);
         cx.notify();
+    }
+
+    fn all_status_paths(&self) -> Vec<GitPath> {
+        let mut paths = Vec::new();
+        let Some(status) = &self.working_copy else {
+            return paths;
+        };
+        for entry in &status.entries {
+            paths.push(status_path(entry).clone());
+        }
+        paths
     }
 
     fn load_diff(
@@ -3686,6 +3845,7 @@ return remote_url & linefeed & parent_path"#;
         self.mutate(operation, cx);
     }
 
+    #[allow(dead_code)]
     fn toggle_worktree_show_all(&mut self, cx: &mut Context<Self>) {
         self.worktree_show_all_files = !self.worktree_show_all_files;
         if self.worktree_show_all_files {
@@ -4468,6 +4628,7 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
+    #[allow(dead_code)]
     fn apply_latest_stash(&mut self, cx: &mut Context<Self>) {
         if self.mutation_in_flight {
             return;

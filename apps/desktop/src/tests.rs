@@ -13,7 +13,7 @@ use super::window_options;
 use crate::app_state::{
     GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, OperationAction,
     RepositoryView, ShellState, eligible_trash_path, git_failure_message, network_failure_message,
-    repository_is_available, resize_width, shows_inspector, window_title,
+    repository_is_available, resize_width, window_title,
 };
 use crate::keymap;
 use crate::views::components::{activity_label, empty_status_message};
@@ -126,12 +126,6 @@ fn keybindings_dispatch_global_actions(cx: &mut TestAppContext) {
 fn pane_widths_stay_within_the_safe_range() {
     assert!((resize_width(0.0) - MINIMUM_PANE_WIDTH).abs() < f32::EPSILON);
     assert!((resize_width(MAXIMUM_PANE_WIDTH) - MAXIMUM_PANE_WIDTH).abs() < f32::EPSILON);
-}
-
-#[test]
-fn inspector_yields_space_to_the_main_content_in_narrow_windows() {
-    assert!(!shows_inspector(800.0, 220.0, 320.0));
-    assert!(shows_inspector(900.0, 220.0, 320.0));
 }
 
 #[test]

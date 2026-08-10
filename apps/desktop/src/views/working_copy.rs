@@ -1,18 +1,33 @@
 //! Working Copy view: status groups, changes, sync, branch controls, confirmations.
 
-use gpui::{AnyElement, ClickEvent, MouseButton, div, prelude::*, px};
+use std::sync::{Arc, Mutex};
+
+use gpui::{AnyElement, ClickEvent, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
-use git_domain::{GitPath, InProgressOperation, StatusEntry, WorktreeRepository};
+use git_domain::{GitPath, HeadStatus, InProgressOperation, StatusEntry, WorktreeRepository};
 
 use crate::app_state::{
     ForcePushState, GitronimoApp, Mutation, OperationAction, RefContext, RepositoryView,
     StashAction,
 };
 use crate::views::components::{
-    empty_status_message, file_action_button, mutation_button, state_panel, status_label,
-    status_path, validated_action_button, workspace_section,
+    file_action_button, mutation_button, state_panel, status_badge_info, status_label, status_path,
 };
+
+#[derive(Clone)]
+struct ColumnDrag {
+    start_x: Arc<Mutex<f32>>,
+    start_width: Arc<Mutex<f32>>,
+}
+
+struct DragHandle;
+
+impl Render for DragHandle {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div().w(px(4.0)).h_full().bg(gpui::transparent_black())
+    }
+}
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -80,163 +95,12 @@ impl GitronimoApp {
                 .conflicts_view(repository, colors, cx)
                 .into_any_element();
         }
-        let groups = self.status_groups();
-        let has_local_branches = !self.refs.local_branches.is_empty();
-        let has_remotes = !self.refs.remotes.is_empty();
-        let has_upstream = self.has_upstream();
-        let has_attached_branch = self.has_attached_branch();
         div()
             .flex()
             .flex_col()
-            .gap_4()
-            .child(
-                div()
-                    .p_4()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .bg(colors.panel_background)
-                    .border_1()
-                    .border_color(colors.border)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(div().text_xl().child("Working copy"))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(colors.text_secondary)
-                                    .child(repository.worktree_root.display().to_string()),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(file_action_button(
-                                if self.worktree_show_all_files {
-                                    "Modified only"
-                                } else {
-                                    "All files"
-                                },
-                                colors,
-                                cx,
-                                super::super::app_state::GitronimoApp::toggle_worktree_show_all,
-                            ))
-                            .child(file_action_button("History", colors, cx, {
-                                let repository = repository.clone();
-                                move |app, cx| app.show_history(repository.clone(), cx)
-                            })),
-                    ),
-            )
             .children(self.navigation_controls(colors, cx))
             .children(self.operation_banner_view(colors, cx))
             .children(self.operation_confirmation_view(colors, cx))
-            .child(workspace_section(
-                "Branch",
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(div().flex().gap_2().children([
-                        validated_action_button(
-                            "Checkout branch…",
-                            has_local_branches,
-                            "No local branches are available.",
-                            colors,
-                            cx,
-                            |_, cx| GitronimoApp::prompt_branch_name(false, cx),
-                        ),
-                        file_action_button("New branch from HEAD…", colors, cx, |_, cx| {
-                            GitronimoApp::prompt_branch_name(true, cx);
-                        }),
-                    ]))
-                    .child(div().flex().gap_2().children([
-                        validated_action_button(
-                            "Rename current branch…",
-                            has_attached_branch,
-                            "Checkout a local branch first.",
-                            colors,
-                            cx,
-                            |_, cx| GitronimoApp::prompt_rename_current_branch(cx),
-                        ),
-                        validated_action_button(
-                            "Delete local branch…",
-                            has_local_branches,
-                            "No local branches are available.",
-                            colors,
-                            cx,
-                            |_, cx| GitronimoApp::prompt_delete_local_branch(cx),
-                        ),
-                    ])),
-                colors,
-            ))
-            .child(workspace_section(
-                "Sync",
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(div().flex().gap_2().children([
-                        validated_action_button(
-                            "Fetch default remote",
-                            has_remotes,
-                            "Add a remote before fetching.",
-                            colors,
-                            cx,
-                            GitronimoApp::fetch_default_remote,
-                        ),
-                        validated_action_button(
-                            "Fetch remote…",
-                            has_remotes,
-                            "Add a remote before fetching.",
-                            colors,
-                            cx,
-                            |_, cx| GitronimoApp::prompt_fetch_remote(cx),
-                        ),
-                    ]))
-                    .child(div().flex().gap_2().children([
-                        validated_action_button(
-                            "Pull current branch",
-                            has_upstream,
-                            "Set an upstream before pulling.",
-                            colors,
-                            cx,
-                            GitronimoApp::pull_current,
-                        ),
-                        validated_action_button(
-                            "Push current branch",
-                            has_upstream,
-                            "Set an upstream before pushing.",
-                            colors,
-                            cx,
-                            GitronimoApp::push_current,
-                        ),
-                    ]))
-                    .child(div().flex().gap_2().children([
-                        validated_action_button(
-                            "Publish current branch",
-                            has_remotes && has_attached_branch,
-                            "Checkout a branch and add a remote before publishing.",
-                            colors,
-                            cx,
-                            GitronimoApp::publish_current,
-                        ),
-                        validated_action_button(
-                            "Advanced force-with-lease…",
-                            has_upstream,
-                            "Set an upstream before force-with-lease is available.",
-                            colors,
-                            cx,
-                            GitronimoApp::request_force_with_lease,
-                        ),
-                    ]))
-                    .children(self.network_cancel_button(colors, cx)),
-                colors,
-            ))
             .children(self.ref_context_menu_view(colors, cx))
             .children(self.working_copy.as_ref().is_none().then(|| {
                 state_panel(
@@ -246,7 +110,6 @@ impl GitronimoApp {
                     colors,
                 )
             }))
-            .child(self.mutation_controls(colors, cx))
             .children(self.discard_confirmation_view(colors, cx))
             .children(self.line_discard_confirmation_view(colors, cx))
             .children(self.hunk_discard_confirmation_view(colors, cx))
@@ -255,7 +118,60 @@ impl GitronimoApp {
             .children(self.branch_delete_confirmation_view(colors, cx))
             .children(self.force_with_lease_confirmation_view(colors, cx))
             .children(self.context_menu_view(repository, colors, cx))
-            .child(self.commit_composer_view(colors, cx))
+            .child(self.file_review_workspace(colors, cx))
+            .into_any_element()
+    }
+
+    fn branch_context_view(
+        &self,
+        _has_local_branches: bool,
+        colors: &ThemeColors,
+        _cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let (branch, tracking) = self.working_copy.as_ref().map_or_else(
+            || ("Branch loading…".to_owned(), String::new()),
+            |status| {
+                let branch = match &status.branch.head {
+                    HeadStatus::Branch(name) => String::from_utf8_lossy(&name.0).into_owned(),
+                    HeadStatus::Detached => "Detached HEAD".into(),
+                    HeadStatus::Unborn => "Unborn branch".into(),
+                    HeadStatus::Unknown => "Unknown branch".into(),
+                };
+                let tracking = status.branch.upstream.as_ref().map_or_else(
+                    || "No Tracking".to_owned(),
+                    |upstream| String::from_utf8_lossy(&upstream.0).into_owned(),
+                );
+                (branch, tracking)
+            },
+        );
+        div()
+            .px_3()
+            .py_2()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_sm()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child("\u{1F418}"),
+            )
+            .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(branch))
+            .child(div().text_color(colors.text_muted).child("\u{203A}"))
+            .child(div().text_color(colors.text_secondary).child(tracking))
+            .into_any_element()
+    }
+
+    fn file_review_workspace(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let groups = self.status_groups();
+        let file_groups = div()
+            .flex()
+            .flex_col()
             .when(self.worktree_show_all_files, |this| {
                 this.child(self.all_files_group_view(colors, cx))
             })
@@ -276,9 +192,81 @@ impl GitronimoApp {
                         colors,
                         cx,
                     ))
-            })
-            .children(self.diff_view(colors, cx))
+            });
+        let file_list = div().flex_1().overflow_hidden().child(file_groups);
+        let diff = self.diff_view(colors, cx).unwrap_or_else(|| {
+            let (title, detail) = if self.selected_paths.len() > 1 {
+                (
+                    "Multiple files selected",
+                    "Select one file to inspect its diff.",
+                )
+            } else {
+                (
+                    "No file selected",
+                    "Choose a changed file to inspect its diff.",
+                )
+            };
+            state_panel(title, detail, colors.text_muted, colors)
+        });
+        let diff_pane = div().flex_1().overflow_hidden().child(diff);
+        let col_w = px(self.column_width);
+        div()
+            .id("workspace-flex")
+            .flex()
+            .flex_1()
+            .items_start()
+            .on_drag_move::<ColumnDrag>(cx.listener(
+                |app, event: &gpui::DragMoveEvent<ColumnDrag>, _window, cx| {
+                    let drag = event.drag(cx);
+                    let start_x = *drag.start_x.lock().unwrap();
+                    let start_width = *drag.start_width.lock().unwrap();
+                    let delta = f32::from(event.event.position.x) - start_x;
+                    app.column_width = (start_width + delta).clamp(200.0, 600.0);
+                    cx.notify();
+                },
+            ))
+            .child(
+                div()
+                    .w(col_w)
+                    .min_w(px(200.0))
+                    .max_w(px(600.0))
+                    .flex()
+                    .flex_col()
+                    .child(self.branch_context_view(false, colors, cx))
+                    .child(self.commit_composer_view(colors, cx))
+                    .child(self.mutation_controls(colors, cx))
+                    .child(file_list),
+            )
+            .child(self.column_resize_handle(colors, cx))
+            .child(diff_pane)
             .into_any_element()
+    }
+
+    #[allow(clippy::unused_self)]
+    fn column_resize_handle(
+        &self,
+        colors: &ThemeColors,
+        _cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let mut handle = div()
+            .w(px(4.0))
+            .h_full()
+            .cursor_col_resize()
+            .bg(colors.border)
+            .hover(|s| s.bg(colors.accent));
+        let start_width = self.column_width;
+        handle.interactivity().on_drag(
+            ColumnDrag {
+                start_x: Arc::new(Mutex::new(0.0)),
+                start_width: Arc::new(Mutex::new(start_width)),
+            },
+            move |drag, offset, _window, app| {
+                *drag.start_x.lock().unwrap() = f32::from(offset.x);
+                *drag.start_width.lock().unwrap() = start_width;
+                app.new(|_| DragHandle)
+            },
+        );
+        handle.into_any_element()
     }
 
     pub(crate) fn status_groups(&self) -> crate::views::components::StatusGroups<'_> {
@@ -304,6 +292,7 @@ impl GitronimoApp {
         groups
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn ref_context_menu_view(
         &self,
         colors: &ThemeColors,
@@ -321,66 +310,121 @@ impl GitronimoApp {
             .flex()
             .flex_col()
             .gap_1()
+            .min_w(px(200.0))
             .bg(colors.raised_background)
             .border_1()
             .border_color(colors.border)
-            .child(format!("{title}: {reference}"));
+            .rounded(px(4.0))
+            .child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .border_b_1()
+                    .border_color(colors.border)
+                    .child(format!("{title}: {reference}")),
+            );
         match context {
             RefContext::LocalBranch(branch) => {
                 let checkout = branch.clone();
                 let history = branch.clone();
+                let delete_branch = branch.clone();
+                let rename_branch = branch.clone();
+                let merge_branch = branch.clone();
+                let rebase_branch = branch.clone();
                 menu = menu
-                    .child(file_action_button(
-                        "Checkout branch",
+                    .child(menu_item("Checkout", colors, cx, move |app, _, cx| {
+                        app.checkout_branch(checkout.clone(), cx);
+                    }))
+                    .child(menu_item("View History", colors, cx, move |app, _, cx| {
+                        app.show_ref_history(history.clone(), cx);
+                    }))
+                    .child(menu_separator(colors))
+                    .child(menu_item(
+                        "Merge into Current…",
                         colors,
                         cx,
-                        move |app, cx| {
-                            app.checkout_branch(checkout.clone(), cx);
+                        move |app, _, cx| {
+                            app.merge_branch_into_current(merge_branch.clone(), cx);
                         },
                     ))
-                    .child(file_action_button(
-                        "View branch history",
+                    .child(menu_item(
+                        "Rebase Current onto…",
                         colors,
                         cx,
-                        move |app, cx| {
-                            app.show_ref_history(history.clone(), cx);
+                        move |app, _, cx| {
+                            app.rebase_current_onto(rebase_branch.clone(), cx);
                         },
-                    ));
+                    ))
+                    .child(menu_separator(colors))
+                    .child(menu_item("Rename…", colors, cx, move |app, _, cx| {
+                        app.prompt_rename_branch(rename_branch.clone(), cx);
+                    }))
+                    .child(menu_item("Delete", colors, cx, move |app, _, cx| {
+                        app.request_branch_delete(delete_branch.clone(), cx);
+                    }));
             }
-            RefContext::RemoteBranch(branch) | RefContext::Tag(branch) => {
+            RefContext::RemoteBranch(branch) => {
                 let create_start = branch.clone();
                 let history = branch.clone();
+                let pull_branch = branch.clone();
+                let delete_ref = branch.clone();
                 menu = menu
-                    .child(file_action_button(
-                        "New branch from ref…",
+                    .child(menu_item(
+                        "New Branch from Here…",
                         colors,
                         cx,
-                        move |_, cx| {
+                        move |_, _, cx| {
                             GitronimoApp::prompt_branch_from_ref(create_start.clone(), cx);
                         },
                     ))
-                    .child(file_action_button(
-                        "View ref history",
+                    .child(menu_item("View History", colors, cx, move |app, _, cx| {
+                        app.show_ref_history(history.clone(), cx);
+                    }))
+                    .child(menu_separator(colors))
+                    .child(menu_item("Pull", colors, cx, move |app, _, cx| {
+                        app.pull_branch(pull_branch.clone(), cx);
+                    }))
+                    .child(menu_separator(colors))
+                    .child(menu_item("Delete", colors, cx, move |app, _, cx| {
+                        app.request_branch_delete(delete_ref.clone(), cx);
+                    }));
+            }
+            RefContext::Tag(branch) => {
+                let create_start = branch.clone();
+                let history = branch.clone();
+                let delete_ref = branch.clone();
+                menu = menu
+                    .child(menu_item(
+                        "New Branch from Here…",
                         colors,
                         cx,
-                        move |app, cx| {
-                            app.show_ref_history(history.clone(), cx);
+                        move |_, _, cx| {
+                            GitronimoApp::prompt_branch_from_ref(create_start.clone(), cx);
                         },
-                    ));
+                    ))
+                    .child(menu_item("View History", colors, cx, move |app, _, cx| {
+                        app.show_ref_history(history.clone(), cx);
+                    }))
+                    .child(menu_separator(colors))
+                    .child(menu_item("Delete", colors, cx, move |app, _, cx| {
+                        app.request_branch_delete(delete_ref.clone(), cx);
+                    }));
             }
             RefContext::Remote(remote) => {
-                menu = menu.child(file_action_button(
-                    "Fetch this remote",
-                    colors,
-                    cx,
-                    move |app, cx| {
-                        app.run_network_command(
-                            format!("Fetching {remote}"),
-                            vec!["fetch".into(), "--progress".into(), remote.clone().into()],
-                            cx,
-                        );
-                    },
-                ));
+                let fetch_remote = remote.clone();
+                menu = menu.child(menu_item("Fetch", colors, cx, move |app, _, cx| {
+                    app.run_network_command(
+                        format!("Fetching {fetch_remote}"),
+                        vec![
+                            "fetch".into(),
+                            "--progress".into(),
+                            fetch_remote.clone().into(),
+                        ],
+                        cx,
+                    );
+                }));
             }
         }
         Some(menu.into_any_element())
@@ -423,55 +467,48 @@ impl GitronimoApp {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let disabled = self.mutation_in_flight;
-        workspace_section(
-            "Changes",
-            div().flex().gap_2().children([
-                mutation_button(
-                    "Stage selected",
-                    disabled,
-                    Mutation::StageSelected,
-                    colors,
-                    cx,
-                ),
-                mutation_button(
-                    "Unstage selected",
-                    disabled,
-                    Mutation::UnstageSelected,
-                    colors,
-                    cx,
-                ),
-                mutation_button("Stage all", disabled, Mutation::StageAll, colors, cx),
-                mutation_button("Unstage all", disabled, Mutation::UnstageAll, colors, cx),
-                mutation_button(
-                    "Discard selected",
-                    disabled,
-                    Mutation::DiscardSelected,
-                    colors,
-                    cx,
-                ),
-                file_action_button("Stash tracked changes", colors, cx, |app, cx| {
-                    app.create_stash(false, cx);
-                }),
-                file_action_button("Stash including untracked", colors, cx, |app, cx| {
-                    app.create_stash(true, cx);
-                }),
-                file_action_button("Apply latest stash", colors, cx, |app, cx| {
-                    app.apply_latest_stash(cx);
-                }),
-                file_action_button("Pop latest stash", colors, cx, |app, cx| {
-                    app.pending_stash_action = Some(StashAction::Pop);
-                    app.activity =
-                        "Confirm before removing the latest stash recovery entry.".into();
-                    cx.notify();
-                }),
-                file_action_button("Drop latest stash", colors, cx, |app, cx| {
-                    app.pending_stash_action = Some(StashAction::Drop);
-                    app.activity = "Confirm before permanently removing the latest stash.".into();
-                    cx.notify();
-                }),
-            ]),
-            colors,
-        )
+        div()
+            .flex()
+            .flex_wrap()
+            .gap_1()
+            .child(mutation_button(
+                "Stage selected",
+                disabled,
+                Mutation::StageSelected,
+                colors,
+                cx,
+            ))
+            .child(mutation_button(
+                "Unstage selected",
+                disabled,
+                Mutation::UnstageSelected,
+                colors,
+                cx,
+            ))
+            .child(mutation_button(
+                "Stage all",
+                disabled,
+                Mutation::StageAll,
+                colors,
+                cx,
+            ))
+            .child(mutation_button(
+                "Unstage all",
+                disabled,
+                Mutation::UnstageAll,
+                colors,
+                cx,
+            ))
+            .child(mutation_button(
+                "Discard selected",
+                disabled,
+                Mutation::DiscardSelected,
+                colors,
+                cx,
+            ))
+            .child(file_action_button("Stash", colors, cx, |app, cx| {
+                app.create_stash(false, cx);
+            }))
     }
 
     pub(crate) fn operation_banner_view(
@@ -711,6 +748,7 @@ impl GitronimoApp {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn network_cancel_button(
         &self,
         colors: &ThemeColors,
@@ -803,17 +841,13 @@ impl GitronimoApp {
         colors: &ThemeColors,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        let rows = if entries.is_empty() {
-            div()
-                .text_color(colors.text_muted)
-                .child(empty_status_message(title))
-                .into_any_element()
+        let rows: Vec<AnyElement> = if entries.is_empty() {
+            vec![]
         } else {
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .children(entries.iter().enumerate().map(|(index, entry)| {
+            entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| {
                     self.status_row(
                         (title, index).into(),
                         status_path(entry).clone(),
@@ -822,25 +856,82 @@ impl GitronimoApp {
                         colors,
                         cx,
                     )
-                }))
-                .into_any_element()
+                })
+                .collect()
         };
         div()
-            .p_3()
             .flex()
             .flex_col()
-            .gap_2()
-            .bg(colors.panel_background)
-            .border_1()
-            .border_color(colors.border)
-            .child(
-                div().flex().justify_between().child(title).child(
+            .when(entries.is_empty(), |this| this)
+            .when(!entries.is_empty(), |this| {
+                let all_selected = entries
+                    .iter()
+                    .all(|entry| self.selected_paths.contains(&status_path(entry)));
+                this.child(
                     div()
-                        .text_color(colors.text_secondary)
-                        .child(entries.len().to_string()),
-                ),
-            )
-            .child(rows)
+                        .h(px(22.0))
+                        .px_2()
+                        .flex()
+                        .items_center()
+                        .text_xs()
+                        .text_color(colors.text_muted)
+                        .border_b_1()
+                        .border_color(colors.border)
+                        .child(
+                            div()
+                                .w(px(44.0))
+                                .flex()
+                                .items_center()
+                                .child("Status")
+                                .child(
+                                    div()
+                                        .w(px(14.0))
+                                        .h(px(14.0))
+                                        .ml_2()
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(3.0))
+                                        .bg(if all_selected {
+                                            colors.accent
+                                        } else {
+                                            colors.panel_background
+                                        })
+                                        .border_1()
+                                        .border_color(if all_selected {
+                                            colors.accent
+                                        } else {
+                                            colors.border
+                                        })
+                                        .text_color(if all_selected {
+                                            colors.panel_background
+                                        } else {
+                                            colors.text_muted
+                                        })
+                                        .cursor_pointer()
+                                        .on_click(cx.listener(move |app, _, _, cx| {
+                                            if all_selected {
+                                                app.selected_paths.retain(|p| {
+                                                    !entries.iter().any(|e| status_path(e) == p)
+                                                });
+                                            } else {
+                                                for entry in entries {
+                                                    let path = status_path(entry);
+                                                    if !app.selected_paths.contains(&path) {
+                                                        app.selected_paths.push(path.clone());
+                                                    }
+                                                }
+                                            }
+                                            app.last_selected_path_index = None;
+                                            cx.notify();
+                                        }))
+                                        .child(if all_selected { "\u{2713}" } else { "" }),
+                                ),
+                        )
+                        .child(div().flex_1().child("Filename")),
+                )
+            })
+            .children(rows)
     }
 
     pub(crate) fn all_files_group_view(
@@ -896,38 +987,38 @@ impl GitronimoApp {
                 cx,
             ));
         }
-        let count = self.tracked_files.len() + groups.untracked.len();
         let body = if self.tracked_files.is_empty() && groups.untracked.is_empty() {
             div()
                 .text_color(colors.text_muted)
                 .child("No tracked files to list.")
                 .into_any_element()
         } else {
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .children(rows)
-                .into_any_element()
+            div().flex().flex_col().children(rows).into_any_element()
         };
         div()
-            .p_3()
             .flex()
             .flex_col()
-            .gap_2()
-            .bg(colors.panel_background)
-            .border_1()
-            .border_color(colors.border)
             .child(
-                div().flex().justify_between().child("All files").child(
-                    div()
-                        .text_color(colors.text_secondary)
-                        .child(count.to_string()),
-                ),
+                div()
+                    .h(px(22.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .border_b_1()
+                    .border_color(colors.border)
+                    .child(div().w(px(36.0)).child("Status"))
+                    .child(div().flex_1().child("Filename")),
             )
             .child(body)
     }
 
+    #[allow(
+        clippy::similar_names,
+        clippy::needless_pass_by_value,
+        clippy::too_many_lines
+    )]
     pub(crate) fn status_row(
         &self,
         id: gpui::ElementId,
@@ -941,22 +1032,35 @@ impl GitronimoApp {
         let checkbox_path = path.clone();
         let checkbox_id = id.clone();
         let selected = self.selected_paths.contains(&path);
+        let (badge_char, badge_bg, badge_fg) = status_badge_info(&label);
+        let badge_char = badge_char.to_owned();
+        let display_path = label
+            .trim_start_matches(|c: char| c.is_alphabetic() || c == ' ')
+            .trim_start();
+        let file_icon = file_type_icon(display_path);
         div()
             .id(id)
+            .h(px(22.0))
             .px_2()
-            .py_1()
+            .flex()
+            .items_center()
+            .gap_2()
             .bg(if selected {
-                colors.raised_background
+                gpui::rgb(0x00_60_a8)
             } else {
                 colors.panel_background
             })
-            .border_1()
-            .border_color(colors.border)
+            .text_color(if selected {
+                gpui::rgb(0xff_ff_ff)
+            } else {
+                colors.text_primary
+            })
             .cursor_pointer()
             .on_click(cx.listener(move |app, event: &ClickEvent, _, cx| {
                 app.select_status_path(
                     path.clone(),
-                    event.modifiers().secondary() || event.modifiers().shift,
+                    event.modifiers().secondary(),
+                    event.modifiers().shift,
                     staged,
                     cx,
                 );
@@ -969,36 +1073,61 @@ impl GitronimoApp {
             )
             .child(
                 div()
+                    .id(gpui::ElementId::from((checkbox_id, label.clone())))
+                    .w(px(14.0))
+                    .h(px(14.0))
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .id(gpui::ElementId::from((checkbox_id, label.clone())))
-                            .w(px(16.0))
-                            .h(px(16.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .border_1()
-                            .border_color(if staged {
-                                colors.success
-                            } else {
-                                colors.border
-                            })
-                            .text_color(if staged {
-                                colors.success
-                            } else {
-                                colors.text_muted
-                            })
-                            .cursor_pointer()
-                            .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
-                                cx.stop_propagation();
-                                app.toggle_path_staged(checkbox_path.clone(), staged, cx);
-                            }))
-                            .child(if staged { "✓" } else { "○" }),
-                    )
-                    .child(div().child(label)),
+                    .justify_center()
+                    .rounded(px(3.0))
+                    .bg(if staged {
+                        colors.success
+                    } else {
+                        colors.panel_background
+                    })
+                    .border_1()
+                    .border_color(if staged {
+                        colors.success
+                    } else if selected {
+                        gpui::rgb(0x80_b0_d0)
+                    } else {
+                        colors.border
+                    })
+                    .text_color(if staged {
+                        colors.panel_background
+                    } else {
+                        colors.text_muted
+                    })
+                    .cursor_pointer()
+                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                        cx.stop_propagation();
+                        app.toggle_path_staged(checkbox_path.clone(), staged, cx);
+                    }))
+                    .child(if staged { "\u{2713}" } else { "" }),
+            )
+            .child(
+                div()
+                    .w(px(16.0))
+                    .h(px(16.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(3.0))
+                    .bg(badge_bg)
+                    .text_color(badge_fg)
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::BOLD)
+                    .child(badge_char),
+            )
+            .child(div().text_xs().child(file_icon))
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .text_xs()
+                    .child(display_path.to_owned()),
             )
             .into_any_element()
     }
@@ -1046,9 +1175,52 @@ fn operation_description(operation: &InProgressOperation) -> (String, String) {
     }
 }
 
+fn file_type_icon(display_path: &str) -> &'static str {
+    let file_ext = std::path::Path::new(display_path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    match file_ext {
+        "rs" => "\u{1F4DC}",
+        "toml" | "json" | "yaml" | "yml" => "\u{2699}",
+        "md" | "txt" => "\u{1F4DD}",
+        "py" | "js" | "ts" | "tsx" | "jsx" | "go" | "rb" | "java" | "c" | "cpp" | "h" => {
+            "\u{1F4BB}"
+        }
+        "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" => "\u{1F5BC}",
+        "lock" => "\u{1F512}",
+        _ => "\u{1F4C4}",
+    }
+}
+
 fn short_oid(oid: Option<&[u8]>) -> String {
     oid.and_then(|oid| std::str::from_utf8(oid).ok())
         .map(|oid| oid.chars().take(7).collect::<String>())
         .filter(|short| !short.is_empty())
         .unwrap_or_else(|| "an unknown commit".into())
+}
+
+fn menu_item(
+    label: &'static str,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &ClickEvent, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> gpui::AnyElement {
+    div()
+        .id(label)
+        .h(px(24.0))
+        .px_2()
+        .flex()
+        .items_center()
+        .text_sm()
+        .rounded(px(3.0))
+        .cursor_pointer()
+        .hover(|style| style.bg(colors.selection))
+        .on_click(cx.listener(move |app, event, _, cx| on_click(app, event, cx)))
+        .child(label)
+        .into_any_element()
+}
+
+fn menu_separator(colors: &ThemeColors) -> gpui::AnyElement {
+    div().h(px(1.0)).my_1().bg(colors.border).into_any_element()
 }

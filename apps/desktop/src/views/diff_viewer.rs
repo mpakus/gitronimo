@@ -1,7 +1,7 @@
 //! Diff viewer: per-line rendered diff rows with line selection for partial
 //! staging or discarding, plus hunk-level stage/unstage actions.
 
-use gpui::{AnyElement, SharedString, div, prelude::*};
+use gpui::{AnyElement, SharedString, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use git_domain::{DiffLine, DiffLineKind};
@@ -24,114 +24,188 @@ impl GitronimoApp {
                 && self.selected_diff.is_some();
             let can_select_lines = can_mutate_hunks && !staged_diff;
             let selection_count = self.selected_diff_lines.len();
-            let (hunk_count, code_rows) = self.diff_code_rows(can_select_lines, colors, cx);
+            let (hunk_count, total_additions, total_deletions, code_rows) =
+                self.diff_code_rows(can_select_lines, colors, cx);
+            let file_name = loaded
+                .diff
+                .files
+                .first()
+                .and_then(|f| f.new_path.as_ref())
+                .map_or_else(|| "No file selected".into(), |p| String::from_utf8_lossy(&p.0).into_owned());
+            let chunk_info = if hunk_count > 0 {
+                format!(
+                    "{hunk_count} chunk{}, {total_additions} insertion{}, {total_deletions} deletion{}",
+                    if hunk_count == 1 { "" } else { "s" },
+                    if total_additions == 1 { "" } else { "s" },
+                    if total_deletions == 1 { "" } else { "s" },
+                )
+            } else {
+                String::new()
+            };
             div()
-                .p_3()
                 .flex()
                 .flex_col()
-                .gap_2()
+                .gap_0()
                 .bg(colors.panel_background)
-                .border_1()
-                .border_color(colors.border)
-                .children(
-                    (can_mutate_hunks && hunk_count > 0)
-                        .then(|| Self::hunk_controls_row(hunk_count, staged_diff, colors, cx)),
-                )
-                .children((can_select_lines && selection_count > 0).then(|| {
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .child(file_action_button(
-                            "Stage selected lines",
-                            colors,
-                            cx,
-                            GitronimoApp::stage_selected_diff_lines,
-                        ))
-                        .child(file_action_button(
-                            "Discard selected lines",
-                            colors,
-                            cx,
-                            GitronimoApp::request_line_discard,
-                        ))
-                        .child(
-                            div()
-                                .px_1()
-                                .text_color(colors.text_secondary)
-                                .child(format!("{selection_count} line(s) selected")),
-                        )
-                        .into_any_element()
-                }))
+                .child(Self::diff_header(
+                    file_name,
+                    staged_diff,
+                    chunk_info,
+                    colors,
+                ))
+                .children(Self::selection_controls(
+                    can_select_lines,
+                    selection_count,
+                    colors,
+                    cx,
+                ))
                 .child(if is_binary {
-                    div().child("Binary file changed").into_any_element()
+                    div()
+                        .p_3()
+                        .child("Binary file changed")
+                        .into_any_element()
                 } else {
-                    div().children(code_rows).into_any_element()
+                    div().p_2().children(code_rows).into_any_element()
                 })
                 .children(loaded.truncated.then(|| {
-                    div().child("Diff truncated.").child(file_action_button(
-                        "Load full diff",
-                        colors,
-                        cx,
-                        |app, cx| {
-                            app.load_full_diff(cx);
-                        },
-                    ))
+                    div()
+                        .p_2()
+                        .child("Diff truncated.")
+                        .child(file_action_button(
+                            "Load full diff",
+                            colors,
+                            cx,
+                            |app, cx| {
+                                app.load_full_diff(cx);
+                            },
+                        ))
                 }))
                 .into_any_element()
         })
     }
 
-    fn hunk_controls_row(
-        hunk_count: usize,
+    fn diff_header(
+        file_name: String,
         staged_diff: bool,
+        chunk_info: String,
         colors: &ThemeColors,
-        cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         div()
             .flex()
             .flex_col()
-            .gap_1()
-            .children((0..hunk_count).map(|hunk_index| {
-                let mut row = div().flex().gap_1().child(
-                    div()
-                        .id(("diff-hunk", hunk_index))
-                        .px_2()
-                        .py_1()
-                        .bg(colors.raised_background)
-                        .border_1()
-                        .border_color(colors.border)
-                        .cursor_pointer()
-                        .on_click(cx.listener(move |app, _, _, cx| {
-                            if staged_diff {
-                                app.unstage_diff_hunk(hunk_index, cx);
-                            } else {
-                                app.stage_diff_hunk(hunk_index, cx);
-                            }
-                        }))
-                        .child(format!(
-                            "{} hunk {}",
-                            if staged_diff { "Unstage" } else { "Stage" },
-                            hunk_index + 1
-                        )),
-                );
-                if !staged_diff {
-                    row = row.child(
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(colors.border)
+                    .child(
                         div()
-                            .id(("discard-hunk", hunk_index))
-                            .px_2()
-                            .py_1()
-                            .bg(colors.raised_background)
-                            .border_1()
-                            .border_color(colors.border)
-                            .cursor_pointer()
-                            .on_click(cx.listener(move |app, _, _, cx| {
-                                app.request_hunk_discard(hunk_index, cx);
-                            }))
-                            .child(format!("Discard hunk {}", hunk_index + 1)),
-                    );
-                }
-                row.into_any_element()
-            }))
+                            .text_xs()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(colors.text_primary)
+                            .child(file_name),
+                    )
+                    .child(Self::staged_unstaged_tabs(staged_diff, colors)),
+            )
+            .when(!chunk_info.is_empty(), |this| {
+                this.child(
+                    div()
+                        .px_3()
+                        .py_1()
+                        .text_xs()
+                        .text_color(colors.text_muted)
+                        .child(chunk_info),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn selection_controls(
+        can_select_lines: bool,
+        selection_count: usize,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        if !can_select_lines || selection_count == 0 {
+            return None;
+        }
+        Some(
+            div()
+                .px_3()
+                .py_1()
+                .flex()
+                .items_center()
+                .gap_2()
+                .border_t_1()
+                .border_color(colors.border)
+                .child(file_action_button(
+                    "Stage selected lines",
+                    colors,
+                    cx,
+                    GitronimoApp::stage_selected_diff_lines,
+                ))
+                .child(file_action_button(
+                    "Discard selected lines",
+                    colors,
+                    cx,
+                    GitronimoApp::request_line_discard,
+                ))
+                .child(
+                    div()
+                        .px_1()
+                        .text_color(colors.text_secondary)
+                        .child(format!("{selection_count} line(s) selected")),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn staged_unstaged_tabs(staged_diff: bool, colors: &ThemeColors) -> AnyElement {
+        div()
+            .flex()
+            .gap_1()
+            .child(
+                div()
+                    .px_2()
+                    .py_0p5()
+                    .rounded(px(3.0))
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .bg(if staged_diff {
+                        colors.raised_background
+                    } else {
+                        colors.accent
+                    })
+                    .text_color(if staged_diff {
+                        colors.text_secondary
+                    } else {
+                        colors.panel_background
+                    })
+                    .child("Unstaged"),
+            )
+            .child(
+                div()
+                    .px_2()
+                    .py_0p5()
+                    .rounded(px(3.0))
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .bg(if staged_diff {
+                        colors.accent
+                    } else {
+                        colors.raised_background
+                    })
+                    .text_color(if staged_diff {
+                        colors.panel_background
+                    } else {
+                        colors.text_secondary
+                    })
+                    .child("Staged"),
+            )
             .into_any_element()
     }
 
@@ -140,22 +214,86 @@ impl GitronimoApp {
         selectable: bool,
         colors: &ThemeColors,
         cx: &mut gpui::Context<Self>,
-    ) -> (usize, Vec<AnyElement>) {
+    ) -> (usize, usize, usize, Vec<AnyElement>) {
         let mut hunk_count = 0;
+        let mut total_additions = 0;
+        let mut total_deletions = 0;
         let mut code_rows: Vec<AnyElement> = Vec::new();
         let Some(loaded) = &self.loaded_diff else {
-            return (0, code_rows);
+            return (0, 0, 0, code_rows);
         };
+        let staged_diff = matches!(&self.selected_diff, Some((_, true)));
+        let can_mutate = !self.mutation_in_flight && !loaded.truncated;
         for file in &loaded.diff.files {
             for (hunk_index, hunk) in file.hunks.iter().enumerate() {
                 hunk_count += 1;
+                for line in &hunk.lines {
+                    match line.kind {
+                        DiffLineKind::Addition => total_additions += 1,
+                        DiffLineKind::Removal => total_deletions += 1,
+                        DiffLineKind::Context => {}
+                    }
+                }
+                let header_text = String::from_utf8_lossy(&hunk.header).into_owned();
+                let can_hunk = can_mutate;
                 code_rows.push(
                     div()
                         .px_2()
                         .py_1()
+                        .flex()
+                        .items_center()
+                        .justify_between()
                         .font_family("Monaco")
+                        .text_xs()
                         .text_color(colors.text_secondary)
-                        .child(String::from_utf8_lossy(&hunk.header).into_owned())
+                        .child(div().child(header_text))
+                        .when(can_hunk, |row| {
+                            row.child(
+                                div()
+                                    .flex()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .id(("discard-chunk", hunk_index))
+                                            .px_2()
+                                            .py_1()
+                                            .rounded(px(3.0))
+                                            .text_xs()
+                                            .bg(colors.raised_background)
+                                            .border_1()
+                                            .border_color(colors.border)
+                                            .cursor_pointer()
+                                            .on_click(cx.listener(move |app, _, _, cx| {
+                                                app.request_hunk_discard(hunk_index, cx);
+                                            }))
+                                            .child("Discard Chunk"),
+                                    )
+                                    .child(
+                                        div()
+                                            .id(("stage-chunk", hunk_index))
+                                            .px_2()
+                                            .py_1()
+                                            .rounded(px(3.0))
+                                            .text_xs()
+                                            .bg(colors.raised_background)
+                                            .border_1()
+                                            .border_color(colors.border)
+                                            .cursor_pointer()
+                                            .on_click(cx.listener(move |app, _, _, cx| {
+                                                if staged_diff {
+                                                    app.unstage_diff_hunk(hunk_index, cx);
+                                                } else {
+                                                    app.stage_diff_hunk(hunk_index, cx);
+                                                }
+                                            }))
+                                            .child(if staged_diff {
+                                                "Unstage Chunk"
+                                            } else {
+                                                "Stage Chunk"
+                                            }),
+                                    ),
+                            )
+                        })
                         .into_any_element(),
                 );
                 for (line_index, line) in hunk.lines.iter().enumerate() {
@@ -165,7 +303,7 @@ impl GitronimoApp {
                 }
             }
         }
-        (hunk_count, code_rows)
+        (hunk_count, total_additions, total_deletions, code_rows)
     }
 
     fn diff_line_row(
@@ -222,6 +360,7 @@ impl GitronimoApp {
             row.px_1()
                 .py_0p5()
                 .font_family("Monaco")
+                .text_xs()
                 .flex()
                 .items_center()
                 .gap_2()

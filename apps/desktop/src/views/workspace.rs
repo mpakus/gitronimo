@@ -1,4 +1,4 @@
-//! The root window layout: toolbar, sidebar, content, inspector, activity bar.
+//! The root window layout: toolbar, sidebar, content, activity bar.
 
 use gpui::{AnyElement, Render, Window, div, prelude::*, px};
 use ui_kit::Theme;
@@ -14,13 +14,6 @@ impl Render for GitronimoApp {
         window.set_window_title(&window_title(&self.state, self.has_commit_draft()));
         let colors = Theme::for_appearance(self.appearance).colors;
         let sidebar_width = self.sidebar_width;
-        let inspector_width = self.inspector_width;
-        let show_inspector = !matches!(self.state, ShellState::Welcome)
-            && crate::app_state::shows_inspector(
-                f32::from(window.viewport_size().width),
-                sidebar_width,
-                inspector_width,
-            );
         let content = match &self.state {
             ShellState::Welcome => self.welcome_view(&colors, cx).into_any_element(),
             ShellState::Loading(path) => loading_view(path, &colors).into_any_element(),
@@ -47,7 +40,6 @@ impl Render for GitronimoApp {
             .on_action(cx.listener(Self::navigate_forward))
             .on_action(cx.listener(Self::toggle_appearance))
             .on_action(cx.listener(Self::widen_sidebar))
-            .on_action(cx.listener(Self::widen_inspector))
             .on_drop(cx.listener(Self::dropped_paths))
             .child(self.workspace_toolbar(&colors, cx))
             .child(
@@ -59,24 +51,9 @@ impl Render for GitronimoApp {
                         div()
                             .flex_1()
                             .h_full()
-                            .p_6()
                             .child(content)
                             .children(self.shortcut_reference_view(&colors, cx)),
-                    )
-                    .when(show_inspector, |this| {
-                        this.child(
-                            div()
-                                .w(px(inspector_width))
-                                .h_full()
-                                .p_4()
-                                .bg(colors.panel_background)
-                                .border_l_1()
-                                .border_color(colors.border)
-                                .child("Diagnostics")
-                                .child(self.diagnostics.clone())
-                                .child("One repository window opens per selection."),
-                        )
-                    }),
+                    ),
             )
             .child(
                 div()

@@ -1,12 +1,12 @@
-//! Left sidebar: workspace navigation, status badges, and ref trees.
+//! Left sidebar: source-list navigation, status badges, and ref trees.
 
-use gpui::{AnyElement, div, prelude::*, px};
+use gpui::{AnyElement, ClickEvent, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
-use git_domain::{HeadStatus, NamedRef};
+use git_domain::NamedRef;
 
+use crate::actions::OpenRepository;
 use crate::app_state::{GitronimoApp, RefContext, RefKind};
-use crate::views::components::file_action_button;
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -17,78 +17,118 @@ impl GitronimoApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         if matches!(self.state, crate::app_state::ShellState::Welcome) {
-            return welcome_sidebar_view(width, colors);
+            return welcome_sidebar_view(self, width, colors, cx);
         }
         let groups = self.status_groups();
-        let branch = self.working_copy.as_ref().map_or_else(
-            || "Branch: loading…".to_owned(),
-            |status| match &status.branch.head {
-                HeadStatus::Branch(name) => format!("Branch: {}", String::from_utf8_lossy(&name.0)),
-                HeadStatus::Detached => "Branch: detached HEAD".into(),
-                HeadStatus::Unborn => "Branch: unborn".into(),
-                HeadStatus::Unknown => "Branch: unknown".into(),
-            },
-        );
-        let upstream = self.working_copy.as_ref().and_then(|status| {
-            status.branch.upstream.as_ref().map(|upstream| {
-                format!(
-                    "Upstream: {} (+{}/-{})",
-                    String::from_utf8_lossy(&upstream.0),
-                    status.branch.ahead,
-                    status.branch.behind
-                )
-            })
-        });
+        let groups_total = groups.staged.len()
+            + groups.unstaged.len()
+            + groups.untracked.len()
+            + groups.conflicts.len();
         div()
             .w(px(width))
             .h_full()
-            .p_4()
             .flex()
             .flex_col()
-            .gap_2()
             .bg(colors.sidebar_background)
-            .border_r_1()
-            .border_color(colors.border)
-            .child("Workspace")
-            .child(branch)
-            .children(upstream)
+            .child(self.repositories_section(colors, cx))
+            .child(self.services_section(colors, cx))
             .child(
                 div()
-                    .id("sidebar-working-copy")
-                    .cursor_pointer()
-                    .on_click(cx.listener(|app, _, _, cx| {
-                        app.navigate_to(crate::app_state::RepositoryView::WorkingCopy, cx);
-                    }))
-                    .child("Working Copy"),
+                    .px_3()
+                    .pt_3()
+                    .pb_2()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child("Workspace"),
             )
-            .child(status_badge("Staged", groups.staged.len(), colors))
-            .child(status_badge("Unstaged", groups.unstaged.len(), colors))
-            .child(status_badge("Untracked", groups.untracked.len(), colors))
-            .child(status_badge("Conflicts", groups.conflicts.len(), colors))
+            .child(nav_row_with_badge(
+                "Working Copy",
+                "📂",
+                "sidebar-working-copy",
+                self.repository_view == crate::app_state::RepositoryView::WorkingCopy,
+                if groups_total > 0 {
+                    Some(groups_total.to_string())
+                } else {
+                    None
+                },
+                colors,
+                cx,
+                |app, _, cx| {
+                    app.navigate_to(crate::app_state::RepositoryView::WorkingCopy, cx);
+                },
+            ))
+            .child(nav_row(
+                "History",
+                "🕐",
+                "sidebar-history",
+                self.repository_view == crate::app_state::RepositoryView::History,
+                colors,
+                cx,
+                |app, _, cx| {
+                    app.navigate_to(crate::app_state::RepositoryView::History, cx);
+                },
+            ))
+            .child(nav_row(
+                "Stashes",
+                "📦",
+                "sidebar-stashes",
+                self.repository_view == crate::app_state::RepositoryView::Stashes,
+                colors,
+                cx,
+                |app, _, cx| {
+                    if let crate::app_state::ShellState::Repository(repository) = &app.state {
+                        app.show_stashes(repository.clone(), cx);
+                    }
+                },
+            ))
+            .child(nav_row(
+                "Pull Requests",
+                "🔀",
+                "sidebar-pull-requests",
+                self.repository_view == crate::app_state::RepositoryView::PullRequests,
+                colors,
+                cx,
+                |app, _, cx| {
+                    if let Some(repo) = app.pull_request_repository.clone() {
+                        app.show_pull_requests(repo, cx);
+                    } else {
+                        app.navigate_to(crate::app_state::RepositoryView::PullRequests, cx);
+                    }
+                },
+            ))
+            .child(nav_row(
+                "Reflog",
+                "📋",
+                "sidebar-reflog",
+                self.repository_view == crate::app_state::RepositoryView::Reflog,
+                colors,
+                cx,
+                |app, _, cx| {
+                    if let crate::app_state::ShellState::Repository(repository) = &app.state {
+                        app.show_reflog(repository.clone(), cx);
+                    }
+                },
+            ))
+            .child(nav_row(
+                "Settings",
+                "⚙",
+                "sidebar-settings",
+                self.repository_view == crate::app_state::RepositoryView::Services,
+                colors,
+                cx,
+                |app, _, cx| {
+                    app.show_services(cx);
+                },
+            ))
             .child(
                 div()
-                    .id("sidebar-history")
-                    .cursor_pointer()
-                    .on_click(cx.listener(|app, _, _, cx| {
-                        app.navigate_to(crate::app_state::RepositoryView::History, cx);
-                    }))
-                    .child("History"),
+                    .px_3()
+                    .pt_4()
+                    .pb_2()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child("Branches"),
             )
-            .child(
-                div()
-                    .id("sidebar-stashes")
-                    .flex()
-                    .justify_between()
-                    .cursor_pointer()
-                    .on_click(cx.listener(|app, _, _, cx| {
-                        if let crate::app_state::ShellState::Repository(repository) = &app.state {
-                            app.show_stashes(repository.clone(), cx);
-                        }
-                    }))
-                    .child("Stashes")
-                    .child(self.stashes.len().to_string()),
-            )
-            .child("Local branches")
             .children(self.ref_rows(
                 "local",
                 &self.refs.local_branches,
@@ -96,7 +136,15 @@ impl GitronimoApp {
                 colors,
                 cx,
             ))
-            .child("Remote branches")
+            .child(
+                div()
+                    .px_3()
+                    .pt_2()
+                    .pb_2()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child("Remote"),
+            )
             .children(self.ref_rows(
                 "remote",
                 &self.refs.remote_branches,
@@ -104,43 +152,27 @@ impl GitronimoApp {
                 colors,
                 cx,
             ))
-            .child("Tags")
+            .child(
+                div()
+                    .px_3()
+                    .pt_4()
+                    .pb_2()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child("Tags"),
+            )
             .children(self.ref_rows("tag", &self.refs.tags, RefKind::Tag, colors, cx))
-            .child(
-                div()
-                    .id("sidebar-remotes")
-                    .flex()
-                    .justify_between()
-                    .cursor_pointer()
-                    .on_click(cx.listener(|app, _, _, cx| {
-                        app.show_remotes(cx);
-                    }))
-                    .child("Remotes")
-                    .child(self.refs.remotes.len().to_string()),
-            )
-            .child(
-                div()
-                    .id("sidebar-lfs")
-                    .flex()
-                    .justify_between()
-                    .cursor_pointer()
-                    .on_click(cx.listener(|app, _, _, cx| {
-                        if let crate::app_state::ShellState::Repository(repository) = &app.state {
-                            app.show_lfs(repository.clone(), cx);
-                        }
-                    }))
-                    .child("Git LFS")
-                    .child(self.lfs.len().to_string()),
-            )
-            .child(
-                div()
-                    .id("sidebar-services")
-                    .cursor_pointer()
-                    .on_click(cx.listener(|app, _, _, cx| {
-                        app.show_services(cx);
-                    }))
-                    .child("Services"),
-            )
+            .child(nav_row(
+                "Remotes",
+                "🌐",
+                "sidebar-remotes",
+                self.repository_view == crate::app_state::RepositoryView::Remotes,
+                colors,
+                cx,
+                |app, _, cx| {
+                    app.show_remotes(cx);
+                },
+            ))
             .children(
                 self.refs
                     .remotes
@@ -151,12 +183,18 @@ impl GitronimoApp {
                             let context = RefContext::Remote(name.clone());
                             div()
                                 .id(("remote-ref", index))
-                                .pl_2()
+                                .px_3()
+                                .pl_6()
+                                .h(px(22.0))
+                                .flex()
+                                .items_center()
+                                .text_sm()
                                 .cursor_pointer()
                                 .on_click(cx.listener(move |app, _, _, cx| {
                                     app.select_ref_context(context.clone(), cx);
                                 }))
                                 .child(name)
+                                .into_any_element()
                         })
                     }),
             )
@@ -174,13 +212,14 @@ impl GitronimoApp {
         Some(
             div()
                 .mt_auto()
+                .mx_3()
+                .mb_3()
                 .p_2()
                 .flex()
                 .flex_col()
                 .gap_1()
                 .bg(colors.raised_background)
-                .border_1()
-                .border_color(colors.border)
+                .rounded(px(4.0))
                 .child(
                     div()
                         .text_sm()
@@ -193,7 +232,7 @@ impl GitronimoApp {
                         .text_color(colors.text_secondary)
                         .child("Running in the background — you can cancel it."),
                 )
-                .child(file_action_button(
+                .child(crate::views::components::file_action_button(
                     "Cancel network operation",
                     colors,
                     cx,
@@ -203,6 +242,67 @@ impl GitronimoApp {
                 ))
                 .into_any_element(),
         )
+    }
+
+    #[allow(clippy::unused_self)]
+    fn repositories_section(
+        &self,
+        colors: &ThemeColors,
+        _cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        div()
+            .px_3()
+            .pt_3()
+            .pb_2()
+            .text_xs()
+            .text_color(colors.text_muted)
+            .child("Repositories")
+            .into_any_element()
+    }
+
+    #[allow(clippy::unused_self)]
+    fn services_section(&self, colors: &ThemeColors, _cx: &mut gpui::Context<Self>) -> AnyElement {
+        let mut children = Vec::new();
+        if let Some(account) = &self.service_account {
+            children.push(
+                div()
+                    .px_3()
+                    .py_2()
+                    .h(px(24.0))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_sm()
+                    .cursor_pointer()
+                    .child("\u{1F310}")
+                    .child(account.login.clone())
+                    .into_any_element(),
+            );
+        }
+        if children.is_empty() {
+            children.push(
+                div()
+                    .px_3()
+                    .py_2()
+                    .h(px(24.0))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_sm()
+                    .text_color(colors.text_muted)
+                    .child("\u{2795}")
+                    .child("Add Service")
+                    .into_any_element(),
+            );
+        }
+        div()
+            .px_3()
+            .pt_4()
+            .pb_2()
+            .text_xs()
+            .text_color(colors.text_muted)
+            .child("Services")
+            .into_any_element()
     }
 
     fn ref_rows(
@@ -245,6 +345,11 @@ impl GitronimoApp {
                     rows.push(
                         div()
                             .id((group_id_prefix, rows.len()))
+                            .h(px(22.0))
+                            .px_3()
+                            .flex()
+                            .items_center()
+                            .text_sm()
                             .text_color(colors.text_secondary)
                             .cursor_pointer()
                             .on_click(cx.listener(move |app, _, _, cx| {
@@ -265,7 +370,12 @@ impl GitronimoApp {
                 rows.push(
                     div()
                         .id((id_prefix, rows.len()))
+                        .h(px(22.0))
+                        .px_3()
                         .pl(px(f32::from(indent)))
+                        .flex()
+                        .items_center()
+                        .text_sm()
                         .cursor_pointer()
                         .on_click(cx.listener(move |app, _, _, cx| {
                             app.select_ref_context(context.clone(), cx);
@@ -279,62 +389,181 @@ impl GitronimoApp {
     }
 }
 
-fn status_badge(label: &'static str, count: usize, colors: &ThemeColors) -> AnyElement {
+fn nav_row(
+    label: &'static str,
+    icon: &'static str,
+    id: &'static str,
+    active: bool,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &ClickEvent, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> AnyElement {
     div()
+        .id(id)
+        .h(px(24.0))
+        .px_3()
         .flex()
-        .justify_between()
-        .text_color(colors.text_secondary)
+        .items_center()
+        .gap_2()
+        .text_sm()
+        .bg(if active {
+            colors.selection
+        } else {
+            colors.sidebar_background
+        })
+        .rounded(px(4.0))
+        .cursor_pointer()
+        .on_click(cx.listener(move |app, event, _, cx| on_click(app, event, cx)))
+        .child(div().text_xs().text_color(colors.text_muted).child(icon))
         .child(label)
-        .child(count.to_string())
         .into_any_element()
 }
 
-fn welcome_sidebar_view(width: f32, colors: &ThemeColors) -> AnyElement {
+#[allow(clippy::too_many_arguments)]
+fn nav_row_with_badge(
+    label: &'static str,
+    icon: &'static str,
+    id: &'static str,
+    active: bool,
+    badge: Option<String>,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &ClickEvent, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> AnyElement {
+    div()
+        .id(id)
+        .h(px(24.0))
+        .px_3()
+        .flex()
+        .items_center()
+        .gap_2()
+        .text_sm()
+        .bg(if active {
+            colors.selection
+        } else {
+            colors.sidebar_background
+        })
+        .rounded(px(4.0))
+        .cursor_pointer()
+        .on_click(cx.listener(move |app, event, _, cx| on_click(app, event, cx)))
+        .child(div().text_xs().text_color(colors.text_muted).child(icon))
+        .child(label)
+        .children(badge.map(|text| {
+            div()
+                .ml_auto()
+                .px_1p5()
+                .py_0p5()
+                .rounded(px(4.0))
+                .bg(colors.accent)
+                .text_xs()
+                .text_color(colors.panel_background)
+                .child(text)
+                .into_any_element()
+        }))
+        .into_any_element()
+}
+
+fn welcome_sidebar_view(
+    app: &GitronimoApp,
+    width: f32,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+) -> AnyElement {
+    let mut repositories = Vec::new();
+    for (index, path) in app.recents.iter().enumerate() {
+        let path = path.clone();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("Repository")
+            .to_owned();
+        let selected = app.selected_recent == Some(index);
+        repositories.push(
+            div()
+                .id(("welcome-repository", index))
+                .h(px(24.0))
+                .px_3()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_sm()
+                .bg(if selected {
+                    colors.selection
+                } else {
+                    colors.sidebar_background
+                })
+                .rounded(px(4.0))
+                .cursor_pointer()
+                .on_click(cx.listener(move |app, event: &ClickEvent, window, cx| {
+                    app.select_recent(index, cx);
+                    if event.click_count() >= 2 {
+                        app.open_recent(path.clone(), window, cx);
+                    }
+                }))
+                .child("📁")
+                .child(name)
+                .into_any_element(),
+        );
+    }
     div()
         .w(px(width))
         .h_full()
-        .p_4()
         .flex()
         .flex_col()
-        .gap_3()
         .bg(colors.sidebar_background)
-        .border_r_1()
-        .border_color(colors.border)
-        .child(div().text_lg().child("Workspace"))
         .child(
             div()
-                .text_color(colors.text_secondary)
-                .child("Open a repository to start reviewing changes, history, and remotes."),
-        )
-        .child(
-            div()
-                .mt_4()
+                .px_3()
+                .pt_3()
+                .pb_2()
+                .text_xs()
                 .text_color(colors.text_muted)
-                .child("Quick start"),
+                .child("Repositories"),
         )
         .child(
             div()
+                .px_3()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .children(repositories),
+        )
+        .child(
+            div()
+                .mt_auto()
                 .p_3()
-                .bg(colors.raised_background)
-                .border_1()
-                .border_color(colors.border)
-                .child("Open a local repository")
+                .flex()
+                .gap_1()
                 .child(
                     div()
-                        .mt_1()
-                        .text_sm()
-                        .text_color(colors.text_secondary)
-                        .child("Command-O or drag a folder into this window"),
-                ),
+                        .id("welcome-add-repository")
+                        .px_2()
+                        .py_1()
+                        .bg(colors.raised_background)
+                        .rounded(px(4.0))
+                        .cursor_pointer()
+                        .on_click(cx.listener(|_, _, window, cx| {
+                            window.dispatch_action(Box::new(OpenRepository), cx);
+                        }))
+                        .child("Add")
+                        .into_any_element(),
+                )
+                .child(crate::views::components::file_action_button(
+                    "Create",
+                    colors,
+                    cx,
+                    |app, cx| {
+                        app.prompt_create_repository(cx);
+                    },
+                ))
+                .child(crate::views::components::file_action_button(
+                    "Clone",
+                    colors,
+                    cx,
+                    |app, cx| {
+                        app.prompt_clone_repository(cx);
+                    },
+                )),
         )
-        .child(
-            div()
-                .mt_4()
-                .text_color(colors.text_muted)
-                .child("Available here"),
-        )
-        .child("Working copy and file diffs")
-        .child("History and local branches")
-        .child("Configured remotes")
         .into_any_element()
 }
