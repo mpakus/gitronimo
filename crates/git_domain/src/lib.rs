@@ -732,6 +732,8 @@ pub struct GraphState {
 pub struct GraphRow {
     pub lane: usize,
     pub parent_lanes: Vec<usize>,
+    /// Lane indexes that should draw a through-line on this row.
+    pub active_lanes: Vec<usize>,
     pub octopus: bool,
 }
 
@@ -749,6 +751,7 @@ pub fn layout_history_graph(commits: &[HistoryCommit], state: &mut GraphState) -
                     state.lanes.insert(0, commit.oid.clone());
                     0
                 });
+            let active_lanes = (0..state.lanes.len()).collect::<Vec<_>>();
             let mut parent_lanes = Vec::new();
             if let Some(first_parent) = commit.parents.first() {
                 state.lanes[lane].clone_from(first_parent);
@@ -771,6 +774,7 @@ pub fn layout_history_graph(commits: &[HistoryCommit], state: &mut GraphState) -
             GraphRow {
                 lane,
                 parent_lanes,
+                active_lanes,
                 octopus: commit.parents.len() > 2,
             }
         })

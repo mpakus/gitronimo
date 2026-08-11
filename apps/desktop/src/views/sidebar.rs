@@ -109,7 +109,9 @@ impl GitronimoApp {
                 colors,
                 cx,
                 |app, _, cx| {
-                    app.navigate_to(crate::app_state::RepositoryView::History, cx);
+                    if let crate::app_state::ShellState::Repository(repository) = &app.state {
+                        app.show_history(repository.clone(), cx);
+                    }
                 },
             ))
             .child(nav_row(
@@ -123,48 +125,6 @@ impl GitronimoApp {
                 |app, _, cx| {
                     if let crate::app_state::ShellState::Repository(repository) = &app.state {
                         app.show_stashes(repository.clone(), cx);
-                    }
-                },
-            ))
-            .child(nav_row(
-                "Pull Requests",
-                IconKind::PullRequests,
-                "sidebar-pull-requests",
-                self.repository_view == crate::app_state::RepositoryView::PullRequests,
-                None,
-                colors,
-                cx,
-                |app, _, cx| {
-                    if let Some(repo) = app.pull_request_repository.clone() {
-                        app.show_pull_requests(repo, cx);
-                    } else {
-                        app.navigate_to(crate::app_state::RepositoryView::PullRequests, cx);
-                    }
-                },
-            ))
-            .child(nav_row(
-                "Branches Review",
-                IconKind::BranchesReview,
-                "sidebar-branches-review",
-                self.repository_view == crate::app_state::RepositoryView::BranchesReview,
-                None,
-                colors,
-                cx,
-                |app, _, cx| {
-                    app.navigate_to(crate::app_state::RepositoryView::BranchesReview, cx);
-                },
-            ))
-            .child(nav_row(
-                "Reflog",
-                IconKind::Reflog,
-                "sidebar-reflog",
-                self.repository_view == crate::app_state::RepositoryView::Reflog,
-                None,
-                colors,
-                cx,
-                |app, _, cx| {
-                    if let crate::app_state::ShellState::Repository(repository) = &app.state {
-                        app.show_reflog(repository.clone(), cx);
                     }
                 },
             ))

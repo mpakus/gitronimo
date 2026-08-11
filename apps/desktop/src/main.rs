@@ -405,12 +405,12 @@ impl GitronimoApp {
             history: Vec::new(),
             history_rows: Vec::new(),
             history_state: GraphState::default(),
-            history_reference: HistoryReference::Current,
+            history_reference: HistoryReference::All,
             history_next: None,
             history_decorations: Vec::new(),
             selected_history: None,
             history_search: String::new(),
-            history_list_state: ListState::new(0, ListAlignment::Top, px(56.0)),
+            history_list_state: ListState::new(0, ListAlignment::Top, px(72.0)),
             history_paths: Vec::new(),
             history_diff: None,
             history_selection_token: 0,
@@ -628,12 +628,12 @@ impl GitronimoApp {
             history: Vec::new(),
             history_rows: Vec::new(),
             history_state: GraphState::default(),
-            history_reference: HistoryReference::Current,
+            history_reference: HistoryReference::All,
             history_next: None,
             history_decorations: Vec::new(),
             selected_history: None,
             history_search: String::new(),
-            history_list_state: ListState::new(0, ListAlignment::Top, px(56.0)),
+            history_list_state: ListState::new(0, ListAlignment::Top, px(72.0)),
             history_paths: Vec::new(),
             history_diff: None,
             history_selection_token: 0,
@@ -844,7 +844,7 @@ impl GitronimoApp {
                 self.history.clear();
                 self.history_rows.clear();
                 self.history_state = GraphState::default();
-                self.history_reference = HistoryReference::Current;
+                self.history_reference = HistoryReference::All;
                 self.history_next = None;
                 self.history_decorations.clear();
                 self.selected_history = None;
@@ -1728,7 +1728,8 @@ return remote_url & linefeed & parent_path"#;
             }
             ChoicePromptKind::SetMergeTool
             | ChoicePromptKind::MergePullRequest { .. }
-            | ChoicePromptKind::BookmarkFolderActions { .. } => {
+            | ChoicePromptKind::BookmarkFolderActions { .. }
+            | ChoicePromptKind::HistoryFilter => {
                 let options = kind.filtered_options(&self.choice_prompt_query);
                 let Some((_, label)) = options
                     .get(
@@ -1808,6 +1809,39 @@ return remote_url & linefeed & parent_path"#;
                     _ => {}
                 }
                 cx.notify();
+            }
+            ChoicePromptKind::HistoryFilter => {
+                self.pending_choice_prompt = None;
+                self.choice_prompt_query.clear();
+                self.choice_prompt_selected = 0;
+                let ShellState::Repository(repository) = &self.state else {
+                    return;
+                };
+                let repository = repository.clone();
+                match label {
+                    "Current branch" => {
+                        self.change_history_reference(HistoryReference::Current, repository, cx);
+                    }
+                    "All refs" => {
+                        self.change_history_reference(HistoryReference::All, repository, cx);
+                    }
+                    "Branch or tag…" => {
+                        self.prompt_history_reference(cx);
+                    }
+                    "Search history…" => {
+                        self.prompt_history_search(cx);
+                    }
+                    "Reveal HEAD" => {
+                        self.reveal_history_head(cx);
+                    }
+                    "Copy selected OID" => {
+                        self.copy_selected_history_oid(cx);
+                    }
+                    "New branch from commit…" => {
+                        self.prompt_branch_from_selected(cx);
+                    }
+                    _ => {}
+                }
             }
         }
     }
@@ -1950,7 +1984,7 @@ return remote_url & linefeed & parent_path"#;
         self.select_history_commit(index, repository.clone(), cx);
     }
 
-    fn show_history(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
+    pub(crate) fn show_history(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
         self.navigate_to(RepositoryView::History, cx);
         if self.history.is_empty() {
             self.load_history(repository, None, cx);

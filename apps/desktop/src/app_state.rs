@@ -169,6 +169,7 @@ pub(crate) enum ChoicePromptKind {
     BookmarkFolderActions {
         id: String,
     },
+    HistoryFilter,
 }
 
 pub(crate) const MERGE_TOOL_CHOICES: &[&str] = &["opendiff", "meld", "kdiff3", "vimdiff", "bc3"];
@@ -177,6 +178,16 @@ pub(crate) const PR_MERGE_METHOD_CHOICES: &[(&str, git_domain::MergeMethod)] = &
     ("Merge commit", git_domain::MergeMethod::Merge),
     ("Squash", git_domain::MergeMethod::Squash),
     ("Rebase", git_domain::MergeMethod::Rebase),
+];
+
+pub(crate) const HISTORY_FILTER_CHOICES: &[&str] = &[
+    "Current branch",
+    "All refs",
+    "Branch or tag…",
+    "Search history…",
+    "Reveal HEAD",
+    "Copy selected OID",
+    "New branch from commit…",
 ];
 
 impl ChoicePromptKind {
@@ -195,6 +206,7 @@ impl ChoicePromptKind {
                 format!("Merge pull request #{number} using {label}?")
             }
             Self::BookmarkFolderActions { .. } => "Group".into(),
+            Self::HistoryFilter => "History filter".into(),
         }
     }
 
@@ -207,6 +219,7 @@ impl ChoicePromptKind {
                 .collect(),
             Self::ConfirmMergePullRequest { .. } => Vec::new(),
             Self::BookmarkFolderActions { .. } => vec!["Rename…", "Delete Group"],
+            Self::HistoryFilter => HISTORY_FILTER_CHOICES.to_vec(),
         }
     }
 

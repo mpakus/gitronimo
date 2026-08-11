@@ -788,6 +788,56 @@ pub(crate) fn relative_time(timestamp: i64) -> String {
     }
 }
 
+/// Calendar date as `M/D/YY` (UTC).
+pub(crate) fn short_calendar_date(timestamp: i64) -> String {
+    let (year, month, day) = civil_ymd(timestamp);
+    let yy = year.rem_euclid(100);
+    format!("{month}/{day}/{yy:02}")
+}
+
+/// Month group label such as `AUGUST 2026` (UTC).
+pub(crate) fn month_group_label(timestamp: i64) -> String {
+    const MONTHS: [&str; 12] = [
+        "JANUARY",
+        "FEBRUARY",
+        "MARCH",
+        "APRIL",
+        "MAY",
+        "JUNE",
+        "JULY",
+        "AUGUST",
+        "SEPTEMBER",
+        "OCTOBER",
+        "NOVEMBER",
+        "DECEMBER",
+    ];
+    let (year, month, _) = civil_ymd(timestamp);
+    let name = MONTHS
+        .get((month as usize).saturating_sub(1))
+        .copied()
+        .unwrap_or("UNKNOWN");
+    format!("{name} {year}")
+}
+
+fn civil_ymd(timestamp: i64) -> (i32, u32, u32) {
+    let days = timestamp.div_euclid(86_400);
+    // Howard Hinnant civil_from_days (UTC).
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 }.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    let year = i32::try_from(y).unwrap_or(1970);
+    let month = u32::try_from(m).unwrap_or(1).clamp(1, 12);
+    let day = u32::try_from(d).unwrap_or(1).clamp(1, 31);
+    (year, month, day)
+}
+
 pub(crate) struct ActionTooltip {
     pub label: &'static str,
     pub colors: ThemeColors,

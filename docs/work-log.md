@@ -1,5 +1,35 @@
 # Implementation work log
 
+## 2026-08-11 — History list full-width flat Tower rows
+
+**Intent:** Match Tower central History list: no per-row card backgrounds (only selected row highlighted); rows span full pane width; branch/ref pills stay readable (contrast + truncate, don’t crush into subject).
+
+**Files:** `docs/work-log.md`, `apps/desktop/src/views/history.rs`.
+
+**Acceptance:** unselected rows transparent/full-bleed; selected = accent full width; ref pills readable; no floating grey cards.
+
+**Done:** rows `w_full` with bg only when selected; month headers flat; ref pills high-contrast + truncated; gates pass.
+
+## 2026-08-11 — History central list match Tower rows
+
+**Intent:** Central History commit list must match Tower: multi-lane colored graph + node dots; two-line rows (author/date over hash+subject+ref pills); solid accent selection with inverted text. Approach adapted from rgitui graph paint (MIT).
+
+**Files:** `docs/work-log.md`, `crates/git_domain` (`GraphRow.active_lanes`), `apps/desktop/src/views/history.rs`.
+
+**Acceptance:** Graph shows colored lanes/nodes; row layout is two-line Tower style; selection is accent blue; central list reads like Tower screenshot.
+
+**Done:** `GraphRow.active_lanes`; multi-color through-lanes + node dots (rgitui MIT approach); two-line author/date + hash/subject/pills; accent selection.
+
+## 2026-08-11 — History Tower layout + trim workspace nav
+
+**Intent:** History should match the Tower-style commit list + detail inspector (scope header, month groups, denser rows with ref pills, Changeset/Tree detail). Remove Pull Requests, Branches Review, and Reflog from the left sidebar (keep enum/palette so nothing breaks).
+
+**Files:** `docs/work-log.md`, `apps/desktop/src/views/history.rs`, `apps/desktop/src/views/sidebar.rs`, `apps/desktop/src/views/components.rs` (date helpers), `app_state.rs` / `main.rs` / `workspace.rs` only if filter choice prompt is needed.
+
+**Acceptance:** History fills the pane with list+detail; scope header instead of action-button strip; sidebar workspace is Working Copy / History / Stashes / Settings; PRs/Branches Review/Reflog still reachable from palette; gates + relaunch.
+
+**Done:** History list fills pane (flex_1/h_full); scope header + Filter choice; month groups, denser rows, ref pills, Changeset detail; sidebar trimmed; `show_history` from sidebar; default scope All refs.
+
 ## 2026-08-11 — Branch actions as right-click popup
 
 **Intent:** Working Copy should stay Tower-like (composer + files only). The inline “Local branch: …” action panel must become a right-click context popup on sidebar branches/remotes/tags (Tower pattern), not replace the WC pane.
