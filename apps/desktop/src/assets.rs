@@ -44,6 +44,17 @@ impl AssetSource for DesktopAssets {
             "icons/arrow-uturn-right.svg" => {
                 include_bytes!("../assets/icons/arrow-uturn-right.svg").as_slice()
             }
+            "icons/clock.svg" => include_bytes!("../assets/icons/clock.svg").as_slice(),
+            "icons/cog-6-tooth.svg" => include_bytes!("../assets/icons/cog-6-tooth.svg").as_slice(),
+            "icons/tag.svg" => include_bytes!("../assets/icons/tag.svg").as_slice(),
+            "icons/document-text.svg" => {
+                include_bytes!("../assets/icons/document-text.svg").as_slice()
+            }
+            "icons/arrows-right-left.svg" => {
+                include_bytes!("../assets/icons/arrows-right-left.svg").as_slice()
+            }
+            "icons/scale.svg" => include_bytes!("../assets/icons/scale.svg").as_slice(),
+            "icons/branch.svg" => include_bytes!("../assets/icons/branch.svg").as_slice(),
             _ => return Ok(None),
         };
         Ok(Some(Cow::Borrowed(bytes)))
@@ -67,6 +78,13 @@ impl AssetSource for DesktopAssets {
             "icons/arrow-up-tray.svg",
             "icons/arrow-uturn-left.svg",
             "icons/arrow-uturn-right.svg",
+            "icons/clock.svg",
+            "icons/cog-6-tooth.svg",
+            "icons/tag.svg",
+            "icons/document-text.svg",
+            "icons/arrows-right-left.svg",
+            "icons/scale.svg",
+            "icons/branch.svg",
         ];
         Ok(all
             .into_iter()

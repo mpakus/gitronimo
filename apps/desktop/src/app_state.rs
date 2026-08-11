@@ -166,7 +166,6 @@ pub(crate) enum ChoicePromptKind {
         number: u64,
         method: git_domain::MergeMethod,
     },
-    WelcomeSidebarPlus,
     BookmarkFolderActions {
         id: String,
     },
@@ -195,7 +194,6 @@ impl ChoicePromptKind {
                 };
                 format!("Merge pull request #{number} using {label}?")
             }
-            Self::WelcomeSidebarPlus => "Bookmarks".into(),
             Self::BookmarkFolderActions { .. } => "Group".into(),
         }
     }
@@ -208,7 +206,6 @@ impl ChoicePromptKind {
                 .map(|(label, _)| *label)
                 .collect(),
             Self::ConfirmMergePullRequest { .. } => Vec::new(),
-            Self::WelcomeSidebarPlus => vec!["Add Repository…", "New Group…"],
             Self::BookmarkFolderActions { .. } => vec!["Rename…", "Delete Group"],
         }
     }
@@ -384,6 +381,9 @@ pub(crate) struct GitronimoApp {
     #[allow(dead_code)]
     pub search_focus_handle: FocusHandle,
     pub commit_subject_focused: bool,
+    pub commit_body_focused: bool,
+    /// Tower-like commit card: details (body/options/author) shown when expanded.
+    pub commit_composer_expanded: bool,
     pub network_progress: f32,
     pub last_network_result: Option<String>,
     pub activity: String,
@@ -421,6 +421,10 @@ pub(crate) struct GitronimoApp {
     pub commit_subject: String,
     pub commit_body: String,
     pub commit_amend: bool,
+    /// Short oid of HEAD while amend is armed (shown beside the checkbox).
+    pub commit_amend_short_oid: Option<String>,
+    /// Subject/body restored when amend is turned off.
+    pub commit_pre_amend_draft: Option<(String, String)>,
     pub commit_sign_off: bool,
     pub author_identity: String,
     pub repository_view: RepositoryView,
@@ -502,7 +506,8 @@ pub(crate) struct GitronimoApp {
     pub command_palette_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub choice_prompt_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub show_quick_open: bool,
-    pub commit_options_expanded: bool,
+    /// Anchored Tower-style menu from the welcome sidebar footer `+` button.
+    pub welcome_plus_menu_open: bool,
     pub last_commit_summary: Option<String>,
     pub file_diff_stats: std::collections::HashMap<git_domain::GitPath, (usize, usize)>,
 }

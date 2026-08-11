@@ -36,8 +36,8 @@ use git_domain::{
     WorktreeRepository, layout_history_graph,
 };
 use gpui::{
-    App, Application, Bounds, ClipboardItem, Context, ExternalPaths, ListAlignment, ListState,
-    PathPromptOptions, Window, WindowBounds, WindowOptions, point, prelude::*, px, size,
+    App, Application, Bounds, ClipboardItem, Context, ExternalPaths, Focusable, ListAlignment,
+    ListState, PathPromptOptions, Window, WindowBounds, WindowOptions, point, prelude::*, px, size,
 };
 use hosting_github::GitHubService;
 use notify::{RecursiveMode, Watcher};
@@ -355,6 +355,8 @@ impl GitronimoApp {
             worktree_file_search: String::new(),
             search_focus_handle: cx.focus_handle(),
             commit_subject_focused: false,
+            commit_body_focused: false,
+            commit_composer_expanded: false,
             network_progress: 0.0,
             last_network_result: None,
             activity: "Choose a repository to begin.".into(),
@@ -392,6 +394,8 @@ impl GitronimoApp {
             commit_subject: String::new(),
             commit_body: String::new(),
             commit_amend: false,
+            commit_amend_short_oid: None,
+            commit_pre_amend_draft: None,
             commit_sign_off: false,
             author_identity: "Loading author identity…".into(),
             repository_view: RepositoryView::WorkingCopy,
@@ -473,12 +477,13 @@ impl GitronimoApp {
             command_palette_input,
             choice_prompt_input,
             show_quick_open: false,
-            commit_options_expanded: false,
+            welcome_plus_menu_open: false,
             last_commit_summary: None,
             file_diff_stats: std::collections::HashMap::new(),
         };
         app.observe_system_appearance(window, cx);
         app.observe_window_geometry(window, cx);
+        app.observe_commit_composer_focus(window, cx);
         Self::load_diagnostics(cx);
         if app.selected_recent.is_some() {
             app.refresh_welcome_snapshot(cx);
@@ -573,6 +578,8 @@ impl GitronimoApp {
             worktree_file_search: String::new(),
             search_focus_handle: cx.focus_handle(),
             commit_subject_focused: false,
+            commit_body_focused: false,
+            commit_composer_expanded: false,
             network_progress: 0.0,
             last_network_result: None,
             activity,
@@ -610,6 +617,8 @@ impl GitronimoApp {
             commit_subject: String::new(),
             commit_body: String::new(),
             commit_amend: false,
+            commit_amend_short_oid: None,
+            commit_pre_amend_draft: None,
             commit_sign_off: false,
             author_identity: "Loading author identity…".into(),
             repository_view: RepositoryView::WorkingCopy,
@@ -691,12 +700,13 @@ impl GitronimoApp {
             command_palette_input,
             choice_prompt_input,
             show_quick_open: false,
-            commit_options_expanded: false,
+            welcome_plus_menu_open: false,
             last_commit_summary: None,
             file_diff_stats: std::collections::HashMap::new(),
         };
         app.observe_system_appearance(window, cx);
         app.observe_window_geometry(window, cx);
+        app.observe_commit_composer_focus(window, cx);
         Self::load_diagnostics(cx);
         if let ShellState::Repository(repository) = &app.state {
             let repository = repository.clone();
@@ -730,6 +740,50 @@ impl GitronimoApp {
                     height: bounds.size.height.into(),
                 });
             }));
+    }
+
+    fn observe_commit_composer_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let subject = self.commit_subject_input.focus_handle(cx);
+        let body = self.commit_body_input.focus_handle(cx);
+        self.subscriptions
+            .push(cx.on_focus_in(&subject, window, |app, _, cx| {
+                app.commit_subject_focused = true;
+                app.commit_composer_expanded = true;
+                cx.notify();
+            }));
+        self.subscriptions
+            .push(cx.on_blur(&subject, window, |app, window, cx| {
+                app.commit_subject_focused = false;
+                // Defer so Amend/Sign-off clicks can update flags before collapse.
+                cx.defer_in(window, |app, _, cx| {
+                    app.sync_commit_composer_expanded(cx);
+                });
+            }));
+        self.subscriptions
+            .push(cx.on_focus_in(&body, window, |app, _, cx| {
+                app.commit_body_focused = true;
+                app.commit_composer_expanded = true;
+                cx.notify();
+            }));
+        self.subscriptions
+            .push(cx.on_blur(&body, window, |app, window, cx| {
+                app.commit_body_focused = false;
+                cx.defer_in(window, |app, _, cx| {
+                    app.sync_commit_composer_expanded(cx);
+                });
+            }));
+    }
+
+    fn sync_commit_composer_expanded(&mut self, cx: &mut Context<Self>) {
+        let keep_open = self.commit_subject_focused
+            || self.commit_body_focused
+            || self.commit_amend
+            || !self.commit_subject.trim().is_empty()
+            || !self.commit_body.trim().is_empty();
+        if self.commit_composer_expanded != keep_open {
+            self.commit_composer_expanded = keep_open;
+            cx.notify();
+        }
     }
 
     fn load_diagnostics(cx: &mut Context<Self>) {
@@ -779,7 +833,10 @@ impl GitronimoApp {
                 self.network_operation = None;
                 self.commit_subject.clear();
                 self.commit_body.clear();
+                self.refresh_commit_inputs(cx);
                 self.commit_amend = false;
+                self.commit_amend_short_oid = None;
+                self.commit_pre_amend_draft = None;
                 self.commit_sign_off = false;
                 self.repository_view = RepositoryView::WorkingCopy;
                 self.navigation_back.clear();
@@ -852,6 +909,7 @@ impl GitronimoApp {
         if matches!(self.state, ShellState::Repository(_)) {
             self.return_to_welcome(cx);
         }
+        self.welcome_plus_menu_open = false;
         if self.welcome_shell_view == view {
             cx.notify();
             return;
@@ -1050,16 +1108,17 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
-    fn focus_composer(&mut self, _: &FocusComposer, _: &mut Window, cx: &mut Context<Self>) {
-        self.edit_commit_subject(cx);
+    fn focus_composer(&mut self, _: &FocusComposer, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_commit_subject(window, cx);
     }
 
     fn show_command_palette(&mut self, _: &CommandPalette, _: &mut Window, cx: &mut Context<Self>) {
         self.open_command_palette(cx);
     }
 
-    fn open_command_palette(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn open_command_palette(&mut self, cx: &mut Context<Self>) {
         self.show_quick_open = false;
+        self.welcome_plus_menu_open = false;
         self.pending_text_prompt = None;
         self.text_prompt_value.clear();
         self.pending_choice_prompt = None;
@@ -1306,6 +1365,7 @@ return remote_url & linefeed & parent_path"#;
     ) {
         self.show_command_palette = false;
         self.show_quick_open = false;
+        self.welcome_plus_menu_open = false;
         self.pending_choice_prompt = None;
         self.choice_prompt_query.clear();
         self.choice_prompt_selected = 0;
@@ -1570,6 +1630,7 @@ return remote_url & linefeed & parent_path"#;
     pub(crate) fn begin_choice_prompt(&mut self, kind: ChoicePromptKind, cx: &mut Context<Self>) {
         self.show_command_palette = false;
         self.show_quick_open = false;
+        self.welcome_plus_menu_open = false;
         self.pending_text_prompt = None;
         self.text_prompt_value.clear();
         self.pending_choice_prompt = Some(kind);
@@ -1577,6 +1638,54 @@ return remote_url & linefeed & parent_path"#;
         self.choice_prompt_selected = 0;
         self.pending_overlay_focus = Some(OverlayFocus::ChoicePrompt);
         cx.notify();
+    }
+
+    pub(crate) fn toggle_welcome_plus_menu(&mut self, cx: &mut Context<Self>) {
+        self.show_command_palette = false;
+        self.show_quick_open = false;
+        self.pending_choice_prompt = None;
+        self.choice_prompt_query.clear();
+        self.choice_prompt_selected = 0;
+        self.welcome_plus_menu_open = !self.welcome_plus_menu_open;
+        cx.notify();
+    }
+
+    pub(crate) fn close_welcome_plus_menu(&mut self, cx: &mut Context<Self>) {
+        if !self.welcome_plus_menu_open {
+            return;
+        }
+        self.welcome_plus_menu_open = false;
+        cx.notify();
+    }
+
+    pub(crate) fn add_repository_from_picker(&mut self, cx: &mut Context<Self>) {
+        self.welcome_plus_menu_open = false;
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose a Git repository".into()),
+        });
+        let store = self.store.clone();
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let outcome = cx
+                .background_spawn(async move { discover_and_record(&path, &store) })
+                .await;
+            let _ = this.update(cx, |app, cx| app.apply_open_outcome(outcome, cx));
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(crate) fn new_bookmark_group_from_menu(&mut self, cx: &mut Context<Self>) {
+        self.welcome_plus_menu_open = false;
+        self.begin_text_prompt(TextPromptKind::CreateBookmarkFolder, "", cx);
     }
 
     fn cancel_choice_prompt(&mut self, cx: &mut Context<Self>) {
@@ -1619,7 +1728,6 @@ return remote_url & linefeed & parent_path"#;
             }
             ChoicePromptKind::SetMergeTool
             | ChoicePromptKind::MergePullRequest { .. }
-            | ChoicePromptKind::WelcomeSidebarPlus
             | ChoicePromptKind::BookmarkFolderActions { .. } => {
                 let options = kind.filtered_options(&self.choice_prompt_query);
                 let Some((_, label)) = options
@@ -1675,40 +1783,6 @@ return remote_url & linefeed & parent_path"#;
                 self.choice_prompt_query.clear();
                 self.choice_prompt_selected = 0;
                 self.execute_merge_pull_request(*number, *method, cx);
-            }
-            ChoicePromptKind::WelcomeSidebarPlus => {
-                self.pending_choice_prompt = None;
-                self.choice_prompt_query.clear();
-                self.choice_prompt_selected = 0;
-                match label {
-                    "Add Repository…" => {
-                        let receiver = cx.prompt_for_paths(PathPromptOptions {
-                            files: false,
-                            directories: true,
-                            multiple: false,
-                            prompt: Some("Choose a Git repository".into()),
-                        });
-                        let store = self.store.clone();
-                        cx.spawn(async move |this, cx| {
-                            let Ok(Ok(Some(paths))) = receiver.await else {
-                                return;
-                            };
-                            let Some(path) = paths.into_iter().next() else {
-                                return;
-                            };
-                            let outcome = cx
-                                .background_spawn(async move { discover_and_record(&path, &store) })
-                                .await;
-                            let _ = this.update(cx, |app, cx| app.apply_open_outcome(outcome, cx));
-                        })
-                        .detach();
-                    }
-                    "New Group…" => {
-                        self.begin_text_prompt(TextPromptKind::CreateBookmarkFolder, "", cx);
-                    }
-                    _ => {}
-                }
-                cx.notify();
             }
             ChoicePromptKind::BookmarkFolderActions { id } => {
                 self.pending_choice_prompt = None;
@@ -3562,6 +3636,7 @@ return remote_url & linefeed & parent_path"#;
                 if confirmed {
                     app.commit_subject.clear();
                     app.commit_body.clear();
+                    app.refresh_commit_inputs(cx);
                     app.begin_open_path(path, window, cx);
                 } else {
                     app.activity = "Kept the unsaved commit draft.".into();
@@ -5368,18 +5443,74 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
-    fn edit_commit_subject(&mut self, cx: &mut Context<Self>) {
+    fn edit_commit_subject(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.commit_subject_focused = true;
-        cx.notify();
-    }
-    #[allow(dead_code)]
-    fn edit_commit_body(&mut self, cx: &mut Context<Self>) {
-        self.commit_options_expanded = true;
+        self.commit_composer_expanded = true;
+        window.focus(&self.commit_subject_input.focus_handle(cx));
         cx.notify();
     }
     fn toggle_commit_amend(&mut self, cx: &mut Context<Self>) {
-        self.commit_amend = !self.commit_amend;
+        if self.commit_amend {
+            self.commit_amend = false;
+            self.commit_amend_short_oid = None;
+            if let Some((subject, body)) = self.commit_pre_amend_draft.take() {
+                self.commit_subject = subject;
+                self.commit_body = body;
+                self.refresh_commit_inputs(cx);
+            }
+            self.sync_commit_composer_expanded(cx);
+            cx.notify();
+            return;
+        }
+
+        let ShellState::Repository(repository) = &self.state else {
+            self.activity = "Open a repository before amending.".into();
+            cx.notify();
+            return;
+        };
+        let repository = repository.clone();
+        self.commit_pre_amend_draft = Some((self.commit_subject.clone(), self.commit_body.clone()));
+        self.commit_amend = true;
+        self.commit_composer_expanded = true;
+        self.activity = "Loading last commit for amend…".into();
         cx.notify();
+        cx.spawn(async move |this, cx| {
+            let summary = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    git.head_commit_summary(&repository)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !app.commit_amend {
+                    return;
+                }
+                match summary {
+                    Ok(summary) => {
+                        app.commit_amend_short_oid = Some(summary.short_oid);
+                        app.commit_subject = summary.subject;
+                        app.commit_body = summary.body;
+                        app.refresh_commit_inputs(cx);
+                        app.commit_composer_expanded = true;
+                        app.activity = "Amend armed — edit message or stage more changes.".into();
+                    }
+                    Err(error) => {
+                        app.commit_amend = false;
+                        app.commit_amend_short_oid = None;
+                        if let Some((subject, body)) = app.commit_pre_amend_draft.take() {
+                            app.commit_subject = subject;
+                            app.commit_body = body;
+                            app.refresh_commit_inputs(cx);
+                        }
+                        app.activity = git_failure_message("Amend", &error);
+                    }
+                }
+                app.sync_commit_composer_expanded(cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
     fn toggle_commit_sign_off(&mut self, cx: &mut Context<Self>) {
         self.commit_sign_off = !self.commit_sign_off;
@@ -5387,10 +5518,11 @@ return remote_url & linefeed & parent_path"#;
     }
 
     fn commit_draft(&mut self, cx: &mut Context<Self>) {
-        if self.mutation_in_flight
-            || self.commit_subject.trim().is_empty()
-            || self.status_groups().staged.is_empty()
-        {
+        let staged_count = self.status_groups().staged.len();
+        // Amend may rewrite HEAD message with zero staged files; normal commit needs staged.
+        let can_submit =
+            !self.commit_subject.trim().is_empty() && (staged_count > 0 || self.commit_amend);
+        if self.mutation_in_flight || !can_submit {
             return;
         }
         let ShellState::Repository(repository) = &self.state else {
@@ -5398,14 +5530,19 @@ return remote_url & linefeed & parent_path"#;
         };
         let repository = repository.clone();
         let worker_repository = repository.clone();
+        let amending = self.commit_amend;
         let request = CommitRequest {
             subject: self.commit_subject.clone(),
             body: self.commit_body.clone(),
-            amend: self.commit_amend,
+            amend: amending,
             sign_off: self.commit_sign_off,
         };
         self.mutation_in_flight = true;
-        self.activity = "Committing…".into();
+        self.activity = if amending {
+            "Amending…".into()
+        } else {
+            "Committing…".into()
+        };
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -5424,14 +5561,28 @@ return remote_url & linefeed & parent_path"#;
                     Ok(oid) => {
                         app.commit_subject.clear();
                         app.commit_body.clear();
-                        app.activity = "Commit complete.".into();
+                        app.commit_amend = false;
+                        app.commit_amend_short_oid = None;
+                        app.commit_pre_amend_draft = None;
+                        app.refresh_commit_inputs(cx);
+                        app.commit_subject_focused = false;
+                        app.commit_body_focused = false;
+                        app.sync_commit_composer_expanded(cx);
+                        app.activity = if amending {
+                            "Amend complete.".into()
+                        } else {
+                            "Commit complete.".into()
+                        };
                         app.load_working_copy(repository.clone(), cx);
                         app.history_reveal_oid = Some(oid);
                         app.navigate_to(RepositoryView::History, cx);
                         app.reset_history();
                         app.load_history(repository, None, cx);
                     }
-                    Err(error) => app.activity = git_failure_message("Commit", &error),
+                    Err(error) => {
+                        app.activity =
+                            git_failure_message(if amending { "Amend" } else { "Commit" }, &error);
+                    }
                 }
                 cx.notify();
             });

@@ -1,4 +1,4 @@
-//! Presentational outline icons (Heroicons MIT) for chrome UI.
+//! Presentational outline icons (Heroicons MIT + original branch glyph) for chrome UI.
 
 use gpui::{AnyElement, Hsla, IntoElement, div, prelude::*, px, svg};
 
@@ -23,6 +23,15 @@ pub(crate) enum IconKind {
     Sync,
     StashApply,
     StashSave,
+    WorkingCopy,
+    History,
+    Stashes,
+    PullRequests,
+    BranchesReview,
+    Reflog,
+    Settings,
+    Branch,
+    Tag,
 }
 
 impl IconKind {
@@ -36,14 +45,21 @@ impl IconKind {
             Self::Search => "icons/magnifying-glass.svg",
             Self::Cloud => "icons/cloud.svg",
             Self::Bookmark => "icons/bookmark.svg",
-            Self::Workflow | Self::Sync => "icons/arrow-path.svg",
+            Self::Workflow | Self::Sync | Self::Reflog => "icons/arrow-path.svg",
             Self::Repo => "icons/cube.svg",
             Self::Palette => "icons/command-line.svg",
             Self::Grid => "icons/squares-2x2.svg",
             Self::Fetch | Self::Pull => "icons/arrow-down-tray.svg",
             Self::Push => "icons/arrow-up-tray.svg",
-            Self::StashApply => "icons/arrow-uturn-left.svg",
+            Self::StashApply | Self::Stashes => "icons/arrow-uturn-left.svg",
             Self::StashSave => "icons/arrow-uturn-right.svg",
+            Self::WorkingCopy => "icons/document-text.svg",
+            Self::History => "icons/clock.svg",
+            Self::PullRequests => "icons/arrows-right-left.svg",
+            Self::BranchesReview => "icons/scale.svg",
+            Self::Settings => "icons/cog-6-tooth.svg",
+            Self::Branch => "icons/branch.svg",
+            Self::Tag => "icons/tag.svg",
         }
     }
 }

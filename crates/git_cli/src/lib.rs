@@ -1017,6 +1017,24 @@ impl GitExecutable {
             .ok_or(GitStatusError::ParseReflog)
     }
 
+    /// Loads the short oid, subject, and body of `HEAD` for amend UI.
+    ///
+    /// # Errors
+    /// Returns an error when the repository has no `HEAD` commit or output is malformed.
+    pub fn head_commit_summary(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<HeadCommitSummary, GitStatusError> {
+        let output = self.run(
+            &repository.worktree_root,
+            ["log", "-1", "--format=%h%x00%s%x00%b"],
+        )?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        parse_head_commit_summary(&output.stdout).ok_or(GitStatusError::ParseReflog)
+    }
+
     /// Lists every tracked path in the index, NUL-delimited.
     ///
     /// # Errors
@@ -2580,6 +2598,38 @@ fn strip_diff_prefix(path: &[u8]) -> Option<&[u8]> {
 pub struct CommitRecord {
     pub oid: String,
     pub subject: Vec<u8>,
+}
+
+/// Subject/body of `HEAD` for the Working Copy amend composer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadCommitSummary {
+    pub short_oid: String,
+    pub subject: String,
+    pub body: String,
+}
+
+fn parse_head_commit_summary(bytes: &[u8]) -> Option<HeadCommitSummary> {
+    let mut parts = bytes.splitn(3, |byte| *byte == 0);
+    let short_oid = std::str::from_utf8(parts.next()?).ok()?.trim().to_owned();
+    let subject = std::str::from_utf8(parts.next()?)
+        .ok()?
+        .trim_end_matches('\n')
+        .to_owned();
+    let body = parts
+        .next()
+        .map(|raw| {
+            let text = String::from_utf8_lossy(raw);
+            text.trim_end_matches('\n').to_owned()
+        })
+        .unwrap_or_default();
+    if short_oid.is_empty() {
+        return None;
+    }
+    Some(HeadCommitSummary {
+        short_oid,
+        subject,
+        body,
+    })
 }
 
 /// Parses NUL-delimited `OID`, `subject` pairs.
@@ -4147,6 +4197,15 @@ index 1111111..2222222 100644\n\
                 },
             )
             .expect("amend should succeed");
+        let summary = repository
+            .git
+            .head_commit_summary(&worktree)
+            .expect("head summary should load");
+        assert_eq!(summary.subject, "amended");
+        assert!(
+            summary.short_oid.len() >= 7,
+            "short oid should be abbreviated"
+        );
         let hook = repository.path.join(".git/hooks/pre-commit");
         fs::write(&hook, "#!/bin/sh\nexit 1\n").expect("hook should write");
         fs::set_permissions(&hook, fs::Permissions::from_mode(0o755))

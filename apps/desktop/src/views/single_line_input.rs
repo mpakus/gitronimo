@@ -3,11 +3,11 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, CursorStyle, Element, ElementInputHandler, Entity,
-    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, KeyBinding, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, Render, ShapedLine,
-    SharedString, TextRun, UTF16Selection, UnderlineStyle, Window, actions, div, fill, point,
-    prelude::*, px, relative, size,
+    AnyElement, AnyView, App, Bounds, ClipboardItem, Context, CursorStyle, Element,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId,
+    KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
+    Point, Render, ShapedLine, SharedString, StyleRefinement, TextRun, UTF16Selection,
+    UnderlineStyle, Window, actions, div, fill, point, prelude::*, px, relative, size,
 };
 use ui_kit::ThemeColors;
 
@@ -90,6 +90,9 @@ impl SingleLineInput {
             app.set_field_for_binding(self.binding, content);
             cx.notify();
         });
+        // Required when embedded via `AnyView::cached` — otherwise keystrokes update app
+        // state but the input view keeps a stale cached paint.
+        cx.notify();
     }
 
     fn sync_from_app(&mut self, cx: &App) {
@@ -209,7 +212,7 @@ impl SingleLineInput {
         self.replace_text_in_range(None, "", window, cx);
     }
 
-    fn confirm(&mut self, _: &Confirm, _: &mut Window, cx: &mut Context<Self>) {
+    fn confirm(&mut self, _: &Confirm, window: &mut Window, cx: &mut Context<Self>) {
         match self.binding {
             TextFieldBinding::TextPrompt => {
                 self.app.update(cx, GitronimoApp::confirm_text_prompt);
@@ -219,6 +222,9 @@ impl SingleLineInput {
             }
             TextFieldBinding::ChoicePrompt => {
                 self.app.update(cx, GitronimoApp::confirm_choice_prompt);
+            }
+            TextFieldBinding::CommitBody => {
+                self.replace_text_in_range(None, "\n", window, cx);
             }
             _ => {}
         }
@@ -271,7 +277,15 @@ impl SingleLineInput {
         }
     }
 
-    fn on_mouse_down(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // Explicit focus (rgitui text_input pattern). track_focus also auto-focuses when
+        // the hitbox is hovered; call out so caret/IME activate even if a parent stole focus.
+        self.focus_handle.focus(window);
         self.is_selecting = true;
         let index = self.index_for_mouse_position(event.position);
         if event.modifiers.shift {
@@ -555,7 +569,13 @@ impl Element for InputElement {
         let (display_text, text_color) = if content.is_empty() {
             (SharedString::from(placeholder), colors.text_muted.into())
         } else {
-            (SharedString::from(content), colors.text_primary.into())
+            // Keep offsets 1:1 for cursor math; newlines paint as spaces in the single-line shaper.
+            let visible = if matches!(input.binding, TextFieldBinding::CommitBody) {
+                content.replace('\n', " ")
+            } else {
+                content
+            };
+            (SharedString::from(visible), colors.text_primary.into())
         };
 
         let run = TextRun {
@@ -673,9 +693,15 @@ impl Render for SingleLineInput {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_from_app(cx);
         let colors = ui_kit::Theme::for_appearance(self.app.read(cx).appearance).colors;
+        // Fill the parent shell: Entity layout is a separate root, so `w_full` alone can
+        // resolve to 0px width and leave a painted placeholder with an empty hit target.
+        let body = matches!(self.binding, TextFieldBinding::CommitBody);
         div()
+            .id("single-line-input")
+            .size_full()
             .flex()
-            .w_full()
+            .when(body, gpui::Styled::items_start)
+            .when(!body, gpui::Styled::items_center)
             .key_context("SingleLineInput")
             .track_focus(&self.focus_handle)
             .cursor(CursorStyle::IBeam)
@@ -712,6 +738,65 @@ impl Focusable for SingleLineInput {
     }
 }
 
+/// Shared outer height for Commit Subject (single line).
+pub(crate) const COMPOSER_FIELD_HEIGHT: f32 = 32.0;
+/// Detailed description textarea — about four subject-line rows.
+pub(crate) const COMPOSER_BODY_HEIGHT: f32 = COMPOSER_FIELD_HEIGHT * 4.0;
+
+/// Stretch an input Entity into a parent that already has a **definite** pixel size
+/// (`flex_1` slot or fixed `h`/`w_full` shell). Prefer this over absolute-fill for
+/// composer fields — absolute + percentage width can collapse to an invisible 0-box.
+fn stretch_input(input: Entity<SingleLineInput>) -> AnyView {
+    let mut style = StyleRefinement::default();
+    style.size.width = Some(relative(1.).into());
+    style.size.height = Some(relative(1.).into());
+    style.min_size.width = Some(px(0.).into());
+    AnyView::from(input).cached(style)
+}
+
+/// Shared chrome for subject and description (identical height/padding/font).
+fn composer_text_field_shell(
+    input: Entity<SingleLineInput>,
+    colors: &ThemeColors,
+    border: impl Into<gpui::Hsla>,
+    shell_id: &'static str,
+    slot_id: &'static str,
+    trailing: Option<AnyElement>,
+) -> impl IntoElement {
+    let border = border.into();
+    let mut row = div()
+        .id(shell_id)
+        .w_full()
+        .flex_shrink_0()
+        .h(px(COMPOSER_FIELD_HEIGHT))
+        .max_h(px(COMPOSER_FIELD_HEIGHT))
+        .overflow_hidden()
+        .px_2()
+        .flex()
+        .items_center()
+        .gap_2()
+        .rounded(px(5.0))
+        .bg(colors.search_field_background)
+        .border_1()
+        .border_color(border)
+        .text_xs()
+        .child(
+            div()
+                .id(slot_id)
+                .flex_1()
+                .min_w(px(0.0))
+                .h_full()
+                .overflow_hidden()
+                .flex()
+                .items_center()
+                .child(stretch_input(input)),
+        );
+    if let Some(badge) = trailing {
+        row = row.child(div().flex_shrink_0().child(badge));
+    }
+    row
+}
+
 /// Render a single-line input entity inside a styled container.
 pub(crate) fn single_line_input_shell(
     input: Entity<SingleLineInput>,
@@ -734,7 +819,83 @@ pub(crate) fn single_line_input_shell(
         .when(!rounded, |el| el.rounded(px(4.0)))
         .border_1()
         .border_color(colors.border)
-        .child(input)
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .h_full()
+                .child(stretch_input(input)),
+        )
+}
+
+/// Commit subject — always mounted; full width of card content; counter trailing.
+pub(crate) fn composer_subject_shell(
+    input: Entity<SingleLineInput>,
+    colors: &ThemeColors,
+    filled: bool,
+    counter: impl Into<String>,
+) -> impl IntoElement {
+    let counter = counter.into();
+    let border = if filled {
+        colors.focus_ring
+    } else {
+        colors.border
+    };
+    composer_text_field_shell(
+        input,
+        colors,
+        border,
+        "commit-subject-shell",
+        "commit-subject-input-slot",
+        Some(
+            div()
+                .text_xs()
+                .text_color(colors.text_muted)
+                .child(counter)
+                .into_any_element(),
+        ),
+    )
+}
+
+/// Commit description — full-width ~4-line textarea; focus ring matches subject.
+/// Enter inserts newlines. Subject chrome/path is untouched.
+pub(crate) fn composer_multiline_shell(
+    input: Entity<SingleLineInput>,
+    colors: &ThemeColors,
+    focused: bool,
+) -> impl IntoElement {
+    let border = if focused {
+        colors.focus_ring
+    } else {
+        colors.border
+    };
+    div()
+        .id("commit-body-shell")
+        .w_full()
+        .flex_shrink_0()
+        .h(px(COMPOSER_BODY_HEIGHT))
+        .min_h(px(COMPOSER_BODY_HEIGHT))
+        .overflow_hidden()
+        .px_2()
+        .py_1p5()
+        .flex()
+        .items_start()
+        .rounded(px(5.0))
+        .bg(colors.search_field_background)
+        .border_1()
+        .border_color(border)
+        .text_xs()
+        .child(
+            div()
+                .id("commit-body-input-slot")
+                .w_full()
+                .min_w(px(0.0))
+                .h_full()
+                .overflow_hidden()
+                .flex()
+                .items_start()
+                .child(stretch_input(input)),
+        )
 }
 
 /// Toolbar search field with leading magnifier and optional shortcut hint.
@@ -765,7 +926,7 @@ pub(crate) fn toolbar_search_shell(
                 .h_full()
                 .flex()
                 .items_center()
-                .child(input),
+                .child(stretch_input(input)),
         )
         .children(show_shortcut.then(|| {
             div()
@@ -807,8 +968,21 @@ impl GitronimoApp {
             TextFieldBinding::CommitSubject => {
                 self.commit_subject = value;
                 self.commit_subject_focused = true;
+                // Subject text or focus keeps the composer open (see sync_commit_composer_expanded).
+                self.commit_composer_expanded = true;
             }
-            TextFieldBinding::CommitBody => self.commit_body = value,
+            TextFieldBinding::CommitBody => {
+                self.commit_body = value;
+                // Stay expanded while body has text, or subject already has text / amend.
+                if !self.commit_body.trim().is_empty()
+                    || !self.commit_subject.trim().is_empty()
+                    || self.commit_amend
+                    || self.commit_subject_focused
+                    || self.commit_body_focused
+                {
+                    self.commit_composer_expanded = true;
+                }
+            }
             TextFieldBinding::TextPrompt => self.text_prompt_value = value,
             TextFieldBinding::CommandPalette => {
                 self.command_palette_query = value;
@@ -819,6 +993,12 @@ impl GitronimoApp {
                 self.choice_prompt_selected = 0;
             }
         }
+    }
+
+    /// Refresh cached commit input views after external subject/body mutations.
+    pub(crate) fn refresh_commit_inputs(&mut self, cx: &mut Context<Self>) {
+        self.commit_subject_input.update(cx, |_, cx| cx.notify());
+        self.commit_body_input.update(cx, |_, cx| cx.notify());
     }
 
     pub(crate) fn create_text_inputs(cx: &mut Context<Self>) -> TextInputBundle {
@@ -848,7 +1028,12 @@ impl GitronimoApp {
             )
         });
         let body = cx.new(|cx| {
-            SingleLineInput::new(TextFieldBinding::CommitBody, app.clone(), "Description", cx)
+            SingleLineInput::new(
+                TextFieldBinding::CommitBody,
+                app.clone(),
+                "Detailed description",
+                cx,
+            )
         });
         let text_prompt = cx.new(|cx| {
             SingleLineInput::new(TextFieldBinding::TextPrompt, app.clone(), "Enter value", cx)

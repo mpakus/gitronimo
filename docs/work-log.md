@@ -1,5 +1,125 @@
 # Implementation work log
 
+## 2026-08-11 — Amend checkbox loads HEAD + Amend button
+
+**Intent:** Checking Amend shows last commit short hash beside the checkbox, fills subject (and body) from that commit, switches the primary button to active “Amend”, and clicking it runs `git commit --amend` with staged changes / message.
+
+**Files:** `docs/work-log.md`, `crates/git_cli` (`head_commit_summary`), `app_state.rs`, `main.rs`, `commit_composer.rs`.
+
+**Acceptance:** toggle fills fields + hash; button label/enablement; amend succeeds; uncheck restores prior draft; gates.
+
+## 2026-08-11 — Description as 4-line textarea + focus ring
+
+**Intent:** Detailed description should be a ~4-line tall textarea with the same blue focus border as Commit Subject when focused. Do not change subject field behavior/layout.
+
+**Files:** `docs/work-log.md`, `single_line_input.rs` (`composer_multiline_shell`), `commit_composer.rs` (pass focus flag only).
+
+**Acceptance:** body shell ~4 lines tall; focus_ring when `commit_body_focused`; subject untouched; relaunch.
+
+## 2026-08-11 — Full-width Detailed description only
+
+**Intent:** Commit Subject already full-width — do not touch it. Detailed description renders as a ~0-width vertical slit; make that field alone span the commit card content width (same as subject).
+
+**Files:** `docs/work-log.md`, `commit_composer.rs`, `single_line_input.rs` (`composer_multiline_shell` only).
+
+**Acceptance:** description shell matches subject width; subject code path unchanged; gates + relaunch.
+
+## 2026-08-11 — Shared COMPOSER_FIELD_HEIGHT; relaunch
+
+**Intent:** Subject and description share one `COMPOSER_FIELD_HEIGHT` (32) via one shell helper. Never collapse when subject/body trimmed non-empty, amend on, or either focused. Kill old app and relaunch so the build is what the user sees.
+
+**Files:** `docs/work-log.md`, `single_line_input.rs`, `main.rs` (verify sync).
+
+**Acceptance:** shared const; keep-open rule; gates + relaunch.
+
+## 2026-08-11 — Match description height; keep expanded on subject text
+
+**Intent:** Description control same outer height as subject (32px). Stay expanded when subject or body has text (or focus/amend); collapse only when both unfocused and both empty and amend off.
+
+**Files:** `docs/work-log.md`, `single_line_input.rs`, `main.rs`.
+
+**Acceptance:** matching heights; collapse rules updated; gates pass.
+
+## 2026-08-11 — Restore always-visible Commit Subject
+
+**Intent:** Collapsed commit card showed only branch + Stage All/Commit — subject/text fields gone. Absolute-fill shells likely collapsed to zero-size. Restore simple always-on subject shell (flex + definite height, visible field bg); details only when expanded; no max_h clip.
+
+**Files:** `docs/work-log.md`, `commit_composer.rs`, `single_line_input.rs`.
+
+**Acceptance:** collapsed shows subject full width; expand shows description; editable; gates pass.
+
+## 2026-08-11 — Restore description; full-width + tighter type
+
+**Intent:** Expanded composer showed Amend/footer but description was empty/clipped (`max_h` + overflow). Make description a normal full-width block; align field borders with Stage All row; smaller text + ~10% more vertical padding in subject/description.
+
+**Files:** `docs/work-log.md`, `commit_composer.rs`, `single_line_input.rs`.
+
+**Acceptance:** description visible when expanded; fields match footer width; typography/padding updated; gates pass.
+
+## 2026-08-11 — Force full-width composer fields (absolute fill)
+
+**Intent:** Subject/description bordered boxes still content-narrow despite flex/cached attempts. Replace with definite `w_full` chrome + `absolute().inset_0()` fill; counter inside subject shell. Entity stretched via explicit StyleRefinement + absolute containing block.
+
+**Files:** `docs/work-log.md`, `apps/desktop/src/views/single_line_input.rs`, `commit_composer.rs`.
+
+**Acceptance:** bordered fields span card content width; counter trailing inside subject; focus/expand intact; gates pass.
+
+## 2026-08-11 — Full-width commit composer inputs
+
+**Intent:** Subject and description bordered fields must stretch across the commit card (counter stays trailing). Fix Entity layout that stayed intrinsic/narrow despite flex shells.
+
+**Files:** `docs/work-log.md`, `apps/desktop/src/views/single_line_input.rs`, `commit_composer.rs` as needed.
+
+**Acceptance:** both fields full-width; click/focus still work; toolbar/prompt shells OK; gates pass.
+
+## 2026-08-11 — Fix unclickable Commit Subject
+
+**Intent:** Commit Subject (and description when expanded) must focus on click so caret appears, typing works, and Tower-like expand runs. Root cause likely zero-width Entity hitbox inside composer shells.
+
+**Files:** `docs/work-log.md`, `apps/desktop/src/views/single_line_input.rs`, `commit_composer.rs` / `main.rs` if focus wiring needed.
+
+**Acceptance:** click subject focuses + expands; description clickable when open; gates pass.
+
+## 2026-08-11 — Commit composer expand/collapse
+
+**Intent:** Match Tower commit card expand/collapse: collapsed shows branch + subject + Stage All/Commit; expand on subject focus to reveal description, Amend/Sign-off, author; stay open if body text or amend; collapse when both unfocused and body empty and amend off. Soft height animation if feasible.
+
+**Files:** `docs/work-log.md`, `commit_composer.rs`, `single_line_input.rs` (focus hooks if needed), `app_state.rs`, `main.rs`.
+
+**Acceptance:** expand/collapse rules work; Stage All/Commit always visible; gates pass.
+
+## 2026-08-11 — Working Copy commit card redesign
+
+**Intent:** Redesign commit composer into a Tower-like raised card: branch header, subject + always-visible description, Amend/Sign-off checkboxes + author, Stage All / Commit footer. Keep file filter/list below, visually separate. No AI generate; no Tower copy/assets.
+
+**Files:** `docs/work-log.md`, `apps/desktop/src/views/commit_composer.rs`, `working_copy.rs`, `single_line_input.rs` (body Enter/newline + shell), possibly `components.rs`.
+
+**Acceptance:** card layout matches IA; body always editable; amend/sign-off clear; Stage All/Commit wired; gates pass.
+
+## 2026-08-11 — In-repo sidebar Tower-like polish
+
+**Intent:** Clearer branch-tree hierarchy (indent + chevron/folder/branch icons) and replace unicode nav glyphs with Heroicons outline; denser section labels/rows/subtle dividers like Tower. No proprietary Tower assets.
+
+**Files:** `docs/work-log.md`, `apps/desktop/assets/icons/*`, `assets.rs`, `views/icons.rs`, `views/sidebar.rs`, `views/components.rs` (section/badge if needed).
+
+**Acceptance:** nested branches clearly indented; outline icons on workspace nav + ref tree; gates pass.
+
+## 2026-08-11 — Compact text prompts + bookmark drag preview
+
+**Intent:** (1) Shrink "New group" / other `text_prompt_overlay` dialogs so height hugs content (no huge empty region below buttons). (2) Show human-friendly drag preview (repo name) for `BookmarkRepoDrag` instead of empty element; keep folder/root drops working.
+
+**Files:** `docs/work-log.md`, `apps/desktop/src/views/workspace.rs`, `apps/desktop/src/views/sidebar.rs`.
+
+**Acceptance:** text prompts compact; drag shows repo name near cursor; drops still work; gates pass.
+
+## 2026-08-11 — Fix welcome + and palette buttons
+
+**Intent:** Sidebar footer `+` must open a Tower-style anchored popup (New Group / Add Repository); toolbar Palette button must open the command palette (`open_command_palette`). Investigate click swallowing / dispatch_action vs direct call; keep Services/Bookmarks/Workflow in toolbar only.
+
+**Files:** `docs/work-log.md`, `apps/desktop/src/app_state.rs`, `main.rs`, `views/sidebar.rs`, `views/toolbar.rs`, `views/workspace.rs`.
+
+**Acceptance:** `+` click opens anchored menu and actions work; Palette opens command palette; fmt/clippy/test/deny pass.
+
 ## 2026-08-11 — Welcome/bookmarks UI polish (six issues)
 
 **Intent:** Fix welcome/bookmarks UX from annotated screenshots: (1) sidebar `+` footer padding/hit target Tower-like with New Group / Add Repository menu; (2) remove unwanted welcome detail rename/"some repo" field and redundant sidebar border gap (keep resize handle); (3) ensure folder/group tree renders with chevron/folder icons, nested repos, create via `+`, rename/delete, DnD; (4) shell tabs more horizontal space + icon-over-label; (5) toolbar search padding/placeholder/alignment; (6) replace unicode/letter placeholders with Heroicons-style outline SVGs (MIT, vendored; no Tower assets, no new crates).

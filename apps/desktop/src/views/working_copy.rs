@@ -3,7 +3,7 @@
 use gpui::{AnyElement, ClickEvent, MouseButton, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
-use git_domain::{GitPath, HeadStatus, InProgressOperation, StatusEntry, WorktreeRepository};
+use git_domain::{GitPath, InProgressOperation, StatusEntry, WorktreeRepository};
 
 use crate::app_state::{
     ForcePushState, GitronimoApp, Mutation, OperationAction, RefContext, RepositoryView,
@@ -116,65 +116,6 @@ impl GitronimoApp {
             .into_any_element()
     }
 
-    fn branch_context_view(
-        &self,
-        _has_local_branches: bool,
-        colors: &ThemeColors,
-        _cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        let (branch, tracking) = self.working_copy.as_ref().map_or_else(
-            || ("Branch loading…".to_owned(), String::new()),
-            |status| {
-                let branch = match &status.branch.head {
-                    HeadStatus::Branch(name) => String::from_utf8_lossy(&name.0).into_owned(),
-                    HeadStatus::Detached => "Detached HEAD".into(),
-                    HeadStatus::Unborn => "Unborn branch".into(),
-                    HeadStatus::Unknown => "Unknown branch".into(),
-                };
-                let tracking = status.branch.upstream.as_ref().map_or_else(
-                    || "No Tracking".to_owned(),
-                    |upstream| String::from_utf8_lossy(&upstream.0).into_owned(),
-                );
-                (branch, tracking)
-            },
-        );
-        div()
-            .h(px(32.0))
-            .px_3()
-            .flex()
-            .items_center()
-            .gap_1()
-            .border_b_1()
-            .border_color(colors.border)
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(colors.accent)
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child("\u{2387}"),
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(colors.text_primary)
-                    .child(branch),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(colors.text_muted)
-                    .child("\u{203A}"),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(colors.text_secondary)
-                    .child(tracking),
-            )
-            .into_any_element()
-    }
-
     fn file_review_workspace(
         &self,
         colors: &ThemeColors,
@@ -226,7 +167,6 @@ impl GitronimoApp {
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .child(self.branch_context_view(false, colors, cx))
                     .child(self.commit_composer_view(colors, cx))
                     .child(file_list),
             )

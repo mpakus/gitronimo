@@ -285,6 +285,7 @@ pub(crate) fn primary_window_action_button(
         .into_any_element()
 }
 
+#[allow(dead_code)]
 pub(crate) fn commit_option_chip(
     label: &'static str,
     active: bool,
@@ -423,7 +424,25 @@ pub(crate) fn status_badge_square(
 pub(crate) fn section_header(title: &'static str, colors: &ThemeColors) -> gpui::AnyElement {
     div()
         .px_3()
-        .pt_3()
+        .pt_2()
+        .pb_1()
+        .border_t_1()
+        .border_color(colors.separator)
+        .text_xs()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(colors.text_muted)
+        .child(title)
+        .into_any_element()
+}
+
+/// First sidebar section label (no top divider).
+pub(crate) fn sidebar_section_label_first(
+    title: &'static str,
+    colors: &ThemeColors,
+) -> gpui::AnyElement {
+    div()
+        .px_3()
+        .pt_2()
         .pb_1()
         .text_xs()
         .font_weight(gpui::FontWeight::SEMIBOLD)
@@ -531,13 +550,16 @@ pub(crate) fn two_pane_view(
 pub(crate) fn head_badge(colors: &ThemeColors) -> gpui::AnyElement {
     div()
         .ml_auto()
-        .px_1p5()
+        .flex_shrink_0()
+        .px_1()
         .py_0p5()
-        .rounded_full()
+        .rounded(px(3.0))
         .bg(colors.raised_background)
+        .border_1()
+        .border_color(colors.border)
         .text_xs()
         .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(colors.text_primary)
+        .text_color(colors.text_secondary)
         .child("HEAD")
         .into_any_element()
 }

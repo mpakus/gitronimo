@@ -13,18 +13,42 @@ use crate::app_state::{
 };
 use crate::views::components::{
     NAV_ROW_HEIGHT, count_badge, head_badge, remote_progress_footer, sidebar_section_label,
+    sidebar_section_label_first,
 };
 use crate::views::icons::{IconKind, icon};
+
+/// Left padding for root-level ref rows (folders and branches).
+const REF_BASE_PAD: f32 = 10.0;
+/// Extra indent per nesting level under a branch/tag folder.
+const REF_DEPTH_STEP: f32 = 18.0;
+/// Row height for ref tree rows (folder + leaf).
+const REF_ROW_HEIGHT: f32 = 22.0;
 
 /// Distinct drag type for bookmark repository rows (does not cross-fire with pane dividers).
 #[derive(Clone)]
 struct BookmarkRepoDrag {
     path: PathBuf,
+    label: String,
+    colors: ThemeColors,
 }
 
 impl Render for BookmarkRepoDrag {
     fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
-        div().w(px(0.0)).h(px(0.0))
+        div()
+            .px_2()
+            .py_1()
+            .flex()
+            .items_center()
+            .gap_2()
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(self.colors.border)
+            .bg(self.colors.raised_background)
+            .shadow_lg()
+            .text_sm()
+            .text_color(self.colors.text_primary)
+            .child(icon(IconKind::Repo, 14.0, self.colors.text_muted))
+            .child(self.label.clone())
     }
 }
 
@@ -59,10 +83,10 @@ impl GitronimoApp {
             .flex()
             .flex_col()
             .bg(colors.sidebar_background)
-            .child(sidebar_section_label("WORKSPACE", colors))
-            .child(nav_row_with_badge(
+            .child(sidebar_section_label_first("WORKSPACE", colors))
+            .child(nav_row(
                 "Working Copy",
-                "\u{25A4}",
+                IconKind::WorkingCopy,
                 "sidebar-working-copy",
                 self.repository_view == crate::app_state::RepositoryView::WorkingCopy,
                 if groups_total > 0 {
@@ -78,9 +102,10 @@ impl GitronimoApp {
             ))
             .child(nav_row(
                 "History",
-                "\u{25F7}",
+                IconKind::History,
                 "sidebar-history",
                 self.repository_view == crate::app_state::RepositoryView::History,
+                None,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -89,9 +114,10 @@ impl GitronimoApp {
             ))
             .child(nav_row(
                 "Stashes",
-                "\u{21A9}",
+                IconKind::Stashes,
                 "sidebar-stashes",
                 self.repository_view == crate::app_state::RepositoryView::Stashes,
+                None,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -102,9 +128,10 @@ impl GitronimoApp {
             ))
             .child(nav_row(
                 "Pull Requests",
-                "\u{2194}",
+                IconKind::PullRequests,
                 "sidebar-pull-requests",
                 self.repository_view == crate::app_state::RepositoryView::PullRequests,
+                None,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -117,9 +144,10 @@ impl GitronimoApp {
             ))
             .child(nav_row(
                 "Branches Review",
-                "\u{2696}",
+                IconKind::BranchesReview,
                 "sidebar-branches-review",
                 self.repository_view == crate::app_state::RepositoryView::BranchesReview,
+                None,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -128,9 +156,10 @@ impl GitronimoApp {
             ))
             .child(nav_row(
                 "Reflog",
-                "\u{21BA}",
+                IconKind::Reflog,
                 "sidebar-reflog",
                 self.repository_view == crate::app_state::RepositoryView::Reflog,
+                None,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -141,9 +170,10 @@ impl GitronimoApp {
             ))
             .child(nav_row(
                 "Settings",
-                "\u{2699}",
+                IconKind::Settings,
                 "sidebar-settings",
                 self.repository_view == crate::app_state::RepositoryView::Settings,
+                None,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -170,9 +200,10 @@ impl GitronimoApp {
                     .child(sidebar_section_label("REMOTES", colors))
                     .child(nav_row(
                         "Remotes",
-                        "\u{2601}",
+                        IconKind::Cloud,
                         "sidebar-remotes",
                         self.repository_view == crate::app_state::RepositoryView::Remotes,
+                        None,
                         colors,
                         cx,
                         |app, _, cx| {
@@ -193,17 +224,20 @@ impl GitronimoApp {
                                 let context = RefContext::Remote(name.clone());
                                 div()
                                     .id(("remote-ref", index))
-                                    .h(px(22.0))
-                                    .px_3()
-                                    .pl_6()
+                                    .h(px(REF_ROW_HEIGHT))
+                                    .pl(px(REF_BASE_PAD + REF_DEPTH_STEP))
+                                    .pr_3()
                                     .flex()
                                     .items_center()
+                                    .gap_2()
                                     .text_xs()
                                     .text_color(colors.text_secondary)
                                     .cursor_pointer()
+                                    .hover(|style| style.bg(colors.selection))
                                     .on_click(cx.listener(move |app, _, _, cx| {
                                         app.select_ref_context(context.clone(), cx);
                                     }))
+                                    .child(icon(IconKind::Cloud, 12.0, colors.text_muted))
                                     .child(name)
                                     .into_any_element()
                             })
@@ -310,6 +344,7 @@ impl GitronimoApp {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_lines)]
     fn ref_rows(
         &self,
         category: &str,
@@ -331,6 +366,10 @@ impl GitronimoApp {
             "remote" => "remote-ref-group",
             _ => "tag-ref-group",
         };
+        let leaf_icon = match kind {
+            RefKind::Tag => IconKind::Tag,
+            RefKind::LocalBranch | RefKind::RemoteBranch => IconKind::Branch,
+        };
         for reference in refs {
             let Ok(name) = String::from_utf8(reference.name.0.clone()) else {
                 continue;
@@ -342,26 +381,41 @@ impl GitronimoApp {
                 let key = format!("{category}:{group}");
                 let expanded = self.expanded_ref_groups.contains(&key);
                 if groups.insert(key.clone()) {
-                    let label = format!(
-                        "{}{} {}",
-                        "  ".repeat(depth),
-                        if expanded { "\u{2304}" } else { "\u{203A}" },
-                        group.rsplit('/').next().unwrap_or_default()
-                    );
+                    let label = group.rsplit('/').next().unwrap_or_default().to_owned();
+                    let nest = u16::try_from(depth.saturating_sub(1)).unwrap_or(32);
+                    let pad = REF_BASE_PAD + f32::from(nest) * REF_DEPTH_STEP;
+                    let chevron = if expanded {
+                        IconKind::ChevronDown
+                    } else {
+                        IconKind::ChevronRight
+                    };
                     rows.push(
                         div()
                             .id((group_id_prefix, rows.len()))
-                            .h(px(22.0))
-                            .px_3()
+                            .h(px(REF_ROW_HEIGHT))
+                            .pl(px(pad))
+                            .pr_3()
                             .flex()
                             .items_center()
+                            .gap_1()
                             .text_sm()
                             .text_color(colors.text_secondary)
                             .cursor_pointer()
+                            .hover(|style| style.bg(colors.selection))
                             .on_click(cx.listener(move |app, _, _, cx| {
                                 app.toggle_ref_group(key.clone(), cx);
                             }))
-                            .child(label)
+                            .child(icon(chevron, 12.0, colors.text_muted))
+                            .child(icon(IconKind::Folder, 13.0, colors.text_muted))
+                            .child(
+                                div()
+                                    .ml_1()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .child(label),
+                            )
                             .into_any_element(),
                     );
                 }
@@ -372,26 +426,47 @@ impl GitronimoApp {
             }
             if visible {
                 let context = kind.context(name.clone());
-                let indent = u16::try_from(parts.len().saturating_mul(12)).unwrap_or(u16::MAX);
+                let nest = u16::try_from(parts.len().saturating_sub(1)).unwrap_or(32);
+                let pad = REF_BASE_PAD + f32::from(nest) * REF_DEPTH_STEP;
                 let is_head = matches!(kind, RefKind::LocalBranch)
                     && current_branch.is_some_and(|branch| branch == name);
+                let leaf_label = parts.last().copied().unwrap_or_default().to_owned();
                 rows.push(
                     div()
                         .id((id_prefix, rows.len()))
-                        .h(px(22.0))
-                        .px_3()
-                        .pl(px(f32::from(indent)))
+                        .h(px(REF_ROW_HEIGHT))
+                        .pl(px(pad))
+                        .pr_3()
                         .flex()
                         .items_center()
                         .gap_2()
                         .text_xs()
-                        .text_color(colors.text_secondary)
+                        .text_color(if is_head {
+                            colors.text_primary
+                        } else {
+                            colors.text_secondary
+                        })
                         .cursor_pointer()
                         .hover(|style| style.bg(colors.selection))
                         .on_click(cx.listener(move |app, _, _, cx| {
                             app.select_ref_context(context.clone(), cx);
                         }))
-                        .child(parts.last().copied().unwrap_or_default().to_owned())
+                        // Align leaf icons under folder name (chevron column + gap).
+                        .when(nest > 0, |row| row.child(div().w(px(12.0)).flex_shrink_0()))
+                        .child(icon(leaf_icon, 13.0, colors.text_muted))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .font_weight(if is_head {
+                                    gpui::FontWeight::MEDIUM
+                                } else {
+                                    gpui::FontWeight::NORMAL
+                                })
+                                .child(leaf_label),
+                        )
                         .children(is_head.then(|| head_badge(colors)))
                         .into_any_element(),
                 );
@@ -401,55 +476,10 @@ impl GitronimoApp {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn nav_row(
     label: &'static str,
-    icon: &'static str,
-    id: &'static str,
-    active: bool,
-    colors: &ThemeColors,
-    cx: &mut gpui::Context<GitronimoApp>,
-    on_click: impl Fn(&mut GitronimoApp, &ClickEvent, &mut gpui::Context<GitronimoApp>) + 'static,
-) -> AnyElement {
-    div()
-        .id(id)
-        .h(px(NAV_ROW_HEIGHT))
-        .px_3()
-        .flex()
-        .items_center()
-        .gap_2()
-        .text_sm()
-        .bg(if active {
-            colors.accent
-        } else {
-            colors.sidebar_background
-        })
-        .text_color(if active {
-            colors.panel_background
-        } else {
-            colors.text_primary
-        })
-        .cursor_pointer()
-        .when(!active, |row| row.hover(|style| style.bg(colors.selection)))
-        .on_click(cx.listener(move |app, event, _, cx| on_click(app, event, cx)))
-        .child(
-            div()
-                .w(px(14.0))
-                .text_xs()
-                .text_color(if active {
-                    colors.panel_background
-                } else {
-                    colors.accent
-                })
-                .child(icon),
-        )
-        .child(label)
-        .into_any_element()
-}
-
-#[allow(clippy::too_many_arguments)]
-fn nav_row_with_badge(
-    label: &'static str,
-    icon: &'static str,
+    kind: IconKind,
     id: &'static str,
     active: bool,
     badge: Option<String>,
@@ -457,6 +487,11 @@ fn nav_row_with_badge(
     cx: &mut gpui::Context<GitronimoApp>,
     on_click: impl Fn(&mut GitronimoApp, &ClickEvent, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> AnyElement {
+    let icon_color = if active {
+        colors.panel_background
+    } else {
+        colors.text_muted
+    };
     div()
         .id(id)
         .h(px(NAV_ROW_HEIGHT))
@@ -478,18 +513,15 @@ fn nav_row_with_badge(
         .cursor_pointer()
         .when(!active, |row| row.hover(|style| style.bg(colors.selection)))
         .on_click(cx.listener(move |app, event, _, cx| on_click(app, event, cx)))
+        .child(icon(kind, 14.0, icon_color))
         .child(
             div()
-                .w(px(14.0))
-                .text_xs()
-                .text_color(if active {
-                    colors.panel_background
-                } else {
-                    colors.accent
-                })
-                .child(icon),
+                .flex_1()
+                .min_w(px(0.0))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .child(label),
         )
-        .child(label)
         .children(badge.map(|text| count_badge(text, active, colors)))
         .into_any_element()
 }
@@ -673,12 +705,22 @@ fn welcome_sidebar_view(
                         .items_center()
                         .justify_center()
                         .rounded(px(6.0))
+                        .border_1()
+                        .border_color(colors.border)
+                        .bg(if app.welcome_plus_menu_open {
+                            colors.selection
+                        } else {
+                            colors.raised_background
+                        })
                         .cursor_pointer()
-                        .hover(|style| style.bg(colors.raised_background))
-                        .on_click(cx.listener(|app, _, _, cx| {
-                            app.begin_choice_prompt(ChoicePromptKind::WelcomeSidebarPlus, cx);
-                        }))
-                        .child(icon(IconKind::Plus, 16.0, colors.text_secondary)),
+                        .hover(|style| style.bg(colors.selection))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|app, _, _, cx| {
+                                app.toggle_welcome_plus_menu(cx);
+                            }),
+                        )
+                        .child(icon(IconKind::Plus, 16.0, colors.text_primary)),
                 ),
         )
         .into_any_element()
@@ -803,7 +845,11 @@ fn welcome_repo_row(
             }
         }))
         .on_drag(
-            BookmarkRepoDrag { path: drag_path },
+            BookmarkRepoDrag {
+                path: drag_path,
+                label: name.clone(),
+                colors: *colors,
+            },
             |drag, _offset, _, cx| cx.new(|_| drag.clone()),
         )
         .child(icon(

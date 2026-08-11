@@ -60,29 +60,12 @@ impl Render for GitronimoApp {
             .on_action(cx.listener(Self::widen_sidebar))
             .on_drop(cx.listener(Self::dropped_paths))
             .child(self.workspace_toolbar(&colors, cx))
-            .children(
-                self.show_quick_open
-                    .then(|| self.quick_open_overlay(&colors, cx).into_any_element()),
-            )
-            .children(
-                self.show_command_palette
-                    .then(|| self.command_palette_overlay(&colors, cx).into_any_element()),
-            )
-            .children(
-                self.pending_text_prompt
-                    .is_some()
-                    .then(|| self.text_prompt_overlay(&colors, cx).into_any_element()),
-            )
-            .children(
-                self.pending_choice_prompt
-                    .is_some()
-                    .then(|| self.choice_prompt_overlay(&colors, cx).into_any_element()),
-            )
             .child(
                 div()
                     .flex_1()
                     .flex()
                     .h_full()
+                    .min_h(px(0.0))
                     .child(self.sidebar_view(sidebar_width, &colors, cx))
                     .child(sidebar_resize_handle(sidebar_width, &colors, cx))
                     .child(
@@ -107,6 +90,29 @@ impl Render for GitronimoApp {
                     .text_color(activity_color(&self.activity, &colors))
                     .child(activity_label(&self.activity)),
             )
+            // Overlays after chrome so they paint above in-flow content.
+            .children(
+                self.show_quick_open
+                    .then(|| self.quick_open_overlay(&colors, cx).into_any_element()),
+            )
+            .children(
+                self.show_command_palette
+                    .then(|| self.command_palette_overlay(&colors, cx).into_any_element()),
+            )
+            .children(
+                self.pending_text_prompt
+                    .is_some()
+                    .then(|| self.text_prompt_overlay(&colors, cx).into_any_element()),
+            )
+            .children(
+                self.pending_choice_prompt
+                    .is_some()
+                    .then(|| self.choice_prompt_overlay(&colors, cx).into_any_element()),
+            )
+            .children(self.welcome_plus_menu_open.then(|| {
+                self.welcome_plus_menu_overlay(&colors, cx)
+                    .into_any_element()
+            }))
     }
 }
 
@@ -161,6 +167,7 @@ impl GitronimoApp {
             .bottom_0()
             .bg(colors.overlay_scrim)
             .flex()
+            .items_start()
             .justify_center()
             .pt_8()
             .on_mouse_down(
@@ -242,6 +249,7 @@ impl GitronimoApp {
             .bottom_0()
             .bg(colors.overlay_scrim)
             .flex()
+            .items_start()
             .justify_center()
             .pt_8()
             .on_mouse_down(
@@ -316,6 +324,7 @@ impl GitronimoApp {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn text_prompt_overlay(
         &self,
         colors: &ui_kit::ThemeColors,
@@ -365,6 +374,7 @@ impl GitronimoApp {
             .bottom_0()
             .bg(colors.overlay_scrim)
             .flex()
+            .items_start()
             .justify_center()
             .pt_8()
             .on_mouse_down(
@@ -378,6 +388,7 @@ impl GitronimoApp {
                     .w(px(420.0))
                     .flex()
                     .flex_col()
+                    .flex_shrink_0()
                     .bg(colors.panel_background)
                     .border_1()
                     .border_color(colors.border)
@@ -446,6 +457,7 @@ impl GitronimoApp {
             .bottom_0()
             .bg(colors.overlay_scrim)
             .flex()
+            .items_start()
             .justify_center()
             .pt_8()
             .on_mouse_down(
@@ -533,4 +545,107 @@ impl GitronimoApp {
             )
             .into_any_element()
     }
+
+    #[allow(clippy::unused_self)]
+    pub(crate) fn welcome_plus_menu_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        // Anchor near the welcome sidebar footer `+` (toolbar 56 + activity 26 + footer ~40).
+        let menu_bottom = px(66.0);
+        let menu_left = px(12.0);
+        div()
+            .absolute()
+            .inset_0()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.close_welcome_plus_menu(cx);
+                }),
+            )
+            .child(
+                div()
+                    .id("welcome-plus-menu")
+                    .absolute()
+                    .bottom(menu_bottom)
+                    .left(menu_left)
+                    .min_w(px(200.0))
+                    .py_1()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(8.0))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(welcome_plus_menu_item(
+                        "New Group…",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.new_bookmark_group_from_menu(cx);
+                        },
+                    ))
+                    .child(welcome_plus_menu_item(
+                        "Add Repository…",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.add_repository_from_picker(cx);
+                        },
+                    ))
+                    .child(
+                        div()
+                            .h(px(1.0))
+                            .my_1()
+                            .mx_2()
+                            .bg(colors.border)
+                            .into_any_element(),
+                    )
+                    .child(welcome_plus_menu_item(
+                        "Create Repository…",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.close_welcome_plus_menu(cx);
+                            app.prompt_create_repository(cx);
+                        },
+                    ))
+                    .child(welcome_plus_menu_item(
+                        "Clone Repository…",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.close_welcome_plus_menu(cx);
+                            app.prompt_clone_repository(cx);
+                        },
+                    )),
+            )
+            .into_any_element()
+    }
+}
+
+fn welcome_plus_menu_item(
+    label: &'static str,
+    colors: &ui_kit::ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> AnyElement {
+    div()
+        .id(label)
+        .px_3()
+        .py_1p5()
+        .mx_1()
+        .rounded(px(4.0))
+        .text_sm()
+        .cursor_pointer()
+        .hover(|style| style.bg(colors.selection))
+        .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)))
+        .child(label)
+        .into_any_element()
 }

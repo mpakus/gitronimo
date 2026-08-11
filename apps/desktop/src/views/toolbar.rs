@@ -3,7 +3,7 @@
 use gpui::{AnyElement, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
-use crate::actions::{CommandPalette, NavigateBack, NavigateForward, OpenRepository, Refresh};
+use crate::actions::{NavigateBack, NavigateForward, OpenRepository, Refresh};
 use crate::app_state::{GitronimoApp, RepositoryView, ShellState, WelcomeShellView};
 use crate::views::components::{ActionTooltip, stacked_toolbar_button, toolbar_divider};
 use crate::views::icons::{IconKind, icon};
@@ -153,6 +153,7 @@ impl GitronimoApp {
                                 cx,
                                 |app, _, cx| {
                                     app.show_command_palette = false;
+                                    app.welcome_plus_menu_open = false;
                                     app.show_quick_open = !app.show_quick_open;
                                     cx.notify();
                                 },
@@ -233,8 +234,8 @@ impl GitronimoApp {
                         IconKind::Palette,
                         colors,
                         cx,
-                        |_, window, cx| {
-                            window.dispatch_action(Box::new(CommandPalette), cx);
+                        |app, _, cx| {
+                            app.open_command_palette(cx);
                         },
                         false,
                     ))
