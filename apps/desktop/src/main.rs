@@ -309,6 +309,7 @@ impl GitronimoApp {
             commit_subject_input,
             commit_body_input,
             repo_description_input,
+            branch_rename_input,
         ) = Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
@@ -351,6 +352,9 @@ impl GitronimoApp {
             pending_stash_action: None,
             pending_operation_action: None,
             pending_branch_delete: None,
+            pending_branch_rename: None,
+            branch_rename_value: String::new(),
+            selected_branch_review: None,
             force_push_state: ForcePushState::Idle,
             shortcut_reference_state: ShortcutReferenceState::Hidden,
             commit_subject: String::new(),
@@ -434,6 +438,7 @@ impl GitronimoApp {
             commit_subject_input,
             commit_body_input,
             repo_description_input,
+            branch_rename_input,
             show_quick_open: false,
             commit_options_expanded: false,
             user_repo_description: String::new(),
@@ -495,6 +500,7 @@ impl GitronimoApp {
             commit_subject_input,
             commit_body_input,
             repo_description_input,
+            branch_rename_input,
         ) = Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
@@ -537,6 +543,9 @@ impl GitronimoApp {
             pending_stash_action: None,
             pending_operation_action: None,
             pending_branch_delete: None,
+            pending_branch_rename: None,
+            branch_rename_value: String::new(),
+            selected_branch_review: None,
             force_push_state: ForcePushState::Idle,
             shortcut_reference_state: ShortcutReferenceState::Hidden,
             commit_subject: String::new(),
@@ -620,6 +629,7 @@ impl GitronimoApp {
             commit_subject_input,
             commit_body_input,
             repo_description_input,
+            branch_rename_input,
             show_quick_open: false,
             commit_options_expanded: false,
             user_repo_description: String::new(),
@@ -1088,6 +1098,37 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
+    fn begin_branch_rename(&mut self, current: String, cx: &mut Context<Self>) {
+        self.pending_branch_rename = Some(current);
+        self.branch_rename_value.clear();
+        cx.notify();
+    }
+
+    fn cancel_branch_rename(&mut self, cx: &mut Context<Self>) {
+        self.pending_branch_rename = None;
+        self.branch_rename_value.clear();
+        cx.notify();
+    }
+
+    fn confirm_branch_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(current) = self.pending_branch_rename.clone() else {
+            return;
+        };
+        let name = self.branch_rename_value.trim().to_owned();
+        if name.is_empty() || name == current {
+            self.activity = "Enter a new branch name to rename.".into();
+            cx.notify();
+            return;
+        }
+        self.pending_branch_rename = None;
+        self.branch_rename_value.clear();
+        self.run_branch_command(
+            format!("Renaming branch to {name}"),
+            move |git, repository| git.rename_branch(repository, &current, &name),
+            cx,
+        );
+    }
+
     fn merge_branch_into_current(&mut self, branch: String, cx: &mut Context<Self>) {
         self.run_branch_command(
             format!("Merging {branch} into current"),
@@ -1104,41 +1145,8 @@ return remote_url & linefeed & parent_path"#;
         );
     }
 
-    #[allow(clippy::unused_self)]
     fn prompt_rename_branch(&mut self, current: String, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let prompt = format!("Rename branch '{current}' to:");
-            let name = cx
-                .background_spawn(async move {
-                    Command::new("osascript")
-                        .args([
-                            "-e",
-                            &format!(
-                                "text returned of (display dialog \"{prompt}\" default answer \"\")"
-                            ),
-                        ])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| {
-                            String::from_utf8_lossy(&output.stdout)
-                                .trim_end()
-                                .to_owned()
-                        })
-                        .filter(|name| !name.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(name) = name {
-                    app.run_branch_command(
-                        format!("Renaming branch to {name}"),
-                        move |git, repository| git.rename_branch(repository, &current, &name),
-                        cx,
-                    );
-                }
-            });
-        })
-        .detach();
+        self.begin_branch_rename(current, cx);
     }
 
     fn move_history_selection(&mut self, delta: isize, cx: &mut Context<Self>) {

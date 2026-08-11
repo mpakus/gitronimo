@@ -47,6 +47,11 @@ impl Render for GitronimoApp {
                 self.show_quick_open
                     .then(|| self.quick_open_overlay(&colors, cx).into_any_element()),
             )
+            .children(
+                self.pending_branch_rename
+                    .is_some()
+                    .then(|| self.branch_rename_overlay(&colors, cx).into_any_element()),
+            )
             .child(
                 div()
                     .flex_1()
@@ -191,6 +196,81 @@ impl GitronimoApp {
                             .child(display)
                             .into_any_element()
                     })),
+            )
+            .into_any_element()
+    }
+
+    pub(crate) fn branch_rename_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let current = self
+            .pending_branch_rename
+            .clone()
+            .unwrap_or_else(|| "branch".into());
+        div()
+            .absolute()
+            .top(px(52.0))
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(colors.overlay_scrim)
+            .flex()
+            .justify_center()
+            .pt_8()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.cancel_branch_rename(cx);
+                }),
+            )
+            .child(
+                div()
+                    .w(px(420.0))
+                    .flex()
+                    .flex_col()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(8.0))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(colors.border)
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(format!("Rename branch '{current}'")),
+                    )
+                    .child(div().px_3().py_2().child(
+                        crate::views::single_line_input::single_line_input_shell(
+                            self.branch_rename_input.clone(),
+                            colors,
+                            false,
+                        ),
+                    ))
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .flex()
+                            .gap_2()
+                            .child(file_action_button("Rename", colors, cx, |app, cx| {
+                                app.confirm_branch_rename(cx);
+                            }))
+                            .child(file_action_button("Cancel", colors, cx, |app, cx| {
+                                app.cancel_branch_rename(cx);
+                            })),
+                    ),
             )
             .into_any_element()
     }

@@ -596,6 +596,12 @@ pub struct RefSnapshot {
 pub struct NamedRef {
     pub name: GitPath,
     pub target: String,
+    /// Short upstream ref name when configured (local branches only).
+    pub upstream: Option<String>,
+    /// Commits on this branch not in upstream.
+    pub ahead: u32,
+    /// Commits on upstream not in this branch.
+    pub behind: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

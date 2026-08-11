@@ -1061,18 +1061,28 @@ impl GitExecutable {
         &self,
         repository: &WorktreeRepository,
     ) -> Result<RefSnapshot, GitStatusError> {
-        let refs = self.run(
+        let local_heads = self.run(
+            &repository.worktree_root,
+            [
+                "for-each-ref",
+                "--format=%(refname)%00%(objectname)%00%(upstream:short)%00%(upstream:trackshort)%00",
+                "refs/heads",
+            ],
+        )?;
+        if !local_heads.status.success() {
+            return Err(command_error(&local_heads));
+        }
+        let other_refs = self.run(
             &repository.worktree_root,
             [
                 "for-each-ref",
                 "--format=%(refname)%00%(objectname)%00",
-                "refs/heads",
                 "refs/remotes",
                 "refs/tags",
             ],
         )?;
-        if !refs.status.success() {
-            return Err(command_error(&refs));
+        if !other_refs.status.success() {
+            return Err(command_error(&other_refs));
         }
         let remotes = self.run(
             &repository.worktree_root,
@@ -1081,7 +1091,7 @@ impl GitExecutable {
         if !remotes.status.success() && remotes.status.code() != Some(1) {
             return Err(command_error(&remotes));
         }
-        parse_ref_snapshot(&refs.stdout, &remotes.stdout)
+        parse_ref_snapshot(&local_heads.stdout, &other_refs.stdout, &remotes.stdout)
     }
 
     /// Checks out an existing branch through Git's safe switch command.
@@ -2947,32 +2957,31 @@ fn parse_ref_decorations(bytes: &[u8]) -> Result<Vec<RefDecoration>, GitStatusEr
         .collect()
 }
 
-fn parse_ref_snapshot(refs: &[u8], remotes: &[u8]) -> Result<RefSnapshot, GitStatusError> {
-    let fields = refs
-        .split(|byte| *byte == 0)
-        .filter(|field| field.iter().any(|byte| !byte.is_ascii_whitespace()))
-        .collect::<Vec<_>>();
-    if fields.len() % 2 != 0 {
-        return Err(GitStatusError::ParseHistory);
+fn parse_ref_ahead_behind(raw: &[u8]) -> Result<(u32, u32), GitStatusError> {
+    if raw.is_empty() || raw == b"=" {
+        return Ok((0, 0));
     }
-    let mut snapshot = RefSnapshot::default();
-    for pair in fields.chunks_exact(2) {
-        let (name, target) = (
-            pair[0].trim_ascii_start(),
-            std::str::from_utf8(pair[1]).map_err(|_| GitStatusError::ParseHistory)?,
-        );
-        let named = |prefix: &[u8]| NamedRef {
-            name: GitPath(name[prefix.len()..].to_vec()),
-            target: target.to_owned(),
-        };
-        if name.starts_with(b"refs/heads/") {
-            snapshot.local_branches.push(named(b"refs/heads/"));
-        } else if name.starts_with(b"refs/remotes/") {
-            snapshot.remote_branches.push(named(b"refs/remotes/"));
-        } else if name.starts_with(b"refs/tags/") {
-            snapshot.tags.push(named(b"refs/tags/"));
+    let value = std::str::from_utf8(raw).map_err(|_| GitStatusError::ParseHistory)?;
+    let mut ahead = 0;
+    let mut behind = 0;
+    for part in value.split_whitespace() {
+        if let Some(count) = part.strip_prefix('+') {
+            ahead = count.parse().map_err(|_| GitStatusError::ParseHistory)?;
+        } else if let Some(count) = part.strip_prefix('-') {
+            behind = count.parse().map_err(|_| GitStatusError::ParseHistory)?;
         }
     }
+    Ok((ahead, behind))
+}
+
+fn parse_ref_snapshot(
+    local_heads: &[u8],
+    other_refs: &[u8],
+    remotes: &[u8],
+) -> Result<RefSnapshot, GitStatusError> {
+    let mut snapshot = RefSnapshot::default();
+    append_local_head_refs(local_heads, &mut snapshot)?;
+    append_other_named_refs(other_refs, &mut snapshot)?;
     for entry in remotes
         .split(|byte| *byte == 0)
         .filter(|entry| !entry.is_empty())
@@ -2993,6 +3002,78 @@ fn parse_ref_snapshot(refs: &[u8], remotes: &[u8]) -> Result<RefSnapshot, GitSta
         });
     }
     Ok(snapshot)
+}
+
+fn split_nul_fields(raw: &[u8]) -> Vec<Vec<u8>> {
+    let without_newlines: Vec<u8> = raw.iter().copied().filter(|byte| *byte != b'\n').collect();
+    let mut fields: Vec<Vec<u8>> = without_newlines
+        .split(|byte| *byte == 0)
+        .map(<[u8]>::to_vec)
+        .collect();
+    if fields.last().is_some_and(Vec::is_empty) {
+        fields.pop();
+    }
+    fields
+}
+
+fn append_local_head_refs(
+    local_heads: &[u8],
+    snapshot: &mut RefSnapshot,
+) -> Result<(), GitStatusError> {
+    let fields = split_nul_fields(local_heads);
+    if !fields.is_empty() && !fields.len().is_multiple_of(4) {
+        return Err(GitStatusError::ParseHistory);
+    }
+    for chunk in fields.chunks_exact(4) {
+        let name = chunk[0].trim_ascii_start();
+        if !name.starts_with(b"refs/heads/") {
+            return Err(GitStatusError::ParseHistory);
+        }
+        let target = std::str::from_utf8(&chunk[1])
+            .map_err(|_| GitStatusError::ParseHistory)?
+            .to_owned();
+        let upstream_raw =
+            std::str::from_utf8(&chunk[2]).map_err(|_| GitStatusError::ParseHistory)?;
+        let upstream = (!upstream_raw.is_empty()).then(|| upstream_raw.to_owned());
+        let (ahead, behind) = parse_ref_ahead_behind(&chunk[3])?;
+        snapshot.local_branches.push(NamedRef {
+            name: GitPath(name[b"refs/heads/".len()..].to_vec()),
+            target,
+            upstream,
+            ahead,
+            behind,
+        });
+    }
+    Ok(())
+}
+
+fn append_other_named_refs(
+    other_refs: &[u8],
+    snapshot: &mut RefSnapshot,
+) -> Result<(), GitStatusError> {
+    let fields = split_nul_fields(other_refs);
+    if !fields.is_empty() && !fields.len().is_multiple_of(2) {
+        return Err(GitStatusError::ParseHistory);
+    }
+    for chunk in fields.chunks_exact(2) {
+        let name = chunk[0].trim_ascii_start();
+        let target = std::str::from_utf8(&chunk[1])
+            .map_err(|_| GitStatusError::ParseHistory)?
+            .to_owned();
+        let named = |prefix: &[u8]| NamedRef {
+            name: GitPath(name[prefix.len()..].to_vec()),
+            target: target.clone(),
+            upstream: None,
+            ahead: 0,
+            behind: 0,
+        };
+        if name.starts_with(b"refs/remotes/") {
+            snapshot.remote_branches.push(named(b"refs/remotes/"));
+        } else if name.starts_with(b"refs/tags/") {
+            snapshot.tags.push(named(b"refs/tags/"));
+        }
+    }
+    Ok(())
 }
 
 fn git_candidates() -> Vec<PathBuf> {
@@ -3020,7 +3101,8 @@ mod tests {
         CommitRequest, GitExecutable, GitStatusError, MAX_PROCESS_OUTPUT_BYTES, RenameKind,
         git_candidates, parse_commit_records, parse_git_progress_line, parse_lfs_status,
         parse_nul_paths, parse_numstat_line, parse_porcelain_v2_z, parse_rebase_todo,
-        parse_signature, parse_stash_records, parse_unified_diff, read_limited, trim_oid,
+        parse_ref_ahead_behind, parse_ref_snapshot, parse_signature, parse_stash_records,
+        parse_unified_diff, read_limited, trim_oid,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
@@ -3036,6 +3118,29 @@ mod tests {
         let output = vec![b'x'; MAX_PROCESS_OUTPUT_BYTES + 1];
         let error = read_limited(Cursor::new(output)).expect_err("output should be bounded");
         assert_eq!(error.kind(), std::io::ErrorKind::FileTooLarge);
+    }
+
+    #[test]
+    fn parses_ref_ahead_behind_field() {
+        assert_eq!(parse_ref_ahead_behind(b"").expect("empty"), (0, 0));
+        assert_eq!(parse_ref_ahead_behind(b"+3 -2").expect("diverged"), (3, 2));
+    }
+
+    #[test]
+    fn parses_ref_snapshot_with_upstream_tracking() {
+        let local_heads = b"refs/heads/main\0abc123\0origin/main\0+1 -2\0";
+        let other_refs = b"refs/remotes/origin/main\0def456\0refs/tags/v1\0tag123\0";
+        let snapshot =
+            parse_ref_snapshot(local_heads, other_refs, b"").expect("snapshot should parse");
+        let main = snapshot
+            .local_branches
+            .iter()
+            .find(|branch| branch.name.0 == b"main")
+            .expect("main branch");
+        assert_eq!(main.upstream.as_deref(), Some("origin/main"));
+        assert_eq!((main.ahead, main.behind), (1, 2));
+        assert_eq!(snapshot.remote_branches.len(), 1);
+        assert_eq!(snapshot.tags.len(), 1);
     }
 
     #[test]

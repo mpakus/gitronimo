@@ -1,5 +1,23 @@
 # Implementation work log
 
+## 2026-08-11 — Branches Review list + GPUI branch rename
+
+**Intent:** continue post–UI-PLAN polish on `feature/ui-improvements`: flesh out Branches Review beyond empty state and replace the branch-rename osascript dialog with an in-app GPUI prompt.
+
+**Design:** extend `NamedRef` / `ref_snapshot` with upstream and ahead/behind from `git for-each-ref`; Branches Review two-pane lists local branches with divergence badges and a detail panel (HEAD marker, upstream, checkout); branch rename uses `overlay_scrim` + `single_line_input` (`TextFieldBinding::BranchRename`) instead of AppleScript.
+
+**Files changed:**
+- `crates/git_domain/src/lib.rs` — upstream/ahead/behind on `NamedRef`
+- `crates/git_cli/src/lib.rs` — extended ref format + parser test
+- `apps/desktop/src/app_state.rs` — branch review selection, rename prompt state
+- `apps/desktop/src/views/single_line_input.rs` — `BranchRename` binding
+- `apps/desktop/src/views/branches_review.rs` — branch list + detail
+- `apps/desktop/src/views/workspace.rs` — rename overlay
+- `apps/desktop/src/main.rs` — wire rename prompt, init state
+- `docs/UI-PLAN.md` — Branches Review deferral note
+
+**Acceptance checks:** Branches Review lists local branches with upstream divergence; selecting a branch shows detail and checkout; rename branch from context menu uses GPUI overlay (no osascript); ref parser test covers ahead/behind; full workspace gates pass.
+
 ## 2026-08-11 — UI polish pass (~1% remaining parity)
 
 **Intent:** close remaining polish gaps from `docs/UI-PLAN.md` deferrals/sign-off without OAuth/enterprise scope.

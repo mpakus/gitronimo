@@ -281,7 +281,7 @@ Manual QA — compare each row to Tower screenshot (optional follow-up):
 | Item | Reason |
 |------|--------|
 | OAuth / enterprise GitHub | `PLAN.md` Phase 9 hardening |
-| Branches Review (full diverged-branch workflow) | Optional Tower feature — sidebar stub + empty state shipped |
+| Branches Review (full diverged-branch workflow) | Optional Tower feature — sidebar view lists branches with upstream divergence; merge/rebase actions deferred |
 | Pixel-perfect Tower clone | `AGENTS.md` / `PLAN.md` non-goals |
 | Built-in editor / terminal | Product non-goal |
 
