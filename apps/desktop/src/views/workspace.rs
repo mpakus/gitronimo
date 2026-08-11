@@ -113,6 +113,10 @@ impl Render for GitronimoApp {
                 self.welcome_plus_menu_overlay(&colors, cx)
                     .into_any_element()
             }))
+            .children(self.ref_context.is_some().then(|| {
+                self.ref_context_menu_overlay(&colors, cx)
+                    .into_any_element()
+            }))
     }
 }
 
@@ -625,6 +629,52 @@ impl GitronimoApp {
                             app.prompt_clone_repository(cx);
                         },
                     )),
+            )
+            .into_any_element()
+    }
+
+    /// Anchored popup for sidebar branch/remote/tag actions (Tower-style right-click menu).
+    pub(crate) fn ref_context_menu_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        // Sit over the sidebar tree: below toolbar/activity, inset from the left edge.
+        let menu_top = px(90.0);
+        let menu_left = px(12.0);
+        div()
+            .absolute()
+            .inset_0()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.close_ref_context_menu(cx);
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.close_ref_context_menu(cx);
+                }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top(menu_top)
+                    .left(menu_left)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .children(self.ref_context_menu_view(colors, cx)),
             )
             .into_any_element()
     }

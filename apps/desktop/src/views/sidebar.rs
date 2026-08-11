@@ -222,6 +222,7 @@ impl GitronimoApp {
                         |(index, remote)| {
                             String::from_utf8(remote.name.0.clone()).ok().map(|name| {
                                 let context = RefContext::Remote(name.clone());
+                                let menu_context = context.clone();
                                 div()
                                     .id(("remote-ref", index))
                                     .h(px(REF_ROW_HEIGHT))
@@ -235,8 +236,14 @@ impl GitronimoApp {
                                     .cursor_pointer()
                                     .hover(|style| style.bg(colors.selection))
                                     .on_click(cx.listener(move |app, _, _, cx| {
-                                        app.select_ref_context(context.clone(), cx);
+                                        app.select_ref_context(&context, cx);
                                     }))
+                                    .on_mouse_down(
+                                        MouseButton::Right,
+                                        cx.listener(move |app, _, _, cx| {
+                                            app.open_ref_context_menu(menu_context.clone(), cx);
+                                        }),
+                                    )
                                     .child(icon(IconKind::Cloud, 12.0, colors.text_muted))
                                     .child(name)
                                     .into_any_element()
@@ -426,6 +433,7 @@ impl GitronimoApp {
             }
             if visible {
                 let context = kind.context(name.clone());
+                let menu_context = context.clone();
                 let nest = u16::try_from(parts.len().saturating_sub(1)).unwrap_or(32);
                 let pad = REF_BASE_PAD + f32::from(nest) * REF_DEPTH_STEP;
                 let is_head = matches!(kind, RefKind::LocalBranch)
@@ -449,8 +457,14 @@ impl GitronimoApp {
                         .cursor_pointer()
                         .hover(|style| style.bg(colors.selection))
                         .on_click(cx.listener(move |app, _, _, cx| {
-                            app.select_ref_context(context.clone(), cx);
+                            app.select_ref_context(&context, cx);
                         }))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |app, _, _, cx| {
+                                app.open_ref_context_menu(menu_context.clone(), cx);
+                            }),
+                        )
                         // Align leaf icons under folder name (chevron column + gap).
                         .when(nest > 0, |row| row.child(div().w(px(12.0)).flex_shrink_0()))
                         .child(icon(leaf_icon, 13.0, colors.text_muted))

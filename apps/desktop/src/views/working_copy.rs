@@ -95,7 +95,6 @@ impl GitronimoApp {
             .children(self.navigation_controls(colors, cx))
             .children(self.operation_banner_view(colors, cx))
             .children(self.operation_confirmation_view(colors, cx))
-            .children(self.ref_context_menu_view(colors, cx))
             .children(self.working_copy.as_ref().is_none().then(|| {
                 state_panel(
                     "Loading working copy",
@@ -345,15 +344,18 @@ impl GitronimoApp {
             RefContext::Remote(name) => ("Remote", name.clone()),
         };
         let mut menu = div()
-            .p_2()
+            .id("ref-context-menu")
+            .p_1p5()
             .flex()
             .flex_col()
-            .gap_1()
-            .min_w(px(200.0))
-            .bg(colors.raised_background)
+            .gap_0p5()
+            .min_w(px(240.0))
+            .max_w(px(320.0))
+            .bg(colors.panel_background)
             .border_1()
             .border_color(colors.border)
-            .rounded(px(4.0))
+            .rounded(px(8.0))
+            .shadow_lg()
             .child(
                 div()
                     .px_2()
@@ -1196,7 +1198,10 @@ fn menu_item(
         .cursor_pointer()
         .hover(|style| style.bg(colors.selection));
     item.interactivity()
-        .on_click(cx.listener(move |app, event, _, cx| on_click(app, event, cx)));
+        .on_click(cx.listener(move |app, event, _, cx| {
+            app.close_ref_context_menu(cx);
+            on_click(app, event, cx);
+        }));
     item.child(label).into_any_element()
 }
 

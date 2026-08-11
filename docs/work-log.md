@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-08-11 — Branch actions as right-click popup
+
+**Intent:** Working Copy should stay Tower-like (composer + files only). The inline “Local branch: …” action panel must become a right-click context popup on sidebar branches/remotes/tags (Tower pattern), not replace the WC pane.
+
+**Files:** `docs/work-log.md`, `working_copy.rs`, `sidebar.rs`, `workspace.rs`, `main.rs` (`open`/`close` ref menu).
+
+**Acceptance:** WC has no inline branch menu; right-click branch opens anchored popup with Checkout/History/Merge/…; outside click / action closes; left-click does not open the panel.
+
+**Done:** Inline panel removed from WC; sidebar right-click opens `ref_context_menu_overlay`; menu actions close popup; gates + relaunch.
+
 ## 2026-08-11 — Amend checkbox loads HEAD + Amend button
 
 **Intent:** Checking Amend shows last commit short hash beside the checkbox, fills subject (and body) from that commit, switches the primary button to active “Amend”, and clicking it runs `git commit --amend` with staged changes / message.

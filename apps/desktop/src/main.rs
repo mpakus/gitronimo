@@ -4239,9 +4239,21 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
-    fn select_ref_context(&mut self, context: RefContext, cx: &mut Context<Self>) {
+    fn select_ref_context(&mut self, _context: &RefContext, cx: &mut Context<Self>) {
+        // Left-click no longer opens the inline Working Copy panel; keep selection
+        // cleared so WC stays Tower-like. Right-click uses open_ref_context_menu.
+        self.close_ref_context_menu(cx);
+    }
+
+    pub(crate) fn open_ref_context_menu(&mut self, context: RefContext, cx: &mut Context<Self>) {
         self.ref_context = Some(context);
         cx.notify();
+    }
+
+    pub(crate) fn close_ref_context_menu(&mut self, cx: &mut Context<Self>) {
+        if self.ref_context.take().is_some() {
+            cx.notify();
+        }
     }
 
     fn show_ref_history(&mut self, reference: String, cx: &mut Context<Self>) {
