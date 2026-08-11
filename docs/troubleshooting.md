@@ -20,4 +20,21 @@ On a panic, Gitronimo writes a local report under `~/Library/Application Support
 
 All Gitronimo actions use visible text labels, and shared action controls repeat those labels in hover tooltips. Use the native menus or `Command-Shift-P` command palette; `Command-/` opens the complete shortcut reference.
 
+Working Copy file selection:
+
+- `Command-A` selects all files in the visible list (Modified/All Files tab and search filter apply).
+- When all visible files are selected, click a row to clear selection; click again to select all.
+- With multiple files selected, clicking a row's stage checkbox stages or unstages all selected files.
+
+Full shortcut and selection rules: [`keyboard-shortcuts.md`](keyboard-shortcuts.md).
+
 GPUI 0.2.2 does not expose macOS accessibility roles or programmatic labels for its custom elements, so VoiceOver parity is a known beta limitation. It will need framework support before Gitronimo can provide a complete assistive-technology experience.
+
+## Build toolchain
+
+Gitronimo requires **Rust 1.97+** (`edition2024`). If `cargo build` fails with an edition error, install the pinned toolchain:
+
+```bash
+rustup toolchain install 1.97.1-aarch64-apple-darwin
+export PATH="$HOME/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin:$PATH"
+```

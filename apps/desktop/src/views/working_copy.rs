@@ -221,6 +221,33 @@ impl GitronimoApp {
             .collect()
     }
 
+    pub(crate) fn visible_status_paths(&self) -> Vec<GitPath> {
+        if self.worktree_show_all_files {
+            let groups = self.status_groups();
+            let search = self.worktree_file_search.to_lowercase();
+            let mut paths = Vec::new();
+            for path in &self.tracked_files {
+                let display = String::from_utf8_lossy(&path.0);
+                if search.is_empty() || display.to_lowercase().contains(&search) {
+                    paths.push(path.clone());
+                }
+            }
+            for entry in groups.untracked {
+                let path = status_path(entry).clone();
+                let display = String::from_utf8_lossy(&path.0);
+                if search.is_empty() || display.to_lowercase().contains(&search) {
+                    paths.push(path);
+                }
+            }
+            paths
+        } else {
+            self.modified_entries()
+                .into_iter()
+                .map(|entry| status_path(entry).clone())
+                .collect()
+        }
+    }
+
     fn file_list_column_header(colors: &ThemeColors) -> impl IntoElement {
         div()
             .h(px(22.0))
@@ -1002,7 +1029,7 @@ impl GitronimoApp {
                 .interactivity()
                 .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
                     cx.stop_propagation();
-                    app.toggle_path_staged(checkbox_path.clone(), staged, cx);
+                    app.toggle_path_staged(&checkbox_path, staged, cx);
                 }));
             checkbox
                 .child(if staged { "\u{2713}" } else { "" })

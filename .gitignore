@@ -10,3 +10,4 @@ docs/screens/*
 
 # XERJ local index/data
 .xerj/
+.cursor/skills

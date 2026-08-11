@@ -84,6 +84,8 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 **Adopt in Gitronimo:**
 
 - sidebar stays the primary navigation (current design already does this);
+- workspace sidebar lists **Working Copy, History, Stashes, Settings** (Pull Requests, Branches Review, and Reflog remain reachable from the command palette);
+- branch/ref actions open from a **right-click context menu** on sidebar branches, remotes, and tags (Tower pattern), not an inline panel in Working Copy;
 - add a **remote-activity footer** in the sidebar (or activity bar) showing in-flight fetch/pull/push progress and last result — wire it to the existing `NetworkOperation` state.
 
 ### 1.6 Working Copy — the commit hub
@@ -96,7 +98,8 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 - move the commit composer to sit directly above the file list in the Working Copy view (it is currently reachable via the composer action);
 - add a **"Modified only / All files" list-mode toggle**;
-- add a compact per-file **stage checkbox** (see 2.3).
+- add a compact per-file **stage checkbox** (see 2.3);
+- **multi-select** with Command-A, Shift-click, and Command-click; checkbox on a multi-selected row stages/unstages all selected files (see [`keyboard-shortcuts.md`](keyboard-shortcuts.md)).
 
 ### 1.7 Pull Requests — collaboration surface
 
@@ -119,6 +122,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 **Adopt in Gitronimo:**
 
 - Gitronimo's History already shows commit graph + per-commit diff; add a **Changeset / Tree mode toggle** on the detail pane;
+- central commit list uses **full-width flat rows** (accent selection only on the active row), **multi-lane graph** with node dots, two-line author/date + hash/subject layout, and **plain typographic ref labels** (no pill backgrounds);
 - add **double-click → Commit Detail view** (1.9) navigation.
 
 ### 1.9 Commit Detail — granular inspection
@@ -161,6 +165,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 - keep the file list + diff panes (current design);
 - add a **per-file checkbox** in the status list that toggles stage/unstage (single click), in addition to the current multi-select + stage button;
+- when multiple files are selected (Command-A, Shift-click, or Command-click), a checkbox click stages or unstages **all selected files** and keeps the list selection;
 - add a **staged/unstaged icon position** affordance (left = staged) or clear left/right badges so users instantly see the stage state;
 - preserve partial staging of lines/hunks in the diff viewer (already implemented).
 
@@ -203,6 +208,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 **Done (functional):**
 - [x] Working Copy composer above file list, Modified/All Files toggle, per-file stage checkbox, staged/unstaged badges
+- [x] Working Copy multi-select: Command-A select all visible files; toggle deselect/reselect on row click when all selected; batch stage/unstage via checkbox on multi-selection
 - [x] Visible Back/Forward (Prev/Next) toolbar navigation with disabled state
 - [x] Reveal new commit in History after committing
 - [x] Commit Detail view with Changeset/Tree modes (double-click from History)
@@ -214,6 +220,12 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Always-visible inline toolbar/sidebar search filtering repos and files
 - [x] Sidebar remote-activity progress bar during fetch/pull/push + last-result footer when idle
 - [x] Visual polish pass: welcome detail headers, commit focus border, diff tabs/hunk headers, HEAD badge, activity bar
+
+**Done (2026-08-11 — Tower interior pass):**
+- [x] In-repo sidebar trimmed to Working Copy / History / Stashes / Settings; PRs, Branches Review, Reflog via palette
+- [x] Branch/ref context menu on sidebar right-click (Checkout, History, Merge, …)
+- [x] History: full-width flat rows, multi-lane graph, plain ref labels, scope header + month groups
+- [x] Working Copy file multi-select + batch checkbox staging
 
 **Done (consistency pass — 2026-08-10):**
 - [x] Shared layout constants (`LIST_ROW_HEIGHT`, `NAV_ROW_HEIGHT`, `PANEL_HEADER_HEIGHT`, etc.) in `components.rs`
@@ -248,6 +260,9 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 | Deterministic remote progress | §1.5 | Indeterminate bar during fetch/pull/push; no byte/object counts from Git stderr yet |
 | IME-rich search/composer | §4 | Inline search uses key-down capture; full EntityInputHandler fields deferred |
 | Settings dedicated view | §1.3 | Settings sidebar item routes to Services; no separate preferences panel yet |
+| History ref label density | §1.8 | Plain text labels; long ref names still truncate on narrow panes |
+
+See also [`keyboard-shortcuts.md`](keyboard-shortcuts.md) for Working Copy selection behavior.
 
 ### Delivery notes
 

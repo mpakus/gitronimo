@@ -35,10 +35,12 @@ Bring Gitronimo to **~99% Tower parity** — same information architecture, work
 All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 
 - Working Copy composer, Modified/All Files, per-file staging, diff tabs
+- Working Copy multi-select (Command-A, Shift/Cmd-click) and batch checkbox staging
 - Welcome: vertical rail, repo detail panel, grouped/flat list, search filter
-- In-repo sidebar: WORKSPACE/BRANCHES/TAGS/REMOTES, HEAD badge, remote footer
+- In-repo sidebar: WORKSPACE/BRANCHES/TAGS/REMOTES, HEAD badge, remote footer; workspace nav trimmed to WC/History/Stashes/Settings
+- Branch/ref actions via sidebar right-click context menu (Tower pattern)
 - Toolbar: labeled Fetch/Pull/Push/Sync, Apply/Save/Refresh, Prev/Next, search field
-- History: Changeset/Tree toggle, structured commit rows
+- History: Changeset/Tree toggle, full-width flat rows, multi-lane graph, plain ref labels, scope header
 - Stashes, Remotes, Services, PRs: two-pane layouts
 - GPUI `single_line_input` for search, commit subject/body (paste, caret, IME)
 - GPUI `single_line_input` for welcome repo description (no osascript dialog)
@@ -63,7 +65,7 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 | History | `overview-08`, `workflow-06` | `history.rs` |
 | Commit Detail | `overview-09` | `commit_detail.rs` |
 | Pull Requests | `overview-07` | `pull_requests.rs` |
-| Branch menu | `tower-branch-menu.png` | `working_copy.rs` |
+| Branch menu | `tower-branch-menu.png` | `sidebar.rs`, `workspace.rs` (`ref_context_menu_overlay`) |
 | Settings | Tower sidebar gear | `settings.rs` |
 
 ---

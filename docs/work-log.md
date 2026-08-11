@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-08-11 — Working Copy select all / toggle deselect / batch checkbox
+
+**Intent:** Cmd/Ctrl+A selects all files in the visible Working Copy list; when all are selected, clicking any selected row deselects all; the next row click re-selects all (toggle). When multiple files are selected (Cmd-A, Shift, or Cmd-click), clicking a row checkbox stages/unstages all selected files and keeps list selection.
+
+**Files:** `actions.rs`, `keymap.rs`, `main.rs`, `app_state.rs`, `workspace.rs`, `working_copy.rs` (`visible_status_paths`).
+
+**Acceptance:** Cmd-A in WC selects all changed files; click selected row clears all; next click selects all again; normal single-click still works otherwise. Checkbox on a multi-selected row stages/unstages all selected files and keeps the file selection.
+
+**Done:** `SelectAllStatusFiles` action; `visible_status_paths`; toggle deselect/reselect; `run_mutation(..., preserve_selection)` for checkbox batch staging; docs updated (`AGENTS.md`, `keyboard-shortcuts.md`, `UI-IMPROVE.md`).
+
 ## 2026-08-11 — History list full-width flat Tower rows
 
 **Intent:** Match Tower central History list: no per-row card backgrounds (only selected row highlighted); rows span full pane width; branch/ref pills stay readable (contrast + truncate, don’t crush into subject).

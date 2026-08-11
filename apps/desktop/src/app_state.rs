@@ -408,6 +408,8 @@ pub(crate) struct GitronimoApp {
     pub ref_context: Option<RefContext>,
     pub selected_paths: Vec<GitPath>,
     pub last_selected_path_index: Option<usize>,
+    /// After deselecting all changed files via row click, the next row click re-selects all.
+    pub file_list_select_all_armed: bool,
     pub context_path: Option<GitPath>,
     pub loaded_diff: Option<LoadedDiff>,
     pub selected_diff: Option<(GitPath, bool)>,

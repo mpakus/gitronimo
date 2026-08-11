@@ -58,6 +58,7 @@ impl Render for GitronimoApp {
             .on_action(cx.listener(Self::navigate_forward))
             .on_action(cx.listener(Self::toggle_appearance))
             .on_action(cx.listener(Self::widen_sidebar))
+            .on_action(cx.listener(Self::select_all_status_files))
             .on_drop(cx.listener(Self::dropped_paths))
             .child(self.workspace_toolbar(&colors, cx))
             .child(
@@ -139,6 +140,7 @@ impl GitronimoApp {
                 .child("Keyboard shortcuts")
                 .child("Command-O  Open repository")
                 .child("Command-R  Refresh working copy")
+                .child("Command-A  Select all changed files (Working Copy)")
                 .child("Command-Shift-C  Edit commit subject")
                 .child("Command-Shift-P  Command palette")
                 .child("Command-/  Show or hide this reference")

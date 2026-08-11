@@ -14,6 +14,7 @@ actions!(
         ShortcutReference,
         ToggleAppearance,
         WidenSidebar,
-        WidenInspector
+        WidenInspector,
+        SelectAllStatusFiles
     ]
 );

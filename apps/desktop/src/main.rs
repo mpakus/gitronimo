@@ -46,7 +46,8 @@ use ui_kit::Appearance;
 
 use crate::actions::{
     CommandPalette, FocusComposer, HistoryNext, HistoryPrevious, NavigateBack, NavigateForward,
-    OpenRepository, Refresh, ShortcutReference, ToggleAppearance, WidenSidebar,
+    OpenRepository, Refresh, SelectAllStatusFiles, ShortcutReference, ToggleAppearance,
+    WidenSidebar,
 };
 use crate::app_state::{
     ChoicePromptKind, DEFAULT_LIST_PANE_WIDTH, DEFAULT_SIDEBAR_WIDTH, ForcePushState, GitronimoApp,
@@ -57,7 +58,6 @@ use crate::app_state::{
     discard_selected, git_failure_message, network_failure_message, repository_is_available,
     repository_unavailable_message, resize_width,
 };
-use crate::views::components::status_path;
 use crate::views::single_line_input::register_input_bindings;
 
 const INITIAL_WINDOW_SIZE: (f32, f32) = (1200.0, 800.0);
@@ -368,6 +368,7 @@ impl GitronimoApp {
             ref_context: None,
             selected_paths: Vec::new(),
             last_selected_path_index: None,
+            file_list_select_all_armed: false,
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
@@ -591,6 +592,7 @@ impl GitronimoApp {
             ref_context: None,
             selected_paths: Vec::new(),
             last_selected_path_index: None,
+            file_list_select_all_armed: false,
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
@@ -818,6 +820,7 @@ impl GitronimoApp {
                 self.refs = RefSnapshot::default();
                 self.ref_context = None;
                 self.selected_paths.clear();
+                self.file_list_select_all_armed = false;
                 self.context_path = None;
                 self.loaded_diff = None;
                 self.selected_diff = None;
@@ -1110,6 +1113,31 @@ return remote_url & linefeed & parent_path"#;
 
     fn focus_composer(&mut self, _: &FocusComposer, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_commit_subject(window, cx);
+    }
+
+    fn select_all_status_files(
+        &mut self,
+        _: &SelectAllStatusFiles,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.repository_view != RepositoryView::WorkingCopy
+            || self.pending_text_prompt.is_some()
+            || self.show_command_palette
+            || self.show_quick_open
+        {
+            return;
+        }
+        let visible = self.visible_status_paths();
+        if visible.is_empty() {
+            return;
+        }
+        self.selected_paths = visible;
+        self.file_list_select_all_armed = false;
+        self.last_selected_path_index = Some(0);
+        self.selected_diff = None;
+        self.loaded_diff = None;
+        cx.notify();
     }
 
     fn show_command_palette(&mut self, _: &CommandPalette, _: &mut Window, cx: &mut Context<Self>) {
@@ -4474,13 +4502,40 @@ return remote_url & linefeed & parent_path"#;
         cx: &mut Context<Self>,
     ) {
         let path_for_index = path.clone();
+        let visible = self.visible_status_paths();
+        let all_visible_selected = !visible.is_empty()
+            && visible
+                .iter()
+                .all(|candidate| self.selected_paths.contains(candidate));
+
+        if !additive && !shift {
+            if all_visible_selected && self.selected_paths.contains(&path) {
+                self.selected_paths.clear();
+                self.file_list_select_all_armed = true;
+                self.selected_diff = None;
+                self.loaded_diff = None;
+                self.last_selected_path_index = None;
+                cx.notify();
+                return;
+            }
+            if self.file_list_select_all_armed && visible.contains(&path) {
+                self.last_selected_path_index = visible.iter().position(|p| p == &path);
+                self.selected_paths = visible;
+                self.file_list_select_all_armed = false;
+                self.selected_diff = None;
+                self.loaded_diff = None;
+                cx.notify();
+                return;
+            }
+            self.file_list_select_all_armed = false;
+        }
+
         if shift {
             if let Some(last_index) = self.last_selected_path_index {
-                let all_paths = self.all_status_paths();
-                if let Some(current_index) = all_paths.iter().position(|p| p == &path) {
+                if let Some(current_index) = visible.iter().position(|p| p == &path) {
                     let start = last_index.min(current_index);
                     let end = last_index.max(current_index);
-                    for p in all_paths.iter().skip(start).take(end + 1 - start) {
+                    for p in visible.iter().skip(start).take(end + 1 - start) {
                         if !self.selected_paths.contains(p) {
                             self.selected_paths.push(p.clone());
                         }
@@ -4521,22 +4576,8 @@ return remote_url & linefeed & parent_path"#;
                 cx,
             );
         }
-        self.last_selected_path_index = self
-            .all_status_paths()
-            .iter()
-            .position(|p| p == &path_for_index);
+        self.last_selected_path_index = visible.iter().position(|p| p == &path_for_index);
         cx.notify();
-    }
-
-    fn all_status_paths(&self) -> Vec<GitPath> {
-        let mut paths = Vec::new();
-        let Some(status) = &self.working_copy else {
-            return paths;
-        };
-        for entry in &status.entries {
-            paths.push(status_path(entry).clone());
-        }
-        paths
     }
 
     fn load_diff(
@@ -4591,20 +4632,27 @@ return remote_url & linefeed & parent_path"#;
 
     fn toggle_path_staged(
         &mut self,
-        path: GitPath,
+        path: &GitPath,
         currently_staged: bool,
         cx: &mut Context<Self>,
     ) {
         if self.mutation_in_flight {
             return;
         }
-        self.selected_paths = vec![path];
+        let paths = if self.selected_paths.contains(path) && self.selected_paths.len() > 1 {
+            self.selected_paths.clone()
+        } else {
+            if !self.selected_paths.contains(path) {
+                self.selected_paths = vec![path.clone()];
+            }
+            self.selected_paths.clone()
+        };
         let operation = if currently_staged {
             Mutation::UnstageSelected
         } else {
             Mutation::StageSelected
         };
-        self.mutate(operation, cx);
+        self.run_mutation(operation, paths, true, cx);
     }
 
     pub(crate) fn toggle_worktree_show_all(&mut self, cx: &mut Context<Self>) {
@@ -4807,14 +4855,14 @@ return remote_url & linefeed & parent_path"#;
             cx.notify();
             return;
         }
-        self.run_mutation(operation, paths, cx);
+        self.run_mutation(operation, paths, false, cx);
     }
 
     fn confirm_discard(&mut self, cx: &mut Context<Self>) {
         let Some(paths) = self.pending_discard.take() else {
             return;
         };
-        self.run_mutation(Mutation::DiscardSelected, paths, cx);
+        self.run_mutation(Mutation::DiscardSelected, paths, false, cx);
     }
 
     fn toggle_diff_line(&mut self, hunk_index: usize, line_index: usize, cx: &mut Context<Self>) {
@@ -5636,11 +5684,27 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
-    fn run_mutation(&mut self, operation: Mutation, paths: Vec<GitPath>, cx: &mut Context<Self>) {
+    fn run_mutation(
+        &mut self,
+        operation: Mutation,
+        paths: Vec<GitPath>,
+        preserve_selection: bool,
+        cx: &mut Context<Self>,
+    ) {
         let ShellState::Repository(repository) = &self.state else {
             return;
         };
         let repository = repository.clone();
+        let preserved_paths = if preserve_selection {
+            self.selected_paths.clone()
+        } else {
+            Vec::new()
+        };
+        let preserved_diff = if preserve_selection {
+            self.selected_diff.clone()
+        } else {
+            None
+        };
         self.mutation_in_flight = true;
         self.activity = format!("{}…", operation.label());
         let worker_repository = repository.clone();
@@ -5664,12 +5728,29 @@ return remote_url & linefeed & parent_path"#;
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.selected_paths.clear();
-                        app.loaded_diff = None;
-                        app.selected_diff = None;
-                        app.selected_diff_lines.clear();
+                        if preserve_selection {
+                            app.selected_paths = preserved_paths;
+                            app.selected_diff = preserved_diff;
+                            app.loaded_diff = None;
+                        } else {
+                            app.selected_paths.clear();
+                            app.loaded_diff = None;
+                            app.selected_diff = None;
+                            app.selected_diff_lines.clear();
+                        }
                         app.activity = format!("{} complete.", operation.label());
-                        app.load_working_copy(repository, cx);
+                        app.load_working_copy(repository.clone(), cx);
+                        if preserve_selection
+                            && let Some((path, staged)) = app.selected_diff.clone()
+                        {
+                            Self::load_diff(
+                                repository,
+                                path,
+                                staged,
+                                git_cli::MAX_DISPLAY_DIFF_BYTES,
+                                cx,
+                            );
+                        }
                     }
                     Err(error) => app.activity = git_failure_message(operation.label(), &error),
                 }

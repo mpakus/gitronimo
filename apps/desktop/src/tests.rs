@@ -169,7 +169,7 @@ fn window_titles_distinguish_welcome_loading_and_drafts() {
         window_title(&ShellState::Loading("/tmp/example".into()), false),
         "Opening repository — Gitronimo"
     );
-    assert_eq!(keymap::bindings().len(), 12);
+    assert_eq!(keymap::bindings().len(), 13);
 }
 
 #[test]

@@ -16,3 +16,54 @@
 - Screenshots of third-party products (including Tower) may be saved under `docs/` for UI/UX reference and study, provided each is attributed to its source; never ship them in the app bundle or claim them as Gitronimo's own.
 - Do not add a dependency, crate, or framework abstraction without a current checklist item that needs it.
 - Before completing a task, run `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check`.
+
+## Toolchain
+
+Use **Rust 1.97+** (`edition2024`). On macOS:
+
+```bash
+export PATH="$HOME/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin:$PATH"
+```
+
+System `cargo` older than 1.97 will fail on this workspace.
+
+## Documentation map
+
+| Doc | Purpose |
+|-----|---------|
+| `PLAN.md` | Product roadmap and checklist — source of truth for scope |
+| `docs/work-log.md` | Per-task intent, files, acceptance checks (write **before** coding) |
+| `docs/UI-PLAN.md` | Tower parity phases and screenshot regression matrix |
+| `docs/UI-IMPROVE.md` | Tower guide patterns mapped to Gitronimo views |
+| `docs/architecture.md` | Crate layers and mutation flow |
+| `docs/implementation-boundaries.md` | Layering constraints |
+| `docs/troubleshooting.md` | User-facing recovery and keyboard reference |
+| `docs/keyboard-shortcuts.md` | Global shortcuts and Working Copy selection rules |
+| `docs/dependency-policy.md` | `cargo deny` policy |
+| `docs/packaging.md` | macOS bundle notes |
+| `docs/adr/` | Architecture decision records |
+
+Tower reference screenshots live under `docs/screens/` (attributed, internal study only).
+
+## GPUI agent skills
+
+Project-owned GPUI skills are vendored under `./skills/` (see `skills/README.md`). Symlink or copy them into agent skill directories when working on desktop UI:
+
+```bash
+for skill in skills/gpui-*; do
+  ln -sf "../../$skill" ".cursor/skills/$(basename "$skill")"
+done
+```
+
+Prefer these skills for actions, entities, styling, async, and testing patterns before improvising GPUI code.
+
+## Working Copy selection (agent context)
+
+When touching file-list selection or staging:
+
+- **`SelectAllStatusFiles`** (`Cmd/Ctrl+A`) selects all paths from `visible_status_paths()` (Modified/All Files tab + search filter).
+- When all visible files are selected, a plain row click toggles between none selected and all selected (`file_list_select_all_armed`).
+- **Shift+click** and **Cmd/Ctrl+click** extend selection; checkbox clicks on a multi-selected row stage/unstage **all selected paths** and preserve list selection (`run_mutation(..., preserve_selection: true)`).
+- Commit subject/body fields keep their own `SingleLineInput` `Cmd/Ctrl+A` binding when focused.
+
+See `docs/keyboard-shortcuts.md` for the full shortcut list.
