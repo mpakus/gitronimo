@@ -161,6 +161,13 @@ fn load_welcome_snapshot(path: &Path) -> WelcomeRepoSnapshot {
             HeadStatus::Unborn => Some("Unborn branch".into()),
             HeadStatus::Unknown => None,
         };
+        snapshot.upstream = status
+            .branch
+            .upstream
+            .as_ref()
+            .map(|upstream| String::from_utf8_lossy(&upstream.0).into_owned());
+        snapshot.ahead = status.branch.ahead;
+        snapshot.behind = status.branch.behind;
         snapshot.changed_files = Some(status.entries.len());
     }
     if let Ok(refs) = git.ref_snapshot(&repository) {
@@ -296,8 +303,13 @@ impl GitronimoApp {
             .into_iter()
             .collect();
         let selected_recent = (!recents.is_empty()).then_some(0);
-        let (welcome_search_input, worktree_search_input, commit_subject_input, commit_body_input) =
-            Self::create_text_inputs(cx);
+        let (
+            welcome_search_input,
+            worktree_search_input,
+            commit_subject_input,
+            commit_body_input,
+            repo_description_input,
+        ) = Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
             last_action: None,
@@ -310,6 +322,8 @@ impl GitronimoApp {
             welcome_snapshot: None,
             welcome_snapshot_path: None,
             welcome_snapshot_token: 0,
+            welcome_list_snapshots: std::collections::HashMap::new(),
+            welcome_list_snapshot_token: 0,
             welcome_shell_view: WelcomeShellView::Repositories,
             repositories_grouped: true,
             welcome_repo_search: String::new(),
@@ -419,6 +433,7 @@ impl GitronimoApp {
             worktree_search_input,
             commit_subject_input,
             commit_body_input,
+            repo_description_input,
             show_quick_open: false,
             commit_options_expanded: false,
             user_repo_description: String::new(),
@@ -431,6 +446,7 @@ impl GitronimoApp {
         if app.selected_recent.is_some() {
             app.refresh_welcome_snapshot(cx);
         }
+        app.refresh_welcome_list_snapshots(cx);
         app
     }
 
@@ -473,8 +489,13 @@ impl GitronimoApp {
             .unwrap_or_default()
             .into_iter()
             .collect();
-        let (welcome_search_input, worktree_search_input, commit_subject_input, commit_body_input) =
-            Self::create_text_inputs(cx);
+        let (
+            welcome_search_input,
+            worktree_search_input,
+            commit_subject_input,
+            commit_body_input,
+            repo_description_input,
+        ) = Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
             last_action: None,
@@ -487,6 +508,8 @@ impl GitronimoApp {
             welcome_snapshot: None,
             welcome_snapshot_path: None,
             welcome_snapshot_token: 0,
+            welcome_list_snapshots: std::collections::HashMap::new(),
+            welcome_list_snapshot_token: 0,
             welcome_shell_view: WelcomeShellView::Repositories,
             repositories_grouped: true,
             welcome_repo_search: String::new(),
@@ -596,6 +619,7 @@ impl GitronimoApp {
             worktree_search_input,
             commit_subject_input,
             commit_body_input,
+            repo_description_input,
             show_quick_open: false,
             commit_options_expanded: false,
             user_repo_description: String::new(),
@@ -1050,9 +1074,11 @@ return remote_url & linefeed & parent_path"#;
         self.selected_recent = (!self.recents.is_empty()).then_some(0);
         self.welcome_snapshot = None;
         self.welcome_snapshot_path = None;
+        self.welcome_list_snapshots.clear();
         if self.selected_recent.is_some() {
             self.refresh_welcome_snapshot(cx);
         }
+        self.refresh_welcome_list_snapshots(cx);
         cx.notify();
     }
 
@@ -3000,40 +3026,6 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
-    fn prompt_repo_description(&mut self, cx: &mut Context<Self>) {
-        let current = self.user_repo_description.clone();
-        self.activity = "Enter repository description…".into();
-        cx.spawn(async move |this, cx| {
-            let text = cx
-                .background_spawn(async move {
-                    Command::new("osascript")
-                        .args([
-                            "-e",
-                            &format!(
-                                "text returned of (display dialog \"Repository description\" default answer \"{current}\")"
-                            ),
-                        ])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| {
-                            String::from_utf8_lossy(&output.stdout)
-                                .trim_end()
-                                .to_owned()
-                        })
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(text) = text {
-                    app.user_repo_description = text;
-                }
-                app.activity = "Ready.".into();
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
     fn widen_sidebar(&mut self, _: &WidenSidebar, _: &mut Window, cx: &mut Context<Self>) {
         self.sidebar_width = resize_width(self.sidebar_width);
         cx.notify();
@@ -3081,6 +3073,7 @@ return remote_url & linefeed & parent_path"#;
         self.welcome_snapshot_path = Some(path.clone());
         self.welcome_snapshot_token = self.welcome_snapshot_token.wrapping_add(1);
         let token = self.welcome_snapshot_token;
+        let list_path = path.clone();
         cx.spawn(async move |this, cx| {
             let snapshot = cx
                 .background_spawn(async move { load_welcome_snapshot(&path) })
@@ -3089,7 +3082,35 @@ return remote_url & linefeed & parent_path"#;
                 if app.welcome_snapshot_token != token {
                     return;
                 }
-                app.welcome_snapshot = Some(snapshot);
+                app.welcome_snapshot = Some(snapshot.clone());
+                app.welcome_list_snapshots.insert(list_path, snapshot);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn refresh_welcome_list_snapshots(&mut self, cx: &mut Context<Self>) {
+        let paths = self.recents.clone();
+        self.welcome_list_snapshot_token = self.welcome_list_snapshot_token.wrapping_add(1);
+        let token = self.welcome_list_snapshot_token;
+        cx.spawn(async move |this, cx| {
+            let snapshots = cx
+                .background_spawn(async move {
+                    paths
+                        .into_iter()
+                        .map(|path| {
+                            let snapshot = load_welcome_snapshot(&path);
+                            (path, snapshot)
+                        })
+                        .collect::<std::collections::HashMap<_, _>>()
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if app.welcome_list_snapshot_token != token {
+                    return;
+                }
+                app.welcome_list_snapshots = snapshots;
                 cx.notify();
             });
         })
@@ -3157,6 +3178,7 @@ return remote_url & linefeed & parent_path"#;
                 if app.selected_recent.is_some() {
                     app.refresh_welcome_snapshot(cx);
                 }
+                app.refresh_welcome_list_snapshots(cx);
                 cx.notify();
             });
         })

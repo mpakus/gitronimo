@@ -5,6 +5,7 @@
 //! types and helpers live in `crate::app_state`.
 
 pub(crate) mod blame;
+pub(crate) mod branches_review;
 pub(crate) mod commit_composer;
 pub(crate) mod commit_detail;
 pub(crate) mod compare;

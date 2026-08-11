@@ -8,7 +8,7 @@ use ui_kit::ThemeColors;
 use git_domain::HeadStatus;
 use git_domain::NamedRef;
 
-use crate::app_state::{GitronimoApp, RefContext, RefKind, WelcomeShellView};
+use crate::app_state::{GitronimoApp, RefContext, RefKind, WelcomeRepoSnapshot, WelcomeShellView};
 use crate::views::components::{
     LIST_ROW_HEIGHT, NAV_ROW_HEIGHT, count_badge, head_badge, remote_progress_footer,
     sidebar_section_label,
@@ -98,6 +98,17 @@ impl GitronimoApp {
                     } else {
                         app.navigate_to(crate::app_state::RepositoryView::PullRequests, cx);
                     }
+                },
+            ))
+            .child(nav_row(
+                "Branches Review",
+                "\u{2696}",
+                "sidebar-branches-review",
+                self.repository_view == crate::app_state::RepositoryView::BranchesReview,
+                colors,
+                cx,
+                |app, _, cx| {
+                    app.navigate_to(crate::app_state::RepositoryView::BranchesReview, cx);
                 },
             ))
             .child(nav_row(
@@ -661,12 +672,17 @@ fn welcome_repo_row(
         .unwrap_or("Repository")
         .to_owned();
     let selected = app.selected_recent == Some(index);
+    let snapshot = app.welcome_list_snapshots.get(&path);
+    let branch_hint = snapshot.and_then(|data| data.branch.as_deref());
+    let upstream_badge = snapshot.and_then(welcome_upstream_badge);
+    let show_branch_hint = upstream_badge.is_none();
     div()
         .id(("welcome-repository", index))
         .h(px(LIST_ROW_HEIGHT))
         .px_3()
         .flex()
         .items_center()
+        .gap_2()
         .text_sm()
         .bg(if selected {
             colors.accent
@@ -685,6 +701,37 @@ fn welcome_repo_row(
                 app.open_recent(path.clone(), window, cx);
             }
         }))
-        .child(name)
+        .child(div().flex_1().overflow_hidden().child(name))
+        .children(upstream_badge.map(|text| count_badge(text, selected, colors)))
+        .children(
+            show_branch_hint
+                .then_some(branch_hint)
+                .flatten()
+                .map(|branch| {
+                    div()
+                        .text_xs()
+                        .text_color(if selected {
+                            colors.panel_background
+                        } else {
+                            colors.text_muted
+                        })
+                        .child(branch.to_owned())
+                        .into_any_element()
+                }),
+        )
         .into_any_element()
+}
+
+fn welcome_upstream_badge(snapshot: &WelcomeRepoSnapshot) -> Option<String> {
+    if snapshot.ahead == 0 && snapshot.behind == 0 {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if snapshot.ahead > 0 {
+        parts.push(format!("{} \u{2191}", snapshot.ahead));
+    }
+    if snapshot.behind > 0 {
+        parts.push(format!("{} \u{2193}", snapshot.behind));
+    }
+    Some(parts.join(" "))
 }

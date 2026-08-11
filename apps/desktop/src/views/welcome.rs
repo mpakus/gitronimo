@@ -12,6 +12,7 @@ use crate::views::components::{
     centered_empty_state, detail_row, detail_section, file_action_button,
     primary_window_action_button, welcome_rail_tab,
 };
+use crate::views::single_line_input::single_line_input_shell;
 
 impl GitronimoApp {
     pub(crate) fn welcome_vertical_rail(
@@ -157,11 +158,13 @@ fn welcome_repo_detail(
         .and_then(|data| data.last_commit_subject.clone())
         .or_else(|| app.last_commit_summary.clone())
         .unwrap_or_else(|| "No commits yet".into());
-    let description = if app.user_repo_description.is_empty() {
-        "Add a description…".to_owned()
-    } else {
-        app.user_repo_description.clone()
-    };
+    let upstream = snapshot
+        .and_then(|data| data.upstream.clone())
+        .unwrap_or_else(|| "Not configured".into());
+    let tracking = snapshot.map_or_else(
+        || "Loading…".into(),
+        |data| format_upstream_tracking(data.ahead, data.behind),
+    );
     let availability = snapshot.map_or("Checking availability…", |data| {
         if data.available {
             ""
@@ -224,23 +227,11 @@ fn welcome_repo_detail(
                 .child(
                     div()
                         .id("repo-description-field")
-                        .px_3()
-                        .py_2()
-                        .rounded(px(4.0))
-                        .bg(colors.raised_background)
-                        .border_1()
-                        .border_color(colors.border)
-                        .text_sm()
-                        .text_color(if app.user_repo_description.is_empty() {
-                            colors.text_muted
-                        } else {
-                            colors.text_secondary
-                        })
-                        .cursor_pointer()
-                        .on_click(cx.listener(|app, _, _, cx| {
-                            app.prompt_repo_description(cx);
-                        }))
-                        .child(description),
+                        .child(single_line_input_shell(
+                            app.repo_description_input.clone(),
+                            colors,
+                            false,
+                        )),
                 )
                 .child(
                     div()
@@ -291,6 +282,8 @@ fn welcome_repo_detail(
                 .flex_col()
                 .gap_0()
                 .child(detail_row("Current Branch", &branch, colors))
+                .child(detail_row("Upstream", &upstream, colors))
+                .child(detail_row("Tracking", &tracking, colors))
                 .child(detail_row("Status", &status, colors)),
         )
         .child(detail_section("Remotes", colors))
@@ -396,6 +389,21 @@ fn welcome_workflow_hub(
                 )),
         )
         .into_any_element()
+}
+
+fn format_upstream_tracking(ahead: u32, behind: u32) -> String {
+    if ahead == 0 && behind == 0 {
+        "Up to date".into()
+    } else {
+        let mut parts = Vec::new();
+        if ahead > 0 {
+            parts.push(format!("{ahead} ahead"));
+        }
+        if behind > 0 {
+            parts.push(format!("{behind} behind"));
+        }
+        parts.join(", ")
+    }
 }
 
 fn display_path(path: &Path) -> String {

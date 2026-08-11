@@ -38,6 +38,7 @@ pub(crate) enum TextFieldBinding {
     WorktreeSearch,
     CommitSubject,
     CommitBody,
+    RepoDescription,
 }
 
 pub(crate) struct SingleLineInput {
@@ -664,6 +665,14 @@ pub(crate) fn single_line_input_shell(
         .child(input)
 }
 
+pub(crate) type TextInputBundle = (
+    Entity<SingleLineInput>,
+    Entity<SingleLineInput>,
+    Entity<SingleLineInput>,
+    Entity<SingleLineInput>,
+    Entity<SingleLineInput>,
+);
+
 impl GitronimoApp {
     pub(crate) fn field_for_binding(&self, binding: TextFieldBinding) -> &str {
         match binding {
@@ -671,6 +680,7 @@ impl GitronimoApp {
             TextFieldBinding::WorktreeSearch => self.worktree_file_search.as_str(),
             TextFieldBinding::CommitSubject => self.commit_subject.as_str(),
             TextFieldBinding::CommitBody => self.commit_body.as_str(),
+            TextFieldBinding::RepoDescription => self.user_repo_description.as_str(),
         }
     }
 
@@ -683,17 +693,11 @@ impl GitronimoApp {
                 self.commit_subject_focused = true;
             }
             TextFieldBinding::CommitBody => self.commit_body = value,
+            TextFieldBinding::RepoDescription => self.user_repo_description = value,
         }
     }
 
-    pub(crate) fn create_text_inputs(
-        cx: &mut Context<Self>,
-    ) -> (
-        Entity<SingleLineInput>,
-        Entity<SingleLineInput>,
-        Entity<SingleLineInput>,
-        Entity<SingleLineInput>,
-    ) {
+    pub(crate) fn create_text_inputs(cx: &mut Context<Self>) -> TextInputBundle {
         let app = cx.entity();
         let welcome = cx.new(|cx| {
             SingleLineInput::new(
@@ -719,9 +723,18 @@ impl GitronimoApp {
                 cx,
             )
         });
-        let body =
-            cx.new(|cx| SingleLineInput::new(TextFieldBinding::CommitBody, app, "Description", cx));
-        (welcome, worktree, subject, body)
+        let body = cx.new(|cx| {
+            SingleLineInput::new(TextFieldBinding::CommitBody, app.clone(), "Description", cx)
+        });
+        let description = cx.new(|cx| {
+            SingleLineInput::new(
+                TextFieldBinding::RepoDescription,
+                app,
+                "Add a description…",
+                cx,
+            )
+        });
+        (welcome, worktree, subject, body, description)
     }
 }
 

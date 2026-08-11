@@ -61,6 +61,9 @@ impl GitronimoApp {
         if self.repository_view == RepositoryView::PullRequests {
             return self.pull_requests_view(colors, cx).into_any_element();
         }
+        if self.repository_view == RepositoryView::BranchesReview {
+            return self.branches_review_view(colors, cx).into_any_element();
+        }
         if self.repository_view == RepositoryView::Reflog {
             return self.reflog_view(repository, colors, cx).into_any_element();
         }

@@ -50,6 +50,7 @@ impl GitronimoApp {
                     RepositoryView::WorkingCopy => "Working Copy",
                     RepositoryView::History => "History",
                     RepositoryView::PullRequests => "Pull Requests",
+                    RepositoryView::BranchesReview => "Branches Review",
                     RepositoryView::Services => "Services",
                     RepositoryView::Settings => "Settings",
                     RepositoryView::Stashes => "Stashes",

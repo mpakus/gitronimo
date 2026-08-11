@@ -41,10 +41,11 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 - History: Changeset/Tree toggle, structured commit rows
 - Stashes, Remotes, Services, PRs: two-pane layouts
 - GPUI `single_line_input` for search, commit subject/body (paste, caret, IME)
+- GPUI `single_line_input` for welcome repo description (no osascript dialog)
 - Quick Open overlay, Settings view, workflow hub, file +/- line counts
 - `parse_git_progress_line` for deterministic fetch/pull/push progress
 - Secondary views (Reflog, Blame, Compare, etc.) on two-pane layout
-- Theme tokens: `toolbar_background`, `search_field_background`, `list_row_border`
+- Theme tokens: `toolbar_background`, `search_field_background`, `list_row_border`, `overlay_scrim`
 
 **Shared layout constants:** `LIST_ROW_HEIGHT` (22), `NAV_ROW_HEIGHT` (24), `PANEL_HEADER_HEIGHT` (28), `ACTION_BUTTON_HEIGHT` (26), `LIST_PANE_WIDTH` (280)
 
@@ -225,6 +226,7 @@ Apply `two_pane_view`, `view_panel_header`, `centered_empty_state` to:
 | `accent` | Selection bars, primary actions |
 | `selection` | Subtle row hover |
 | `focus_ring` | Focused input border |
+| `overlay_scrim` | Modal/overlay dim background |
 | `success` / `warning` / `danger` | Status, activity bar |
 | `added_line` / `removed_line` / `modified_line` | Diff backgrounds |
 
@@ -279,7 +281,7 @@ Manual QA — compare each row to Tower screenshot (optional follow-up):
 | Item | Reason |
 |------|--------|
 | OAuth / enterprise GitHub | `PLAN.md` Phase 9 hardening |
-| Branches Review | Optional Tower feature |
+| Branches Review (full diverged-branch workflow) | Optional Tower feature — sidebar stub + empty state shipped |
 | Pixel-perfect Tower clone | `AGENTS.md` / `PLAN.md` non-goals |
 | Built-in editor / terminal | Product non-goal |
 

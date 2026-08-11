@@ -1,5 +1,25 @@
 # Implementation work log
 
+## 2026-08-11 — UI polish pass (~1% remaining parity)
+
+**Intent:** close remaining polish gaps from `docs/UI-PLAN.md` deferrals/sign-off without OAuth/enterprise scope.
+
+**Design:** replace welcome repo description osascript dialog with GPUI `SingleLineInput` (`TextFieldBinding::RepoDescription`); load upstream/ahead/behind into `WelcomeRepoSnapshot` and show badges on welcome sidebar rows + detail panel; add Branches Review sidebar entry with two-pane empty state; add `overlay_scrim` theme token for Quick Open overlay in light/dark.
+
+**Files changed:**
+- `apps/desktop/src/views/single_line_input.rs` — `RepoDescription` binding, fifth input in bundle
+- `apps/desktop/src/views/welcome.rs` — inline description field, upstream/tracking detail rows
+- `apps/desktop/src/views/sidebar.rs` — upstream badges on repo rows, Branches Review nav
+- `apps/desktop/src/views/branches_review.rs` — new stub view
+- `apps/desktop/src/views/working_copy.rs`, `toolbar.rs`, `mod.rs` — route Branches Review
+- `apps/desktop/src/app_state.rs` — snapshot upstream fields, list snapshot cache
+- `apps/desktop/src/main.rs` — batch snapshot load, remove osascript description prompt
+- `apps/desktop/src/views/workspace.rs` — overlay_scrim token
+- `crates/ui_kit/src/theme.rs` — `overlay_scrim` light/dark
+- `docs/UI-PLAN.md` — deferrals + token inventory
+
+**Acceptance checks:** welcome description editable inline; repo list shows branch/upstream divergence badges; Branches Review reachable with empty state; Quick Open scrim uses theme token; fmt/clippy pass; desktop/ui_kit tests pass.
+
 ## 2026-08-11 — Tower 99% UI Parity Plan execution (Phases 0–10)
 
 **Intent:** implement `docs/UI-PLAN.md` — reach ~99% Tower parity across welcome and in-repo views.

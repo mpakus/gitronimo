@@ -129,7 +129,7 @@ impl GitronimoApp {
             .left_0()
             .right_0()
             .bottom_0()
-            .bg(gpui::hsla(0.0, 0.0, 0.0, 0.35))
+            .bg(colors.overlay_scrim)
             .flex()
             .justify_center()
             .pt_8()

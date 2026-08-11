@@ -36,6 +36,7 @@ pub struct ThemeColors {
     pub removed_line: Rgba,
     pub modified_line: Rgba,
     pub conflict: Rgba,
+    pub overlay_scrim: Rgba,
     pub graph_lanes: [Rgba; 6],
 }
 
@@ -74,6 +75,7 @@ impl Theme {
                 removed_line: rgb(0xfb_df_e1),
                 modified_line: rgb(0xff_f1_c7),
                 conflict: rgb(0xff_e4_b3),
+                overlay_scrim: gpui::hsla(0.0, 0.0, 0.0, 0.25).into(),
                 graph_lanes: [
                     rgb(0x00_68_cc),
                     rgb(0x12_8a_4b),
@@ -111,6 +113,7 @@ impl Theme {
                 removed_line: rgb(0x65_35_3d),
                 modified_line: rgb(0x59_49_28),
                 conflict: rgb(0x7f_50_23),
+                overlay_scrim: gpui::hsla(0.0, 0.0, 0.0, 0.45).into(),
                 graph_lanes: [
                     rgb(0x43_9a_ff),
                     rgb(0x49_c6_7c),
