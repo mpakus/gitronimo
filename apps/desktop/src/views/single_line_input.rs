@@ -45,6 +45,7 @@ pub(crate) enum TextFieldBinding {
     RepoDescription,
     TextPrompt,
     CommandPalette,
+    ChoicePrompt,
 }
 
 pub(crate) struct SingleLineInput {
@@ -217,6 +218,9 @@ impl SingleLineInput {
             TextFieldBinding::CommandPalette => {
                 self.app.update(cx, GitronimoApp::confirm_command_palette);
             }
+            TextFieldBinding::ChoicePrompt => {
+                self.app.update(cx, GitronimoApp::confirm_choice_prompt);
+            }
             _ => {}
         }
     }
@@ -229,23 +233,42 @@ impl SingleLineInput {
             TextFieldBinding::CommandPalette => {
                 self.app.update(cx, GitronimoApp::close_command_palette);
             }
+            TextFieldBinding::ChoicePrompt => {
+                self.app.update(cx, GitronimoApp::cancel_choice_prompt);
+            }
             _ => {}
         }
     }
 
     fn move_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.binding, TextFieldBinding::CommandPalette) {
-            self.app.update(cx, |app, cx| {
-                app.move_command_palette_selection(-1, cx);
-            });
+        match self.binding {
+            TextFieldBinding::CommandPalette => {
+                self.app.update(cx, |app, cx| {
+                    app.move_command_palette_selection(-1, cx);
+                });
+            }
+            TextFieldBinding::ChoicePrompt => {
+                self.app.update(cx, |app, cx| {
+                    app.move_choice_prompt_selection(-1, cx);
+                });
+            }
+            _ => {}
         }
     }
 
     fn move_down(&mut self, _: &MoveDown, _: &mut Window, cx: &mut Context<Self>) {
-        if matches!(self.binding, TextFieldBinding::CommandPalette) {
-            self.app.update(cx, |app, cx| {
-                app.move_command_palette_selection(1, cx);
-            });
+        match self.binding {
+            TextFieldBinding::CommandPalette => {
+                self.app.update(cx, |app, cx| {
+                    app.move_command_palette_selection(1, cx);
+                });
+            }
+            TextFieldBinding::ChoicePrompt => {
+                self.app.update(cx, |app, cx| {
+                    app.move_choice_prompt_selection(1, cx);
+                });
+            }
+            _ => {}
         }
     }
 
@@ -723,6 +746,7 @@ pub(crate) type TextInputBundle = (
     Entity<SingleLineInput>,
     Entity<SingleLineInput>,
     Entity<SingleLineInput>,
+    Entity<SingleLineInput>,
 );
 
 impl GitronimoApp {
@@ -735,6 +759,7 @@ impl GitronimoApp {
             TextFieldBinding::RepoDescription => self.user_repo_description.as_str(),
             TextFieldBinding::TextPrompt => self.text_prompt_value.as_str(),
             TextFieldBinding::CommandPalette => self.command_palette_query.as_str(),
+            TextFieldBinding::ChoicePrompt => self.choice_prompt_query.as_str(),
         }
     }
 
@@ -752,6 +777,10 @@ impl GitronimoApp {
             TextFieldBinding::CommandPalette => {
                 self.command_palette_query = value;
                 self.command_palette_selected = 0;
+            }
+            TextFieldBinding::ChoicePrompt => {
+                self.choice_prompt_query = value;
+                self.choice_prompt_selected = 0;
             }
         }
     }
@@ -797,7 +826,15 @@ impl GitronimoApp {
             SingleLineInput::new(TextFieldBinding::TextPrompt, app.clone(), "Enter value", cx)
         });
         let command_palette = cx.new(|cx| {
-            SingleLineInput::new(TextFieldBinding::CommandPalette, app, "Filter commands", cx)
+            SingleLineInput::new(
+                TextFieldBinding::CommandPalette,
+                app.clone(),
+                "Filter commands",
+                cx,
+            )
+        });
+        let choice_prompt = cx.new(|cx| {
+            SingleLineInput::new(TextFieldBinding::ChoicePrompt, app, "Filter choices", cx)
         });
         (
             welcome,
@@ -807,6 +844,7 @@ impl GitronimoApp {
             description,
             text_prompt,
             command_palette,
+            choice_prompt,
         )
     }
 }

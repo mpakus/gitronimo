@@ -6,8 +6,8 @@ use gpui::{
 use ui_kit::Theme;
 
 use crate::app_state::{
-    GitronimoApp, OverlayFocus, PaletteCommand, ShellState, ShortcutReferenceState, TextPromptKind,
-    window_title,
+    ChoicePromptKind, GitronimoApp, OverlayFocus, PaletteCommand, ShellState,
+    ShortcutReferenceState, TextPromptKind, window_title,
 };
 
 use super::components::{
@@ -23,6 +23,7 @@ impl Render for GitronimoApp {
                     self.command_palette_input.read(cx).focus_handle(cx)
                 }
                 OverlayFocus::TextPrompt => self.text_prompt_input.read(cx).focus_handle(cx),
+                OverlayFocus::ChoicePrompt => self.choice_prompt_input.read(cx).focus_handle(cx),
             };
             window.focus(&handle);
         }
@@ -69,6 +70,11 @@ impl Render for GitronimoApp {
                 self.pending_text_prompt
                     .is_some()
                     .then(|| self.text_prompt_overlay(&colors, cx).into_any_element()),
+            )
+            .children(
+                self.pending_choice_prompt
+                    .is_some()
+                    .then(|| self.choice_prompt_overlay(&colors, cx).into_any_element()),
             )
             .child(
                 div()
@@ -342,6 +348,11 @@ impl GitronimoApp {
                 if *squash { "Next" } else { "Fixup" },
             ),
             TextPromptKind::AutosquashMessage { .. } => ("Squash message".into(), "Squash"),
+            TextPromptKind::RewordSubject => ("New commit subject".into(), "Next"),
+            TextPromptKind::RewordBody { .. } => ("New commit body (optional)".into(), "Reword"),
+            TextPromptKind::MergeToolPath => {
+                ("Conflicted path (leave empty for all)".into(), "Open tool")
+            }
         };
         div()
             .absolute()
@@ -405,6 +416,117 @@ impl GitronimoApp {
                                 app.cancel_text_prompt(cx);
                             })),
                     ),
+            )
+            .into_any_element()
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn choice_prompt_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let Some(kind) = self.pending_choice_prompt.clone() else {
+            return div().into_any_element();
+        };
+        let title = kind.title();
+        let is_confirm = matches!(kind, ChoicePromptKind::ConfirmMergePullRequest { .. });
+        let options = kind.filtered_options(&self.choice_prompt_query);
+        let selected = self
+            .choice_prompt_selected
+            .min(options.len().saturating_sub(1));
+        div()
+            .absolute()
+            .top(px(52.0))
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(colors.overlay_scrim)
+            .flex()
+            .justify_center()
+            .pt_8()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.cancel_choice_prompt(cx);
+                }),
+            )
+            .child(
+                div()
+                    .w(px(420.0))
+                    .max_h(px(360.0))
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(8.0))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(colors.border)
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .when(is_confirm, |el| el.h(px(0.0)).overflow_hidden())
+                            .when(!is_confirm, |el| el.px_3().py_2())
+                            .child(crate::views::single_line_input::single_line_input_shell(
+                                self.choice_prompt_input.clone(),
+                                colors,
+                                false,
+                            )),
+                    )
+                    .children(is_confirm.then(|| {
+                        div()
+                            .px_3()
+                            .py_2()
+                            .flex()
+                            .gap_2()
+                            .child(file_action_button("Merge", colors, cx, |app, cx| {
+                                app.confirm_choice_prompt(cx);
+                            }))
+                            .child(file_action_button("Cancel", colors, cx, |app, cx| {
+                                app.cancel_choice_prompt(cx);
+                            }))
+                    }))
+                    .children((!is_confirm).then(|| {
+                        div().flex_1().overflow_hidden().children(
+                            options.into_iter().enumerate().map(|(row, (_, label))| {
+                                let selected_row = row == selected;
+                                let prompt_kind = kind.clone();
+                                div()
+                                    .id(row)
+                                    .px_3()
+                                    .py_2()
+                                    .text_sm()
+                                    .cursor_pointer()
+                                    .bg(if selected_row {
+                                        colors.selection
+                                    } else {
+                                        colors.panel_background
+                                    })
+                                    .hover(|row| row.bg(colors.selection))
+                                    .on_click(cx.listener(move |app, _, _, cx| {
+                                        app.select_choice_option(&prompt_kind, label, cx);
+                                    }))
+                                    .child(label)
+                                    .into_any_element()
+                            }),
+                        )
+                    })),
             )
             .into_any_element()
     }

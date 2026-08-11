@@ -48,11 +48,11 @@ use crate::actions::{
     OpenRepository, Refresh, ShortcutReference, ToggleAppearance, WidenSidebar,
 };
 use crate::app_state::{
-    ForcePushState, GitronimoApp, HistoryDetailMode, LastAction, Mutation, NetworkOperation,
-    OpenedRepository, OperationAction, OverlayFocus, PaletteCommand, RefContext, RepositoryView,
-    ShellState, ShortcutReferenceState, StashAction, TextPromptKind, ThemeMode,
-    WelcomeRepoSnapshot, WelcomeShellView, appearance_from_window, discard_selected,
-    git_failure_message, network_failure_message, repository_is_available,
+    ChoicePromptKind, ForcePushState, GitronimoApp, HistoryDetailMode, LastAction, Mutation,
+    NetworkOperation, OpenedRepository, OperationAction, OverlayFocus, PR_MERGE_METHOD_CHOICES,
+    PaletteCommand, RefContext, RepositoryView, ShellState, ShortcutReferenceState, StashAction,
+    TextPromptKind, ThemeMode, WelcomeRepoSnapshot, WelcomeShellView, appearance_from_window,
+    discard_selected, git_failure_message, network_failure_message, repository_is_available,
     repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
@@ -312,6 +312,7 @@ impl GitronimoApp {
             repo_description_input,
             text_prompt_input,
             command_palette_input,
+            choice_prompt_input,
         ) = Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
@@ -356,6 +357,9 @@ impl GitronimoApp {
             pending_branch_delete: None,
             pending_text_prompt: None,
             text_prompt_value: String::new(),
+            pending_choice_prompt: None,
+            choice_prompt_query: String::new(),
+            choice_prompt_selected: 0,
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_selected: 0,
@@ -447,6 +451,7 @@ impl GitronimoApp {
             repo_description_input,
             text_prompt_input,
             command_palette_input,
+            choice_prompt_input,
             show_quick_open: false,
             commit_options_expanded: false,
             user_repo_description: String::new(),
@@ -510,6 +515,7 @@ impl GitronimoApp {
             repo_description_input,
             text_prompt_input,
             command_palette_input,
+            choice_prompt_input,
         ) = Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
@@ -554,6 +560,9 @@ impl GitronimoApp {
             pending_branch_delete: None,
             pending_text_prompt: None,
             text_prompt_value: String::new(),
+            pending_choice_prompt: None,
+            choice_prompt_query: String::new(),
+            choice_prompt_selected: 0,
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_selected: 0,
@@ -645,6 +654,7 @@ impl GitronimoApp {
             repo_description_input,
             text_prompt_input,
             command_palette_input,
+            choice_prompt_input,
             show_quick_open: false,
             commit_options_expanded: false,
             user_repo_description: String::new(),
@@ -915,6 +925,9 @@ return remote_url & linefeed & parent_path"#;
         self.show_quick_open = false;
         self.pending_text_prompt = None;
         self.text_prompt_value.clear();
+        self.pending_choice_prompt = None;
+        self.choice_prompt_query.clear();
+        self.choice_prompt_selected = 0;
         self.show_command_palette = true;
         self.command_palette_query.clear();
         self.command_palette_selected = 0;
@@ -1031,14 +1044,14 @@ return remote_url & linefeed & parent_path"#;
             PaletteCommand::SquashStaged => self.prompt_autosquash(true, cx),
             PaletteCommand::FixupStaged => self.prompt_autosquash(false, cx),
             PaletteCommand::DropCommit => self.prompt_drop_commit(cx),
-            PaletteCommand::RewordLastCommit => Self::prompt_reword_last_commit(cx),
+            PaletteCommand::RewordLastCommit => self.prompt_reword_last_commit(cx),
             PaletteCommand::Conflicts => {
                 if let ShellState::Repository(repository) = &self.state {
                     self.show_conflicts(repository.clone(), cx);
                 }
             }
-            PaletteCommand::SetMergeTool => Self::prompt_set_merge_tool(cx),
-            PaletteCommand::OpenInMergeTool => Self::prompt_run_merge_tool(cx),
+            PaletteCommand::SetMergeTool => self.prompt_set_merge_tool(cx),
+            PaletteCommand::OpenInMergeTool => self.prompt_run_merge_tool(cx),
             PaletteCommand::CheckCommitSignature => Self::prompt_check_commit_signature(cx),
             PaletteCommand::ShowWorkingCopy => {
                 self.navigate_to(RepositoryView::WorkingCopy, cx);
@@ -1156,6 +1169,9 @@ return remote_url & linefeed & parent_path"#;
     ) {
         self.show_command_palette = false;
         self.show_quick_open = false;
+        self.pending_choice_prompt = None;
+        self.choice_prompt_query.clear();
+        self.choice_prompt_selected = 0;
         self.pending_text_prompt = Some(kind);
         self.text_prompt_value = initial.into();
         self.pending_overlay_focus = Some(OverlayFocus::TextPrompt);
@@ -1365,8 +1381,223 @@ return remote_url & linefeed & parent_path"#;
                     cx,
                 );
             }
+            TextPromptKind::RewordSubject => {
+                if value.is_empty() {
+                    self.activity = "Enter a commit subject.".into();
+                    cx.notify();
+                    return;
+                }
+                self.text_prompt_value.clear();
+                self.pending_text_prompt = Some(TextPromptKind::RewordBody { subject: value });
+                self.pending_overlay_focus = Some(OverlayFocus::TextPrompt);
+                cx.notify();
+            }
+            TextPromptKind::RewordBody { subject } => {
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.run_worktree_mutation(
+                    "Reword last commit".to_owned(),
+                    move |git, repository| {
+                        git.commit(
+                            repository,
+                            &CommitRequest {
+                                subject,
+                                body: value,
+                                amend: true,
+                                sign_off: false,
+                            },
+                        )
+                    },
+                    cx,
+                );
+            }
+            TextPromptKind::MergeToolPath => {
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.run_merge_tool_for_path(if value.is_empty() { None } else { Some(value) }, cx);
+            }
         }
         cx.notify();
+    }
+
+    fn begin_choice_prompt(&mut self, kind: ChoicePromptKind, cx: &mut Context<Self>) {
+        self.show_command_palette = false;
+        self.show_quick_open = false;
+        self.pending_text_prompt = None;
+        self.text_prompt_value.clear();
+        self.pending_choice_prompt = Some(kind);
+        self.choice_prompt_query.clear();
+        self.choice_prompt_selected = 0;
+        self.pending_overlay_focus = Some(OverlayFocus::ChoicePrompt);
+        cx.notify();
+    }
+
+    fn cancel_choice_prompt(&mut self, cx: &mut Context<Self>) {
+        self.pending_choice_prompt = None;
+        self.choice_prompt_query.clear();
+        self.choice_prompt_selected = 0;
+        cx.notify();
+    }
+
+    fn move_choice_prompt_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let Some(kind) = self.pending_choice_prompt.as_ref() else {
+            return;
+        };
+        let count = kind.filtered_options(&self.choice_prompt_query).len();
+        if count == 0 {
+            self.choice_prompt_selected = 0;
+            cx.notify();
+            return;
+        }
+        let current = self.choice_prompt_selected.min(count - 1);
+        let next = match delta.cmp(&0) {
+            std::cmp::Ordering::Less => current.saturating_sub(delta.unsigned_abs()),
+            std::cmp::Ordering::Greater => (current + delta.unsigned_abs()).min(count - 1),
+            std::cmp::Ordering::Equal => current,
+        };
+        self.choice_prompt_selected = next;
+        cx.notify();
+    }
+
+    fn confirm_choice_prompt(&mut self, cx: &mut Context<Self>) {
+        let Some(kind) = self.pending_choice_prompt.clone() else {
+            return;
+        };
+        match kind {
+            ChoicePromptKind::ConfirmMergePullRequest { number, method } => {
+                self.pending_choice_prompt = None;
+                self.choice_prompt_query.clear();
+                self.choice_prompt_selected = 0;
+                self.execute_merge_pull_request(number, method, cx);
+            }
+            ChoicePromptKind::SetMergeTool | ChoicePromptKind::MergePullRequest { .. } => {
+                let options = kind.filtered_options(&self.choice_prompt_query);
+                let Some((_, label)) = options
+                    .get(
+                        self.choice_prompt_selected
+                            .min(options.len().saturating_sub(1)),
+                    )
+                    .copied()
+                else {
+                    return;
+                };
+                self.select_choice_option(&kind, label, cx);
+            }
+        }
+    }
+
+    fn select_choice_option(
+        &mut self,
+        kind: &ChoicePromptKind,
+        label: &'static str,
+        cx: &mut Context<Self>,
+    ) {
+        match kind {
+            ChoicePromptKind::SetMergeTool => {
+                self.pending_choice_prompt = None;
+                self.choice_prompt_query.clear();
+                self.choice_prompt_selected = 0;
+                let tool = label.to_owned();
+                self.run_worktree_mutation(
+                    format!("Set merge tool to {tool}"),
+                    move |git, repository| git.set_merge_tool(repository, &tool),
+                    cx,
+                );
+            }
+            ChoicePromptKind::MergePullRequest { number } => {
+                let Some((_, method)) = PR_MERGE_METHOD_CHOICES
+                    .iter()
+                    .find(|(choice_label, _)| *choice_label == label)
+                else {
+                    return;
+                };
+                self.pending_choice_prompt = Some(ChoicePromptKind::ConfirmMergePullRequest {
+                    number: *number,
+                    method: *method,
+                });
+                self.choice_prompt_query.clear();
+                self.choice_prompt_selected = 0;
+                self.pending_overlay_focus = Some(OverlayFocus::ChoicePrompt);
+                cx.notify();
+            }
+            ChoicePromptKind::ConfirmMergePullRequest { number, method } => {
+                self.pending_choice_prompt = None;
+                self.choice_prompt_query.clear();
+                self.choice_prompt_selected = 0;
+                self.execute_merge_pull_request(*number, *method, cx);
+            }
+        }
+    }
+
+    fn execute_merge_pull_request(
+        &mut self,
+        number: u64,
+        method: git_domain::MergeMethod,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(repository) = self.pull_request_repository.clone() else {
+            self.activity = "Open pull requests before merging.".into();
+            cx.notify();
+            return;
+        };
+        let worker_repository = repository.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let keychain = MacKeychainStore;
+                    let token = keychain
+                        .read(&MacKeychainStore::github_key("default"))
+                        .map_err(|_| HostingError::Network)?
+                        .ok_or(HostingError::Authentication)?;
+                    GitHubService::default().merge_pull_request(
+                        &token,
+                        &worker_repository,
+                        number,
+                        method,
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                match result {
+                    Ok(()) => {
+                        app.activity = format!("Merged pull request #{number}.");
+                        app.load_pull_requests(repository, cx);
+                    }
+                    Err(error) => app.activity = format!("Merge failed: {error:?}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn run_merge_tool_for_path(&mut self, path: Option<String>, cx: &mut Context<Self>) {
+        let ShellState::Repository(repository) = &self.state else {
+            self.activity = "Open a repository before using the merge tool.".into();
+            cx.notify();
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let path_arg = path.map(|path| GitPath(path.as_bytes().to_vec()));
+        self.activity = "Opening merge tool…".into();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    git.run_merge_tool(&worker_repository, None, path_arg.as_ref())
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| match result {
+                Ok(()) => {
+                    app.activity = "Merge tool finished.".into();
+                    app.load_working_copy(repository, cx);
+                }
+                Err(error) => app.activity = format!("Merge tool failed: {error}"),
+            });
+        })
+        .detach();
     }
 
     fn merge_branch_into_current(&mut self, branch: String, cx: &mut Context<Self>) {
@@ -2587,60 +2818,11 @@ return remote_url & linefeed & parent_path"#;
             cx.notify();
             return;
         };
-        let Some(repository) = self.pull_request_repository.clone() else {
-            return;
-        };
         let Some(request) = self.pull_requests.get(index) else {
             return;
         };
         let number = request.number;
-        cx.spawn(async move |this, cx| {
-            let method = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "set choice to choose from list {\"Merge commit\", \"Squash\", \"Rebase\"} with title \"Merge pull request\"; if choice is false then return \"\"; set confirmation to button returned of (display dialog (\"Merge using \" & (item 1 of choice) & \"?\") buttons {\"Cancel\", \"Merge\"} default button \"Cancel\" with icon caution); if confirmation is \"Merge\" then return item 1 of choice"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-                        .filter(|method| !method.is_empty() && method != "false")
-                })
-                .await;
-            let Some(method) = method else {
-                return;
-            };
-            let Some(method) = (match method.as_str() {
-                "Merge commit" => Some(git_domain::MergeMethod::Merge),
-                "Squash" => Some(git_domain::MergeMethod::Squash),
-                "Rebase" => Some(git_domain::MergeMethod::Rebase),
-                _ => None,
-            }) else {
-                return;
-            };
-            let worker_repository = repository.clone();
-            let result = cx
-                .background_spawn(async move {
-                    let keychain = MacKeychainStore;
-                    let token = keychain
-                        .read(&MacKeychainStore::github_key("default"))
-                        .map_err(|_| HostingError::Network)?
-                        .ok_or(HostingError::Authentication)?;
-                    GitHubService::default()
-                        .merge_pull_request(&token, &worker_repository, number, method)
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                match result {
-                    Ok(()) => {
-                        app.activity = format!("Merged pull request #{number}.");
-                        app.load_pull_requests(repository, cx);
-                    }
-                    Err(error) => app.activity = format!("Merge failed: {error:?}"),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+        self.begin_choice_prompt(ChoicePromptKind::MergePullRequest { number }, cx);
     }
 
     fn checkout_pull_request(&mut self, cx: &mut Context<Self>) {
@@ -2811,52 +2993,8 @@ return remote_url & linefeed & parent_path"#;
         self.begin_text_prompt(TextPromptKind::DropCommit, "HEAD~1", cx);
     }
 
-    fn prompt_reword_last_commit(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let subject = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"New commit subject\" default answer \"\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|subject| !subject.is_empty())
-                })
-                .await;
-            let body = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"New commit body (optional)\" default answer \"\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                let Some(subject) = subject else {
-                    return;
-                };
-                let body = body.unwrap_or_default();
-                app.run_worktree_mutation(
-                    "Reword last commit".to_owned(),
-                    move |git, repository| {
-                        git.commit(
-                            repository,
-                            &CommitRequest {
-                                subject,
-                                body,
-                                amend: true,
-                                sign_off: false,
-                            },
-                        )
-                    },
-                    cx,
-                );
-            });
-        })
-        .detach();
+    fn prompt_reword_last_commit(&mut self, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::RewordSubject, "", cx);
     }
 
     fn show_conflicts(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
@@ -2913,74 +3051,12 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
-    fn prompt_set_merge_tool(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let tool = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "choose from list {\"opendiff\", \"meld\", \"kdiff3\", \"vimdiff\", \"bc3\"} with title \"Gitronimo merge tool\" with prompt \"Choose a merge tool\""])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-                        .filter(|tool| tool != "false" && !tool.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(tool) = tool {
-                    app.run_worktree_mutation(
-                        format!("Set merge tool to {tool}"),
-                        move |git, repository| git.set_merge_tool(repository, &tool),
-                        cx,
-                    );
-                }
-            });
-        })
-        .detach();
+    fn prompt_set_merge_tool(&mut self, cx: &mut Context<Self>) {
+        self.begin_choice_prompt(ChoicePromptKind::SetMergeTool, cx);
     }
 
-    fn prompt_run_merge_tool(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let path = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"Conflicted path, or leave empty for all\" default answer \"\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|path| !path.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                let ShellState::Repository(repository) = &app.state else {
-                    app.activity = "Open a repository before using the merge tool.".into();
-                    return;
-                };
-                let repository = repository.clone();
-                let worker_repository = repository.clone();
-                let path_arg = path.map(|path| GitPath(path.as_bytes().to_vec()));
-                app.activity = "Opening merge tool…".into();
-                cx.spawn(async move |this, cx| {
-                    let result = cx
-                        .background_spawn(async move {
-                            let git = GitExecutable::discover().map_err(|error| error.to_string())?;
-                            git.run_merge_tool(&worker_repository, None, path_arg.as_ref())
-                                .map_err(|error| format!("{error:?}"))
-                        })
-                        .await;
-                    let _ = this.update(cx, |app, cx| match result {
-                        Ok(()) => {
-                            app.activity = "Merge tool finished.".into();
-                            app.load_working_copy(repository, cx);
-                        }
-                        Err(error) => app.activity = format!("Merge tool failed: {error}"),
-                    });
-                })
-                .detach();
-            });
-        })
-        .detach();
+    fn prompt_run_merge_tool(&mut self, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::MergeToolPath, "", cx);
     }
 
     fn prompt_check_commit_signature(cx: &mut Context<Self>) {

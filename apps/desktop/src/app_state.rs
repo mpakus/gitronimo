@@ -145,6 +145,68 @@ pub(crate) enum TextPromptKind {
     RebaseOnto,
     AutosquashTarget { squash: bool },
     AutosquashMessage { target: String },
+    RewordSubject,
+    RewordBody { subject: String },
+    MergeToolPath,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum ChoicePromptKind {
+    SetMergeTool,
+    MergePullRequest {
+        number: u64,
+    },
+    ConfirmMergePullRequest {
+        number: u64,
+        method: git_domain::MergeMethod,
+    },
+}
+
+pub(crate) const MERGE_TOOL_CHOICES: &[&str] = &["opendiff", "meld", "kdiff3", "vimdiff", "bc3"];
+
+pub(crate) const PR_MERGE_METHOD_CHOICES: &[(&str, git_domain::MergeMethod)] = &[
+    ("Merge commit", git_domain::MergeMethod::Merge),
+    ("Squash", git_domain::MergeMethod::Squash),
+    ("Rebase", git_domain::MergeMethod::Rebase),
+];
+
+impl ChoicePromptKind {
+    pub(crate) fn title(&self) -> String {
+        match self {
+            Self::SetMergeTool => "Choose a merge tool".into(),
+            Self::MergePullRequest { number } => {
+                format!("Merge pull request #{number}")
+            }
+            Self::ConfirmMergePullRequest { number, method } => {
+                let label = match method {
+                    git_domain::MergeMethod::Merge => "Merge commit",
+                    git_domain::MergeMethod::Squash => "Squash",
+                    git_domain::MergeMethod::Rebase => "Rebase",
+                };
+                format!("Merge pull request #{number} using {label}?")
+            }
+        }
+    }
+
+    pub(crate) fn options(&self) -> Vec<&'static str> {
+        match self {
+            Self::SetMergeTool => MERGE_TOOL_CHOICES.to_vec(),
+            Self::MergePullRequest { .. } => PR_MERGE_METHOD_CHOICES
+                .iter()
+                .map(|(label, _)| *label)
+                .collect(),
+            Self::ConfirmMergePullRequest { .. } => Vec::new(),
+        }
+    }
+
+    pub(crate) fn filtered_options(&self, query: &str) -> Vec<(usize, &'static str)> {
+        let needle = query.trim().to_lowercase();
+        self.options()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, label)| needle.is_empty() || label.to_lowercase().contains(&needle))
+            .collect()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,6 +242,7 @@ pub(crate) enum PaletteCommand {
 pub(crate) enum OverlayFocus {
     CommandPalette,
     TextPrompt,
+    ChoicePrompt,
 }
 
 pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
@@ -329,6 +392,9 @@ pub(crate) struct GitronimoApp {
     pub pending_branch_delete: Option<String>,
     pub pending_text_prompt: Option<TextPromptKind>,
     pub text_prompt_value: String,
+    pub pending_choice_prompt: Option<ChoicePromptKind>,
+    pub choice_prompt_query: String,
+    pub choice_prompt_selected: usize,
     pub show_command_palette: bool,
     pub command_palette_query: String,
     pub command_palette_selected: usize,
@@ -420,6 +486,7 @@ pub(crate) struct GitronimoApp {
     pub repo_description_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub text_prompt_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub command_palette_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
+    pub choice_prompt_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub show_quick_open: bool,
     pub commit_options_expanded: bool,
     pub user_repo_description: String,

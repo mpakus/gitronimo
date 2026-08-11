@@ -1,5 +1,26 @@
 # Implementation work log
 
+## 2026-08-11 — GPUI choice overlays + reword / merge-tool prompts
+
+**Intent:** replace remaining high-frequency osascript `choose from list` and text dialogs (set merge tool, merge PR method, reword last commit, open merge tool path) with in-app GPUI overlays.
+
+**Design:** add `ChoicePromptKind` + `choice_prompt_overlay` (fixed option list with click / ↑↓ / Enter / Escape, same scrim pattern as command palette); migrate `SetMergeTool` and PR merge method picker onto it (PR merge keeps a Confirm step); extend `TextPromptKind` for reword subject/body (two-step) and optional conflict path for merge tool.
+
+**Files (planned):**
+- `apps/desktop/src/app_state.rs` — `ChoicePromptKind`, choice state fields, text prompt variants
+- `apps/desktop/src/views/workspace.rs` — choice overlay render; wire into root layout
+- `apps/desktop/src/main.rs` — open/confirm/cancel choice; migrate prompts; remove targeted osascript
+- `docs/work-log.md` — this entry
+
+**Acceptance checks:**
+- Set merge tool uses GPUI list (no osascript choose-from-list).
+- Merge pull request method + confirm uses GPUI overlays.
+- Reword last commit uses two-step GPUI text prompts.
+- Open in merge tool path uses GPUI text prompt (blank = all conflicts).
+- Full workspace gates: fmt, clippy `-D warnings`, test, deny.
+
+**Verification:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` all pass.
+
 ## 2026-08-11 — GPUI command palette + Enter-to-confirm
 
 **Intent:** replace the largest remaining osascript cluster (`choose from list` command palette) with a searchable in-app GPUI overlay, and add Enter-to-confirm (Escape-to-cancel) on the existing text prompt overlay.
