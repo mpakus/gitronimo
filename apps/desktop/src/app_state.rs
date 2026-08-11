@@ -52,6 +52,7 @@ pub(crate) struct WelcomeRepoSnapshot {
     pub remote_url: Option<String>,
     pub author_name: Option<String>,
     pub author_email: Option<String>,
+    pub last_commit_subject: Option<String>,
     pub last_modified: Option<std::time::SystemTime>,
     pub available: bool,
 }
@@ -78,6 +79,7 @@ pub(crate) enum RepositoryView {
     Stashes,
     Remotes,
     Services,
+    Settings,
     PullRequests,
     Reflog,
     FileHistory,
@@ -197,6 +199,7 @@ pub(crate) struct GitronimoApp {
     pub repositories_grouped: bool,
     pub welcome_repo_search: String,
     pub worktree_file_search: String,
+    #[allow(dead_code)]
     pub search_focus_handle: FocusHandle,
     pub commit_subject_focused: bool,
     pub network_progress: f32,
@@ -298,6 +301,15 @@ pub(crate) struct GitronimoApp {
     pub diagnostics: String,
     pub subscriptions: Vec<gpui::Subscription>,
     pub column_width: f32,
+    pub welcome_search_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
+    pub worktree_search_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
+    pub commit_subject_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
+    pub commit_body_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
+    pub show_quick_open: bool,
+    pub commit_options_expanded: bool,
+    pub user_repo_description: String,
+    pub last_commit_summary: Option<String>,
+    pub file_diff_stats: std::collections::HashMap<git_domain::GitPath, (usize, usize)>,
 }
 
 impl GitronimoApp {
@@ -305,6 +317,7 @@ impl GitronimoApp {
         !self.commit_subject.trim().is_empty() || !self.commit_body.trim().is_empty()
     }
 
+    #[allow(dead_code)]
     pub(crate) fn active_search_query(&self) -> &str {
         match &self.state {
             ShellState::Welcome => self.welcome_repo_search.as_str(),

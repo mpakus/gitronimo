@@ -14,6 +14,9 @@ pub enum Appearance {
 
 #[derive(Clone, Copy)]
 pub struct ThemeColors {
+    pub toolbar_background: Rgba,
+    pub search_field_background: Rgba,
+    pub list_row_border: Rgba,
     pub window_background: Rgba,
     pub panel_background: Rgba,
     pub raised_background: Rgba,
@@ -49,6 +52,9 @@ impl Theme {
     pub fn light() -> Self {
         Self {
             colors: ThemeColors {
+                toolbar_background: rgb(0xf0_f3_f7),
+                search_field_background: rgb(0xeb_f0_f5),
+                list_row_border: rgb(0xdd_e4_ec),
                 window_background: rgb(0xf5_f7_fa),
                 panel_background: rgb(0xff_ff_ff),
                 raised_background: rgb(0xeb_f0_f5),
@@ -83,6 +89,9 @@ impl Theme {
     pub fn dark() -> Self {
         Self {
             colors: ThemeColors {
+                toolbar_background: rgb(0x1a_21_2a),
+                search_field_background: rgb(0x29_34_42),
+                list_row_border: rgb(0x2a_36_45),
                 window_background: rgb(0x16_1b_22),
                 panel_background: rgb(0x1f_27_33),
                 raised_background: rgb(0x29_34_42),

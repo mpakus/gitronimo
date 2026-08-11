@@ -55,6 +55,9 @@ impl GitronimoApp {
         if self.repository_view == RepositoryView::Services {
             return self.services_view(colors, cx).into_any_element();
         }
+        if self.repository_view == RepositoryView::Settings {
+            return self.settings_view(colors, cx).into_any_element();
+        }
         if self.repository_view == RepositoryView::PullRequests {
             return self.pull_requests_view(colors, cx).into_any_element();
         }
@@ -257,11 +260,11 @@ impl GitronimoApp {
         _cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let mut handle = div()
-            .w(px(4.0))
+            .w(px(2.0))
             .h_full()
             .cursor_col_resize()
-            .bg(colors.border)
-            .hover(|s| s.bg(colors.accent));
+            .bg(colors.list_row_border)
+            .hover(|s| s.bg(colors.separator));
         let start_width = self.column_width;
         handle.interactivity().on_drag(
             ColumnDrag {
@@ -403,16 +406,11 @@ impl GitronimoApp {
     ) -> AnyElement {
         let entries = self.modified_entries();
         if entries.is_empty() {
-            return div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p_4()
-                .text_sm()
-                .text_color(colors.text_muted)
-                .child("Working tree clean — edit files in your editor and changes appear here.")
-                .into_any_element();
+            return centered_empty_state(
+                "Working tree clean",
+                "Edit files in your editor and changes appear here.",
+                colors,
+            );
         }
         let rows: Vec<AnyElement> = entries
             .iter()
@@ -1114,6 +1112,33 @@ impl GitronimoApp {
                 .into_any_element()
         };
 
+        let line_stats = self.file_diff_stats.get(&path).copied();
+        let stats_element = line_stats.map(|(additions, deletions)| {
+            div()
+                .flex()
+                .gap_1()
+                .text_xs()
+                .font_family("Monaco")
+                .child(
+                    div()
+                        .text_color(if selected {
+                            colors.panel_background
+                        } else {
+                            colors.success
+                        })
+                        .child(format!("+{additions}")),
+                )
+                .child(
+                    div()
+                        .text_color(if selected {
+                            colors.panel_background
+                        } else {
+                            colors.danger
+                        })
+                        .child(format!("-{deletions}")),
+                )
+                .into_any_element()
+        });
         let mut row = div()
             .id(id)
             .h(px(22.0))
@@ -1122,7 +1147,7 @@ impl GitronimoApp {
             .items_center()
             .gap_2()
             .border_b_1()
-            .border_color(colors.separator)
+            .border_color(colors.list_row_border)
             .bg(if selected {
                 colors.accent
             } else {
@@ -1166,6 +1191,7 @@ impl GitronimoApp {
                 })
                 .child(display_path.to_owned()),
         )
+        .children(stats_element)
         .into_any_element()
     }
 }

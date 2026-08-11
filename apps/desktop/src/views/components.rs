@@ -3,10 +3,21 @@
 //! These are presentational only: they never touch Git or domain logic.
 
 use git_domain::StatusEntry;
-use gpui::{FocusHandle, IntoElement, KeyDownEvent, Render, Window, div, prelude::*, px, relative};
+use gpui::{IntoElement, Render, Window, div, prelude::*, px, relative};
 use ui_kit::ThemeColors;
 
 use crate::app_state::{GitronimoApp, Mutation};
+
+/// Compact list row height (file lists, ref tree, welcome repos).
+pub(crate) const LIST_ROW_HEIGHT: f32 = 22.0;
+/// Sidebar navigation row height (Working Copy, History, etc.).
+pub(crate) const NAV_ROW_HEIGHT: f32 = 24.0;
+/// View panel header bar height (Stashes, Remotes, Services, PRs).
+pub(crate) const PANEL_HEADER_HEIGHT: f32 = 28.0;
+/// Primary/secondary action button height.
+pub(crate) const ACTION_BUTTON_HEIGHT: f32 = 26.0;
+/// Standard width for list panes in two-pane views.
+pub(crate) const LIST_PANE_WIDTH: f32 = 280.0;
 
 #[derive(Default)]
 pub(crate) struct StatusGroups<'a> {
@@ -41,7 +52,7 @@ pub(crate) fn mutation_button(
     let tooltip_colors = *colors;
     div()
         .id(label)
-        .h(px(26.0))
+        .h(px(ACTION_BUTTON_HEIGHT))
         .px_2()
         .flex()
         .items_center()
@@ -74,7 +85,7 @@ pub(crate) fn file_action_button(
     let tooltip_colors = *colors;
     div()
         .id(label)
-        .h(px(26.0))
+        .h(px(ACTION_BUTTON_HEIGHT))
         .px_2()
         .flex()
         .items_center()
@@ -104,7 +115,7 @@ pub(crate) fn window_action_button(
     let tooltip_colors = *colors;
     div()
         .id(label)
-        .h(px(26.0))
+        .h(px(ACTION_BUTTON_HEIGHT))
         .px_2()
         .flex()
         .items_center()
@@ -140,7 +151,7 @@ pub(crate) fn primary_window_action_button(
     };
     div()
         .id(label)
-        .h(px(26.0))
+        .h(px(ACTION_BUTTON_HEIGHT))
         .px_3()
         .flex()
         .items_center()
@@ -181,7 +192,7 @@ pub(crate) fn commit_option_chip(
 ) -> gpui::AnyElement {
     div()
         .id(label)
-        .h(px(22.0))
+        .h(px(LIST_ROW_HEIGHT))
         .px_2()
         .flex()
         .items_center()
@@ -219,7 +230,7 @@ pub(crate) fn validated_action_button(
     let tooltip_colors = *colors;
     div()
         .id(label)
-        .h(px(26.0))
+        .h(px(ACTION_BUTTON_HEIGHT))
         .px_2()
         .flex()
         .items_center()
@@ -307,7 +318,7 @@ pub(crate) fn status_badge_square(
         .into_any_element()
 }
 
-pub(crate) fn sidebar_section_label(title: &'static str, colors: &ThemeColors) -> gpui::AnyElement {
+pub(crate) fn section_header(title: &'static str, colors: &ThemeColors) -> gpui::AnyElement {
     div()
         .px_3()
         .pt_3()
@@ -316,6 +327,142 @@ pub(crate) fn sidebar_section_label(title: &'static str, colors: &ThemeColors) -
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(colors.text_muted)
         .child(title)
+        .into_any_element()
+}
+
+pub(crate) fn sidebar_section_label(title: &'static str, colors: &ThemeColors) -> gpui::AnyElement {
+    section_header(title, colors)
+}
+
+pub(crate) fn detail_section(title: &'static str, colors: &ThemeColors) -> gpui::AnyElement {
+    div()
+        .pt_4()
+        .pb_1()
+        .text_xs()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(colors.text_muted)
+        .child(title.to_uppercase())
+        .into_any_element()
+}
+
+pub(crate) fn detail_row(label: &str, value: &str, colors: &ThemeColors) -> gpui::AnyElement {
+    div()
+        .py_1p5()
+        .border_b_1()
+        .border_color(colors.separator)
+        .flex()
+        .gap_4()
+        .child(
+            div()
+                .w(px(140.0))
+                .flex_shrink_0()
+                .text_sm()
+                .text_color(colors.text_muted)
+                .child(label.to_owned()),
+        )
+        .child(
+            div()
+                .flex_1()
+                .text_sm()
+                .text_color(colors.text_primary)
+                .child(value.to_owned()),
+        )
+        .into_any_element()
+}
+
+pub(crate) fn view_panel_header(
+    title: &'static str,
+    colors: &ThemeColors,
+    actions: Option<gpui::AnyElement>,
+) -> gpui::AnyElement {
+    let mut header = div()
+        .h(px(PANEL_HEADER_HEIGHT))
+        .px_3()
+        .flex()
+        .items_center()
+        .justify_between()
+        .border_b_1()
+        .border_color(colors.border)
+        .child(
+            div()
+                .text_sm()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(colors.text_primary)
+                .child(title),
+        );
+    if let Some(actions) = actions {
+        header = header.child(actions);
+    }
+    header.into_any_element()
+}
+
+pub(crate) fn two_pane_view(
+    header: gpui::AnyElement,
+    list: gpui::AnyElement,
+    detail: gpui::AnyElement,
+    colors: &ThemeColors,
+) -> gpui::AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .h_full()
+        .child(header)
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .items_start()
+                .child(
+                    div()
+                        .w(px(LIST_PANE_WIDTH))
+                        .h_full()
+                        .border_r_1()
+                        .border_color(colors.border)
+                        .overflow_hidden()
+                        .child(list),
+                )
+                .child(div().flex_1().h_full().overflow_hidden().child(detail)),
+        )
+        .into_any_element()
+}
+
+pub(crate) fn head_badge(colors: &ThemeColors) -> gpui::AnyElement {
+    div()
+        .ml_auto()
+        .px_1p5()
+        .py_0p5()
+        .rounded_full()
+        .bg(colors.raised_background)
+        .text_xs()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(colors.text_primary)
+        .child("HEAD")
+        .into_any_element()
+}
+
+pub(crate) fn count_badge(text: String, inverted: bool, colors: &ThemeColors) -> gpui::AnyElement {
+    div()
+        .ml_auto()
+        .min_w(px(18.0))
+        .h(px(16.0))
+        .px_1()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_full()
+        .bg(if inverted {
+            colors.panel_background
+        } else {
+            colors.raised_background
+        })
+        .text_xs()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(if inverted {
+            colors.accent
+        } else {
+            colors.text_primary
+        })
+        .child(text)
         .into_any_element()
 }
 
@@ -532,141 +679,6 @@ impl Render for ActionTooltip {
             .border_color(self.colors.border)
             .text_color(self.colors.text_primary)
             .child(self.label)
-    }
-}
-
-pub(crate) fn toolbar_search_field(
-    placeholder: &'static str,
-    value: &str,
-    focus_handle: &FocusHandle,
-    colors: &ThemeColors,
-    cx: &mut gpui::Context<GitronimoApp>,
-    on_change: impl Fn(&mut GitronimoApp, String, &mut gpui::Context<GitronimoApp>) + 'static,
-) -> gpui::AnyElement {
-    inline_search_field(
-        placeholder,
-        placeholder,
-        value,
-        focus_handle,
-        colors,
-        cx,
-        on_change,
-        true,
-    )
-}
-
-#[allow(clippy::too_many_arguments, clippy::redundant_closure_for_method_calls)]
-pub(crate) fn inline_search_field(
-    field_id: &'static str,
-    placeholder: &'static str,
-    value: &str,
-    focus_handle: &FocusHandle,
-    colors: &ThemeColors,
-    cx: &mut gpui::Context<GitronimoApp>,
-    on_change: impl Fn(&mut GitronimoApp, String, &mut gpui::Context<GitronimoApp>) + 'static,
-    show_label: bool,
-) -> gpui::AnyElement {
-    let display = if value.is_empty() {
-        placeholder.to_owned()
-    } else {
-        value.to_owned()
-    };
-    let text_color = if value.is_empty() {
-        colors.text_muted
-    } else {
-        colors.text_primary
-    };
-    let mut field = div()
-        .id(field_id)
-        .when(show_label, |element| element.w(px(168.0)))
-        .when(!show_label, |element| element.flex_1())
-        .h(px(24.0))
-        .px_2()
-        .flex()
-        .items_center()
-        .gap_1()
-        .bg(colors.raised_background)
-        .rounded_full()
-        .border_1()
-        .border_color(colors.border)
-        .track_focus(focus_handle)
-        .cursor_text()
-        .on_key_down(cx.listener(move |app, event: &KeyDownEvent, window, cx| {
-            handle_search_keydown(event, window, cx, &on_change, app);
-        }));
-    field = field.child(
-        div()
-            .text_xs()
-            .text_color(colors.text_muted)
-            .child("\u{2315}"),
-    );
-    field = field.child(
-        div()
-            .flex_1()
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_ellipsis()
-            .text_xs()
-            .text_color(text_color)
-            .child(display),
-    );
-    if show_label {
-        div()
-            .ml_1()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap_0p5()
-            .child(field)
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(colors.text_muted)
-                    .child("Search"),
-            )
-            .into_any_element()
-    } else {
-        field.into_any_element()
-    }
-}
-
-fn handle_search_keydown(
-    event: &KeyDownEvent,
-    window: &mut Window,
-    cx: &mut gpui::Context<GitronimoApp>,
-    on_change: &impl Fn(&mut GitronimoApp, String, &mut gpui::Context<GitronimoApp>),
-    app: &mut GitronimoApp,
-) {
-    let keystroke = &event.keystroke;
-    if keystroke.modifiers.platform && keystroke.key == "v" {
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            let mut next = app.active_search_query().to_owned();
-            next.push_str(&text.replace('\n', " "));
-            on_change(app, next, cx);
-        }
-        return;
-    }
-    if keystroke.modifiers.platform || keystroke.modifiers.control {
-        return;
-    }
-    let current = app.active_search_query().to_owned();
-    match keystroke.key.as_str() {
-        "backspace" => {
-            let mut chars: Vec<char> = current.chars().collect();
-            if chars.pop().is_some() {
-                on_change(app, chars.into_iter().collect(), cx);
-            }
-        }
-        "escape" | "enter" => {
-            window.blur();
-        }
-        _ => {
-            if let Some(ch) = keystroke.key_char.as_ref().filter(|ch| !ch.contains('\n')) {
-                let mut next = current;
-                next.push_str(ch);
-                on_change(app, next, cx);
-            }
-        }
     }
 }
 

@@ -1,6 +1,6 @@
 # UI/UX Improvement Plan
 
-Status: **in progress** — core IA and workflows are largely in place; visual parity with Tower reference screenshots is still being closed section-by-section.
+Status: **complete** — Tower 99% parity roadmap Phases 1–10 implemented; manual screenshot QA remains optional follow-up.
 
 **Sources**
 
@@ -215,6 +215,14 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Sidebar remote-activity progress bar during fetch/pull/push + last-result footer when idle
 - [x] Visual polish pass: welcome detail headers, commit focus border, diff tabs/hunk headers, HEAD badge, activity bar
 
+**Done (consistency pass — 2026-08-10):**
+- [x] Shared layout constants (`LIST_ROW_HEIGHT`, `NAV_ROW_HEIGHT`, `PANEL_HEADER_HEIGHT`, etc.) in `components.rs`
+- [x] Shared helpers: `section_header`, `detail_section`, `detail_row`, `view_panel_header`, `two_pane_view`, `head_badge`, `count_badge`
+- [x] Full-width accent selection in sidebar nav (no rounded inset) and welcome repo list
+- [x] Unified empty states (`centered_empty_state`) across Welcome, WC, History, Services, PRs
+- [x] Services + Pull Requests two-pane layouts matching Stashes/Remotes
+- [x] Panel headers standardized to 28px across Stashes, Remotes, Services, PRs
+
 **Partially done (works but visually or structurally short of Tower):**
 - [~] §1.1 Services — hosting view exists; welcome now has vertical Services/Bookmarks/Workflow rail; Workflow tab is placeholder-only
 - [~] §1.4 Back/Forward — Prev/Next labels added; toolbar groups Fetch/Pull/Push/Sync, stash Apply/Save, Refresh, and inline search fields Tower-style
@@ -239,6 +247,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 | OAuth / enterprise GitHub | Delivery notes | Still deferred per `PLAN.md` |
 | Deterministic remote progress | §1.5 | Indeterminate bar during fetch/pull/push; no byte/object counts from Git stderr yet |
 | IME-rich search/composer | §4 | Inline search uses key-down capture; full EntityInputHandler fields deferred |
+| Settings dedicated view | §1.3 | Settings sidebar item routes to Services; no separate preferences panel yet |
 
 ### Delivery notes
 

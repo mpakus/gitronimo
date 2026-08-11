@@ -5,12 +5,12 @@ use ui_kit::ThemeColors;
 
 use crate::actions::{CommandPalette, NavigateBack, NavigateForward, OpenRepository, Refresh};
 use crate::app_state::{GitronimoApp, RepositoryView, ShellState, WelcomeShellView};
-use crate::views::components::{
-    ActionTooltip, stacked_toolbar_button, toolbar_divider, toolbar_search_field,
-};
+use crate::views::components::{ActionTooltip, stacked_toolbar_button, toolbar_divider};
+use crate::views::single_line_input::single_line_input_shell;
 use git_domain::HeadStatus;
 
 impl GitronimoApp {
+    #[allow(clippy::too_many_lines)]
     #[allow(clippy::too_many_lines)]
     pub(crate) fn workspace_toolbar(
         &self,
@@ -51,6 +51,7 @@ impl GitronimoApp {
                     RepositoryView::History => "History",
                     RepositoryView::PullRequests => "Pull Requests",
                     RepositoryView::Services => "Services",
+                    RepositoryView::Settings => "Settings",
                     RepositoryView::Stashes => "Stashes",
                     RepositoryView::Remotes => "Remotes",
                     _ => "Git workspace",
@@ -114,15 +115,10 @@ impl GitronimoApp {
         } else {
             view_label
         };
-        let search_placeholder = match &self.state {
-            ShellState::Welcome => "Search for Repositories",
-            ShellState::Repository(_) => "Search for File",
-            _ => "Search",
-        };
-        let search_value = match &self.state {
-            ShellState::Welcome => self.welcome_repo_search.as_str(),
-            ShellState::Repository(_) => self.worktree_file_search.as_str(),
-            _ => "",
+        let search_input = if matches!(self.state, ShellState::Repository(_)) {
+            self.worktree_search_input.clone()
+        } else {
+            self.welcome_search_input.clone()
         };
         div()
             .h(px(52.0))
@@ -130,7 +126,7 @@ impl GitronimoApp {
             .flex()
             .items_center()
             .justify_between()
-            .bg(colors.panel_background)
+            .bg(colors.toolbar_background)
             .border_b_1()
             .border_color(colors.border)
             .child(
@@ -144,7 +140,8 @@ impl GitronimoApp {
                         colors,
                         cx,
                         |app, _, cx| {
-                            app.return_to_welcome(cx);
+                            app.show_quick_open = !app.show_quick_open;
+                            cx.notify();
                         },
                         false,
                     ))
@@ -197,22 +194,11 @@ impl GitronimoApp {
                     .gap_0p5()
                     .children(self.repository_actions(colors, cx))
                     .children(self.working_copy_toolbar_actions(colors, cx))
-                    .child(toolbar_search_field(
-                        search_placeholder,
-                        search_value,
-                        &self.search_focus_handle,
+                    .child(div().w(px(168.0)).child(single_line_input_shell(
+                        search_input,
                         colors,
-                        cx,
-                        |app, query, cx| match &app.state {
-                            ShellState::Welcome => {
-                                GitronimoApp::set_welcome_repo_search(app, query, cx);
-                            }
-                            ShellState::Repository(_) => {
-                                GitronimoApp::set_worktree_file_search(app, query, cx);
-                            }
-                            _ => {}
-                        },
-                    ))
+                        true,
+                    )))
                     .child(toolbar_divider(colors))
                     .child(icon_toolbar_button(
                         "Palette",

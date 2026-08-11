@@ -4,7 +4,9 @@ use gpui::{SharedString, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use crate::app_state::GitronimoApp;
-use crate::views::components::{centered_empty_state, file_action_button};
+use crate::views::components::{
+    centered_empty_state, file_action_button, two_pane_view, view_panel_header,
+};
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -111,40 +113,11 @@ impl GitronimoApp {
                     .into_any_element()
             },
         );
-        div()
-            .flex()
-            .flex_col()
-            .h_full()
-            .child(
-                div()
-                    .h(px(36.0))
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .border_b_1()
-                    .border_color(colors.border)
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child("Remotes"),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .items_start()
-                    .child(
-                        div()
-                            .w(px(280.0))
-                            .h_full()
-                            .border_r_1()
-                            .border_color(colors.border)
-                            .overflow_hidden()
-                            .child(list),
-                    )
-                    .child(div().flex_1().h_full().overflow_hidden().child(detail)),
-            )
+        two_pane_view(
+            view_panel_header("Remotes", colors, None),
+            list,
+            detail,
+            colors,
+        )
     }
 }

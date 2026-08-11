@@ -1,6 +1,6 @@
 //! The root window layout: toolbar, sidebar, content, activity bar.
 
-use gpui::{AnyElement, Render, Window, div, prelude::*, px};
+use gpui::{AnyElement, MouseButton, MouseDownEvent, Render, Window, div, prelude::*, px};
 use ui_kit::Theme;
 
 use crate::app_state::{GitronimoApp, ShellState, ShortcutReferenceState, window_title};
@@ -24,6 +24,7 @@ impl Render for GitronimoApp {
         };
 
         div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
@@ -42,6 +43,10 @@ impl Render for GitronimoApp {
             .on_action(cx.listener(Self::widen_sidebar))
             .on_drop(cx.listener(Self::dropped_paths))
             .child(self.workspace_toolbar(&colors, cx))
+            .children(
+                self.show_quick_open
+                    .then(|| self.quick_open_overlay(&colors, cx).into_any_element()),
+            )
             .child(
                 div()
                     .flex_1()
@@ -110,5 +115,83 @@ impl GitronimoApp {
                 ))
                 .into_any_element()
         })
+    }
+
+    pub(crate) fn quick_open_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let recents = self.recents.clone();
+        div()
+            .absolute()
+            .top(px(52.0))
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(gpui::hsla(0.0, 0.0, 0.0, 0.35))
+            .flex()
+            .justify_center()
+            .pt_8()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.show_quick_open = false;
+                    cx.notify();
+                }),
+            )
+            .child(
+                div()
+                    .w(px(420.0))
+                    .max_h(px(360.0))
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(8.0))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(colors.border)
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child("Quick Open"),
+                    )
+                    .child(div().px_3().py_2().child(
+                        crate::views::single_line_input::single_line_input_shell(
+                            self.welcome_search_input.clone(),
+                            colors,
+                            false,
+                        ),
+                    ))
+                    .children(recents.into_iter().enumerate().map(|(index, path)| {
+                        let display = path.display().to_string();
+                        div()
+                            .id(index)
+                            .px_3()
+                            .py_2()
+                            .text_sm()
+                            .cursor_pointer()
+                            .hover(|row| row.bg(colors.selection))
+                            .on_click(cx.listener(move |app, _, window, cx| {
+                                app.show_quick_open = false;
+                                app.open_recent(path.clone(), window, cx);
+                            }))
+                            .child(display)
+                            .into_any_element()
+                    })),
+            )
+            .into_any_element()
     }
 }

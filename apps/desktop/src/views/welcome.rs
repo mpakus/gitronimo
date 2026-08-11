@@ -9,7 +9,8 @@ use ui_kit::ThemeColors;
 use crate::actions::OpenRepository;
 use crate::app_state::{GitronimoApp, WelcomeRepoSnapshot, WelcomeShellView};
 use crate::views::components::{
-    file_action_button, primary_window_action_button, welcome_rail_tab,
+    centered_empty_state, detail_row, detail_section, file_action_button,
+    primary_window_action_button, welcome_rail_tab,
 };
 
 impl GitronimoApp {
@@ -61,13 +62,14 @@ impl GitronimoApp {
         if self.welcome_shell_view == WelcomeShellView::Services {
             return div()
                 .flex_1()
-                .p_6()
+                .h_full()
+                .overflow_hidden()
                 .bg(colors.window_background)
                 .child(self.services_view(colors, cx))
                 .into_any_element();
         }
         if self.welcome_shell_view == WelcomeShellView::Workflow {
-            return welcome_workflow_placeholder(colors).into_any_element();
+            return welcome_workflow_hub(self, colors, cx).into_any_element();
         }
         div()
             .flex_1()
@@ -96,38 +98,15 @@ fn welcome_detail_content(
     let Some(path) = app.recents.get(index) else {
         return welcome_empty_state(colors);
     };
-    welcome_repo_detail(path, index, app.welcome_snapshot.as_ref(), colors, cx)
+    welcome_repo_detail(path, index, app.welcome_snapshot.as_ref(), app, colors, cx)
 }
 
 fn welcome_empty_state(colors: &ThemeColors) -> AnyElement {
-    div()
-        .size_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .justify_center()
-        .gap_2()
-        .child(
-            div()
-                .text_lg()
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(colors.text_primary)
-                .child("Select a repository"),
-        )
-        .child(
-            div()
-                .text_sm()
-                .text_color(colors.text_muted)
-                .child("Choose a repository from the sidebar, or add one below."),
-        )
-        .child(
-            div()
-                .mt_2()
-                .text_xs()
-                .text_color(colors.text_muted)
-                .child("You can also drop a folder anywhere on the window."),
-        )
-        .into_any_element()
+    centered_empty_state(
+        "Select a repository",
+        "Choose a repository from the sidebar, or add one below. You can also drop a folder anywhere on the window.",
+        colors,
+    )
 }
 
 #[allow(clippy::too_many_lines)]
@@ -135,6 +114,7 @@ fn welcome_repo_detail(
     path: &Path,
     index: usize,
     snapshot: Option<&WelcomeRepoSnapshot>,
+    app: &GitronimoApp,
     colors: &ThemeColors,
     cx: &mut gpui::Context<GitronimoApp>,
 ) -> AnyElement {
@@ -169,6 +149,19 @@ fn welcome_repo_detail(
         (Some(name), None) => Some(name.clone()),
         _ => None,
     });
+    let author_initial = snapshot
+        .and_then(|data| data.author_name.as_ref())
+        .and_then(|name| name.chars().next())
+        .map_or_else(|| "?".to_owned(), |ch| ch.to_uppercase().to_string());
+    let last_commit = snapshot
+        .and_then(|data| data.last_commit_subject.clone())
+        .or_else(|| app.last_commit_summary.clone())
+        .unwrap_or_else(|| "No commits yet".into());
+    let description = if app.user_repo_description.is_empty() {
+        "Add a description…".to_owned()
+    } else {
+        app.user_repo_description.clone()
+    };
     let availability = snapshot.map_or("Checking availability…", |data| {
         if data.available {
             ""
@@ -191,10 +184,63 @@ fn welcome_repo_detail(
                 .gap_3()
                 .child(
                     div()
-                        .text_xl()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(colors.text_primary)
-                        .child(name),
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .child(
+                            div()
+                                .w(px(36.0))
+                                .h(px(36.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_full()
+                                .bg(colors.accent)
+                                .text_sm()
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(colors.panel_background)
+                                .child(author_initial),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_0p5()
+                                .child(
+                                    div()
+                                        .text_xl()
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .text_color(colors.text_primary)
+                                        .child(name),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(colors.text_muted)
+                                        .child(last_commit),
+                                ),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("repo-description-field")
+                        .px_3()
+                        .py_2()
+                        .rounded(px(4.0))
+                        .bg(colors.raised_background)
+                        .border_1()
+                        .border_color(colors.border)
+                        .text_sm()
+                        .text_color(if app.user_repo_description.is_empty() {
+                            colors.text_muted
+                        } else {
+                            colors.text_secondary
+                        })
+                        .cursor_pointer()
+                        .on_click(cx.listener(|app, _, _, cx| {
+                            app.prompt_repo_description(cx);
+                        }))
+                        .child(description),
                 )
                 .child(
                     div()
@@ -295,63 +341,59 @@ fn welcome_action_bar(colors: &ThemeColors, cx: &mut gpui::Context<GitronimoApp>
         .into_any_element()
 }
 
-fn welcome_workflow_placeholder(colors: &ThemeColors) -> AnyElement {
+fn welcome_workflow_hub(
+    app: &GitronimoApp,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+) -> AnyElement {
+    let last_action = match app.last_action {
+        Some(crate::app_state::LastAction::Refresh) => "Last action: refreshed working copy",
+        None => "Open a repository to start working",
+    };
+    let last_commit = app
+        .last_commit_summary
+        .as_deref()
+        .unwrap_or("No recent commit loaded");
     div()
-        .size_full()
+        .flex_1()
+        .h_full()
+        .overflow_hidden()
+        .bg(colors.window_background)
+        .p_8()
         .flex()
         .flex_col()
-        .items_center()
-        .justify_center()
-        .gap_2()
-        .bg(colors.window_background)
+        .gap_6()
         .child(
             div()
-                .text_lg()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_xl()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(colors.text_primary)
-                .child("Workflow view coming soon"),
+                .child("Workflow"),
         )
+        .child(detail_section("Recent activity", colors))
+        .child(detail_row("Summary", last_action, colors))
+        .child(detail_row("Last commit", last_commit, colors))
         .child(
             div()
-                .text_sm()
-                .text_color(colors.text_muted)
-                .child("Open a repository to review changes and commit from Working Copy."),
-        )
-        .into_any_element()
-}
-
-fn detail_section(title: &'static str, colors: &ThemeColors) -> AnyElement {
-    div()
-        .pt_4()
-        .pb_1()
-        .text_xs()
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(colors.text_muted)
-        .child(title.to_uppercase())
-        .into_any_element()
-}
-
-fn detail_row(label: &str, value: &str, colors: &ThemeColors) -> AnyElement {
-    div()
-        .py_1p5()
-        .border_b_1()
-        .border_color(colors.separator)
-        .flex()
-        .gap_4()
-        .child(
-            div()
-                .w(px(140.0))
-                .flex_shrink_0()
-                .text_sm()
-                .text_color(colors.text_muted)
-                .child(label.to_owned()),
-        )
-        .child(
-            div()
-                .flex_1()
-                .text_sm()
-                .text_color(colors.text_primary)
-                .child(value.to_owned()),
+                .flex()
+                .gap_2()
+                .child(primary_window_action_button(
+                    "Open Working Copy",
+                    matches!(app.state, crate::app_state::ShellState::Repository(_)),
+                    colors,
+                    cx,
+                    |app, _, cx| {
+                        app.navigate_to(crate::app_state::RepositoryView::WorkingCopy, cx);
+                    },
+                ))
+                .child(file_action_button(
+                    "Open repository…",
+                    colors,
+                    cx,
+                    |_, cx| {
+                        cx.notify();
+                    },
+                )),
         )
         .into_any_element()
 }
@@ -366,10 +408,7 @@ fn display_path(path: &Path) -> String {
     path.display().to_string()
 }
 
-fn format_last_opened(index: usize, modified: Option<SystemTime>) -> String {
-    if index == 0 {
-        return "Most recently opened".into();
-    }
+fn format_last_opened(_index: usize, modified: Option<SystemTime>) -> String {
     let Some(modified) = modified else {
         return "Unknown".into();
     };
@@ -378,12 +417,12 @@ fn format_last_opened(index: usize, modified: Option<SystemTime>) -> String {
     };
     let seconds = age.as_secs();
     if seconds < 60 {
-        format!("Updated {seconds}s ago")
+        format!("Opened {seconds}s ago")
     } else if seconds < 3600 {
-        format!("Updated {}m ago", seconds / 60)
+        format!("Opened {}m ago", seconds / 60)
     } else if seconds < 86_400 {
-        format!("Updated {}h ago", seconds / 3600)
+        format!("Opened {}h ago", seconds / 3600)
     } else {
-        format!("Updated {}d ago", seconds / 86_400)
+        format!("Opened {}d ago", seconds / 86_400)
     }
 }

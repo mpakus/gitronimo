@@ -6,7 +6,7 @@ use ui_kit::ThemeColors;
 use git_domain::{HistoryReference, WorktreeRepository};
 
 use crate::app_state::{GitronimoApp, HistoryDetailMode};
-use crate::views::components::{file_action_button, segmented_detail_toggle, state_panel};
+use crate::views::components::{centered_empty_state, file_action_button, segmented_detail_toggle};
 
 impl GitronimoApp {
     pub(crate) fn history_row_count(&self) -> usize {
@@ -207,13 +207,11 @@ impl GitronimoApp {
             .and_then(|index| self.history.get(index))
             .map_or_else(
                 || {
-                    state_panel(
+                    centered_empty_state(
                         "No commit selected",
                         "Choose a commit to inspect its details.",
-                        colors.text_muted,
                         colors,
                     )
-                    .into_any_element()
                 },
                 |commit| {
                     let repository_for_toggle = repository.clone();

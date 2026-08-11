@@ -10,8 +10,10 @@ use git_domain::NamedRef;
 
 use crate::app_state::{GitronimoApp, RefContext, RefKind, WelcomeShellView};
 use crate::views::components::{
-    inline_search_field, remote_progress_footer, sidebar_section_label,
+    LIST_ROW_HEIGHT, NAV_ROW_HEIGHT, count_badge, head_badge, remote_progress_footer,
+    sidebar_section_label,
 };
+use crate::views::single_line_input::single_line_input_shell;
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -115,11 +117,11 @@ impl GitronimoApp {
                 "Settings",
                 "\u{2699}",
                 "sidebar-settings",
-                self.repository_view == crate::app_state::RepositoryView::Services,
+                self.repository_view == crate::app_state::RepositoryView::Settings,
                 colors,
                 cx,
                 |app, _, cx| {
-                    app.show_services(cx);
+                    app.navigate_to(crate::app_state::RepositoryView::Settings, cx);
                 },
             ))
             .child(
@@ -364,19 +366,7 @@ impl GitronimoApp {
                             app.select_ref_context(context.clone(), cx);
                         }))
                         .child(parts.last().copied().unwrap_or_default().to_owned())
-                        .children(is_head.then(|| {
-                            div()
-                                .ml_auto()
-                                .px_1p5()
-                                .py_0p5()
-                                .rounded_full()
-                                .bg(colors.raised_background)
-                                .text_xs()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .text_color(colors.text_primary)
-                                .child("HEAD")
-                                .into_any_element()
-                        }))
+                        .children(is_head.then(|| head_badge(colors)))
                         .into_any_element(),
                 );
             }
@@ -396,10 +386,8 @@ fn nav_row(
 ) -> AnyElement {
     div()
         .id(id)
-        .h(px(24.0))
-        .mx_1()
-        .px_2()
-        .rounded(px(4.0))
+        .h(px(NAV_ROW_HEIGHT))
+        .px_3()
         .flex()
         .items_center()
         .gap_2()
@@ -445,10 +433,8 @@ fn nav_row_with_badge(
 ) -> AnyElement {
     div()
         .id(id)
-        .h(px(24.0))
-        .mx_1()
-        .px_2()
-        .rounded(px(4.0))
+        .h(px(NAV_ROW_HEIGHT))
+        .px_3()
         .flex()
         .items_center()
         .gap_2()
@@ -478,31 +464,7 @@ fn nav_row_with_badge(
                 .child(icon),
         )
         .child(label)
-        .children(badge.map(|text| {
-            div()
-                .ml_auto()
-                .min_w(px(18.0))
-                .h(px(16.0))
-                .px_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_full()
-                .bg(if active {
-                    colors.panel_background
-                } else {
-                    colors.raised_background
-                })
-                .text_xs()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(if active {
-                    colors.accent
-                } else {
-                    colors.text_primary
-                })
-                .child(text)
-                .into_any_element()
-        }))
+        .children(badge.map(|text| count_badge(text, active, colors)))
         .into_any_element()
 }
 
@@ -611,24 +573,17 @@ fn welcome_sidebar_view(
                         .child(grouped_label),
                 ),
         )
-        .child(div().px_3().pb_2().child(inline_search_field(
-            "welcome-sidebar-search",
-            "Filter repositories",
-            app.welcome_repo_search.as_str(),
-            &app.search_focus_handle,
+        .child(div().px_3().pb_2().child(single_line_input_shell(
+            app.welcome_search_input.clone(),
             colors,
-            cx,
-            GitronimoApp::set_welcome_repo_search,
             false,
         )))
         .child(
             div()
                 .flex_1()
                 .overflow_hidden()
-                .px_3()
                 .flex()
                 .flex_col()
-                .gap_0p5()
                 .children(rows),
         )
         .into_any_element()
@@ -708,7 +663,7 @@ fn welcome_repo_row(
     let selected = app.selected_recent == Some(index);
     div()
         .id(("welcome-repository", index))
-        .h(px(22.0))
+        .h(px(LIST_ROW_HEIGHT))
         .px_3()
         .flex()
         .items_center()

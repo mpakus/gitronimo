@@ -5,6 +5,7 @@ use ui_kit::ThemeColors;
 
 use crate::app_state::{GitronimoApp, Mutation};
 use crate::views::components::{commit_option_chip, mutation_button, primary_window_action_button};
+use crate::views::single_line_input::single_line_input_shell;
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -16,15 +17,7 @@ impl GitronimoApp {
         let staged_count = self.status_groups().staged.len();
         let enabled =
             !self.mutation_in_flight && !self.commit_subject.trim().is_empty() && staged_count > 0;
-        let subject_is_empty = self.commit_subject.is_empty();
-        let body_is_empty = self.commit_body.is_empty();
-        let subject = if subject_is_empty {
-            "Summary (required)".to_owned()
-        } else {
-            self.commit_subject.clone()
-        };
         let subject_remaining = 50usize.saturating_sub(self.commit_subject.chars().count());
-        let body = self.commit_body.clone();
         let groups = self.status_groups();
         let has_stageable = !groups.unstaged.is_empty()
             || !groups.untracked.is_empty()
@@ -42,39 +35,9 @@ impl GitronimoApp {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(
-                        div()
-                            .id("commit-subject-field")
-                            .flex_1()
-                            .h(px(26.0))
-                            .px_2()
-                            .flex()
-                            .items_center()
-                            .bg(colors.panel_background)
-                            .rounded(px(4.0))
-                            .border_1()
-                            .border_color(if self.commit_subject_focused {
-                                colors.focus_ring
-                            } else {
-                                colors.border
-                            })
-                            .cursor_pointer()
-                            .on_click(cx.listener(|app, _, _, cx| {
-                                app.commit_subject_focused = true;
-                                app.edit_commit_subject(cx);
-                            }))
-                            .text_sm()
-                            .text_color(if subject_is_empty {
-                                colors.text_muted
-                            } else {
-                                colors.text_primary
-                            })
-                            .child(if subject_is_empty {
-                                "Commit Subject".to_owned()
-                            } else {
-                                subject
-                            }),
-                    )
+                    .child(div().id("commit-subject-field").flex_1().child(
+                        single_line_input_shell(self.commit_subject_input.clone(), colors, false),
+                    ))
                     .child(
                         div()
                             .text_xs()
@@ -112,41 +75,23 @@ impl GitronimoApp {
                         },
                     )),
             )
-            .when(!body_is_empty, |this| {
-                this.child(
-                    div()
-                        .id("commit-body-field")
-                        .min_h(px(40.0))
-                        .max_h(px(72.0))
-                        .px_2()
-                        .py_1()
-                        .flex()
-                        .items_start()
-                        .bg(colors.panel_background)
-                        .rounded(px(4.0))
-                        .border_1()
-                        .border_color(colors.border)
-                        .text_sm()
-                        .text_color(colors.text_secondary)
-                        .child(body)
-                        .cursor_pointer()
-                        .on_click(cx.listener(|app, _, _, cx| {
-                            app.edit_commit_body(cx);
-                        })),
-                )
-            })
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_0p5()
                     .child(commit_option_chip(
-                        "Description",
-                        false,
+                        if self.commit_options_expanded {
+                            "Description ✓"
+                        } else {
+                            "Description"
+                        },
+                        self.commit_options_expanded,
                         colors,
                         cx,
                         |app, cx| {
-                            app.edit_commit_body(cx);
+                            app.commit_options_expanded = !app.commit_options_expanded;
+                            cx.notify();
                         },
                     ))
                     .child(commit_option_chip(
@@ -172,5 +117,18 @@ impl GitronimoApp {
                         GitronimoApp::toggle_commit_sign_off,
                     )),
             )
+            .when(self.commit_options_expanded, |this| {
+                this.child(
+                    div()
+                        .id("commit-body-field")
+                        .min_h(px(40.0))
+                        .max_h(px(72.0))
+                        .child(single_line_input_shell(
+                            self.commit_body_input.clone(),
+                            colors,
+                            false,
+                        )),
+                )
+            })
     }
 }

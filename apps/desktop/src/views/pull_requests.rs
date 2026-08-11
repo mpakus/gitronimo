@@ -1,12 +1,15 @@
 //! Pull Requests view: split list/detail browser and explicit remote actions.
 
-use gpui::{AnyElement, ClickEvent, SharedString, div, prelude::*};
+use gpui::{AnyElement, ClickEvent, SharedString, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use git_domain::PullRequestState;
 
 use crate::app_state::GitronimoApp;
-use crate::views::components::file_action_button;
+use crate::views::components::{
+    centered_empty_state, detail_row, detail_section, file_action_button, two_pane_view,
+    view_panel_header,
+};
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -24,98 +27,91 @@ impl GitronimoApp {
             rows.push(
                 div()
                     .id(SharedString::from(format!("pull-request-{index}")))
-                    .p_2()
+                    .h(px(44.0))
+                    .px_3()
                     .flex()
                     .flex_col()
-                    .gap_1()
+                    .justify_center()
+                    .gap_0p5()
+                    .border_b_1()
+                    .border_color(colors.separator)
                     .bg(if selected {
-                        colors.selection
+                        colors.accent
                     } else {
                         colors.panel_background
                     })
-                    .border_1()
-                    .border_color(colors.border)
                     .cursor_pointer()
                     .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
                         app.select_pull_request(index, cx);
                     }))
-                    .child(div().text_sm().child(title))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(if selected {
+                                colors.panel_background
+                            } else {
+                                colors.text_primary
+                            })
+                            .child(title),
+                    )
                     .child(
                         div()
                             .text_xs()
-                            .text_color(colors.text_secondary)
+                            .text_color(if selected {
+                                colors.panel_background
+                            } else {
+                                colors.text_muted
+                            })
                             .child(format!("{label} · {state}")),
                     )
                     .into_any_element(),
             );
         }
-        let detail = self
-            .pull_request_detail
-            .as_ref()
-            .map(|detail| Self::pull_request_detail_view(detail, colors, cx));
-        div()
+        let list = if rows.is_empty() {
+            centered_empty_state(
+                "No pull requests",
+                "Open pull requests for the selected repository appear here.",
+                colors,
+            )
+        } else {
+            div().flex().flex_col().children(rows).into_any_element()
+        };
+        let detail = self.pull_request_detail.as_ref().map_or_else(
+            || {
+                centered_empty_state(
+                    "No pull request selected",
+                    "Choose a pull request to inspect changes and comments.",
+                    colors,
+                )
+            },
+            |detail| Self::pull_request_detail_view(detail, colors, cx),
+        );
+        let actions = div()
             .flex()
-            .flex_col()
-            .gap_3()
-            .child(div().text_xl().child("Pull Requests"))
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(file_action_button("Services", colors, cx, |app, cx| {
-                        app.show_services(cx);
-                    }))
-                    .child(file_action_button("Refresh", colors, cx, |app, cx| {
-                        if let Some(repository) = app.pull_request_repository.clone() {
-                            app.load_pull_requests(repository, cx);
-                        }
-                    }))
-                    .child(file_action_button(
-                        "New pull request…",
-                        colors,
-                        cx,
-                        |app, cx| {
-                            app.prompt_create_pull_request(cx);
-                        },
-                    )),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_3()
-                    .child(
-                        div()
-                            .w_1_2()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .children(if rows.is_empty() {
-                                vec![
-                                    div()
-                                        .text_color(colors.text_muted)
-                                        .child("No open pull requests.")
-                                        .into_any_element(),
-                                ]
-                            } else {
-                                rows
-                            }),
-                    )
-                    .child(
-                        div()
-                            .w_1_2()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .children(detail)
-                            .when(self.pull_request_detail.is_none(), |this| {
-                                this.child(
-                                    div()
-                                        .text_color(colors.text_muted)
-                                        .child("Select a pull request to inspect it."),
-                                )
-                            }),
-                    ),
-            )
+            .gap_1()
+            .child(file_action_button("Services", colors, cx, |app, cx| {
+                app.show_services(cx);
+            }))
+            .child(file_action_button("Refresh", colors, cx, |app, cx| {
+                if let Some(repository) = app.pull_request_repository.clone() {
+                    app.load_pull_requests(repository, cx);
+                }
+            }))
+            .child(file_action_button(
+                "New pull request…",
+                colors,
+                cx,
+                |app, cx| {
+                    app.prompt_create_pull_request(cx);
+                },
+            ));
+        two_pane_view(
+            view_panel_header("Pull Requests", colors, Some(actions.into_any_element())),
+            list,
+            detail,
+            colors,
+        )
     }
 
     fn pull_request_detail_view(
@@ -124,49 +120,68 @@ impl GitronimoApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         div()
-            .p_3()
             .flex()
             .flex_col()
-            .gap_2()
-            .bg(colors.panel_background)
-            .border_1()
-            .border_color(colors.border)
-            .child(div().text_lg().child(format!(
-                "#{} {}",
-                detail.summary.number, detail.summary.title
-            )))
-            .child(format!(
-                "{} → {} · {}",
-                detail.summary.head_ref,
-                detail.summary.base_ref,
-                pull_request_state_label(&detail.summary.state)
-            ))
-            .child(detail.body.clone())
+            .gap_4()
+            .p_4()
+            .overflow_hidden()
             .child(
                 div()
-                    .text_sm()
-                    .text_color(colors.text_secondary)
-                    .child("Changed files"),
+                    .text_lg()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(format!(
+                        "#{} {}",
+                        detail.summary.number, detail.summary.title
+                    )),
             )
+            .child(detail_section("Summary", colors))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(detail_row(
+                        "Branch",
+                        &format!("{} → {}", detail.summary.head_ref, detail.summary.base_ref),
+                        colors,
+                    ))
+                    .child(detail_row(
+                        "State",
+                        pull_request_state_label(&detail.summary.state),
+                        colors,
+                    )),
+            )
+            .when(!detail.body.is_empty(), |panel| {
+                panel.child(detail_section("Description", colors)).child(
+                    div()
+                        .text_sm()
+                        .text_color(colors.text_secondary)
+                        .child(detail.body.clone()),
+                )
+            })
+            .child(detail_section("Changed files", colors))
             .children(detail.files.iter().map(|file| {
-                div().font_family("Monaco").child(format!(
-                    "{}  +{} -{}",
-                    file.path, file.additions, file.deletions
-                ))
+                detail_row(
+                    &file.path,
+                    &format!("+{} -{}", file.additions, file.deletions),
+                    colors,
+                )
             }))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(colors.text_secondary)
-                    .child("Comments"),
-            )
-            .children(detail.comments.iter().map(|comment| {
-                div()
-                    .p_2()
-                    .bg(colors.raised_background)
-                    .child(format!("{} · {}", comment.author, comment.created_at))
-                    .child(comment.body.clone())
-            }))
+            .child(detail_section("Comments", colors))
+            .children(if detail.comments.is_empty() {
+                vec![detail_row("Comments", "No comments yet.", colors)]
+            } else {
+                detail
+                    .comments
+                    .iter()
+                    .map(|comment| {
+                        detail_row(
+                            &comment.author,
+                            &format!("{} — {}", comment.created_at, comment.body),
+                            colors,
+                        )
+                    })
+                    .collect()
+            })
             .child(
                 div()
                     .flex()

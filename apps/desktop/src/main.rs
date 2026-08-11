@@ -15,10 +15,12 @@ mod views;
 use std::{
     ffi::OsString,
     fs,
+    io::{BufRead, BufReader},
     os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex, mpsc},
+    thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -26,7 +28,7 @@ use app_core::{
     HostingError, HostingService, RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError,
     SecretStore, WindowGeometry, open_repository,
 };
-use git_cli::{CommitRequest, GitExecutable, GitStatusError, read_stderr_limited};
+use git_cli::{CommitRequest, GitExecutable, GitStatusError, parse_git_progress_line};
 use git_domain::{
     ConflictSide, FileHistoryRequest, GitPath, GraphState, HeadStatus, HistoryPage,
     HistoryReference, HistoryRequest, RefSnapshot, ReflogRequest, TreeEntry, TreeEntryKind,
@@ -53,6 +55,7 @@ use crate::app_state::{
     repository_is_available, repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
+use crate::views::single_line_input::register_input_bindings;
 
 const INITIAL_WINDOW_SIZE: (f32, f32) = (1200.0, 800.0);
 const MINIMUM_WINDOW_SIZE: (f32, f32) = (800.0, 560.0);
@@ -66,6 +69,7 @@ fn main() {
     Application::new().run(|cx: &mut App| {
         cx.bind_keys(keymap::bindings());
         cx.set_menus(menus::application_menus());
+        register_input_bindings(cx);
 
         let store = RecentRepositoryStore::new(preferences_path());
         let _ = store.recover_corrupted_preferences();
@@ -170,6 +174,17 @@ fn load_welcome_snapshot(path: &Path) -> WelcomeRepoSnapshot {
     if let Ok(Some(identity)) = git.author_identity(&repository) {
         snapshot.author_name = Some(identity.name);
         snapshot.author_email = Some(identity.email);
+    }
+    if let Ok(page) = git.history_page(
+        &repository,
+        &HistoryRequest {
+            reference: HistoryReference::Current,
+            before: None,
+            limit: 1,
+        },
+    ) && let Some(commit) = page.commits.first()
+    {
+        snapshot.last_commit_subject = Some(String::from_utf8_lossy(&commit.subject).into_owned());
     }
     snapshot
 }
@@ -281,6 +296,8 @@ impl GitronimoApp {
             .into_iter()
             .collect();
         let selected_recent = (!recents.is_empty()).then_some(0);
+        let (welcome_search_input, worktree_search_input, commit_subject_input, commit_body_input) =
+            Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
             last_action: None,
@@ -398,6 +415,15 @@ impl GitronimoApp {
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
             column_width: 400.0,
+            welcome_search_input,
+            worktree_search_input,
+            commit_subject_input,
+            commit_body_input,
+            show_quick_open: false,
+            commit_options_expanded: false,
+            user_repo_description: String::new(),
+            last_commit_summary: None,
+            file_diff_stats: std::collections::HashMap::new(),
         };
         app.observe_system_appearance(window, cx);
         app.observe_window_geometry(window, cx);
@@ -447,6 +473,8 @@ impl GitronimoApp {
             .unwrap_or_default()
             .into_iter()
             .collect();
+        let (welcome_search_input, worktree_search_input, commit_subject_input, commit_body_input) =
+            Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
             last_action: None,
@@ -564,6 +592,15 @@ impl GitronimoApp {
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
             column_width: 400.0,
+            welcome_search_input,
+            worktree_search_input,
+            commit_subject_input,
+            commit_body_input,
+            show_quick_open: false,
+            commit_options_expanded: false,
+            user_repo_description: String::new(),
+            last_commit_summary: None,
+            file_diff_stats: std::collections::HashMap::new(),
         };
         app.observe_system_appearance(window, cx);
         app.observe_window_geometry(window, cx);
@@ -730,11 +767,13 @@ impl GitronimoApp {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     fn set_welcome_repo_search(&mut self, query: String, cx: &mut Context<Self>) {
         self.welcome_repo_search = query;
         cx.notify();
     }
 
+    #[allow(dead_code)]
     fn set_worktree_file_search(&mut self, query: String, cx: &mut Context<Self>) {
         self.worktree_file_search = query;
         cx.notify();
@@ -996,6 +1035,7 @@ return remote_url & linefeed & parent_path"#;
         }
     }
 
+    #[allow(dead_code)]
     fn return_to_welcome(&mut self, cx: &mut Context<Self>) {
         if matches!(self.state, ShellState::Welcome) {
             return;
@@ -2511,6 +2551,7 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
+    #[allow(dead_code)]
     fn prompt_open_submodule(path: GitPath, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let _ = this.update(cx, |app, _| {
@@ -2945,12 +2986,52 @@ return remote_url & linefeed & parent_path"#;
             ThemeMode::Light => ThemeMode::Dark,
             ThemeMode::Dark => ThemeMode::System,
         };
+        self.apply_theme_mode(Some(window), cx);
+    }
+
+    pub(crate) fn apply_theme_mode(&mut self, window: Option<&Window>, cx: &mut Context<Self>) {
         self.appearance = match self.theme_mode {
-            ThemeMode::System => appearance_from_window(window.appearance()),
+            ThemeMode::System => window.map_or(self.appearance, |window| {
+                appearance_from_window(window.appearance())
+            }),
             ThemeMode::Light => Appearance::Light,
             ThemeMode::Dark => Appearance::Dark,
         };
         cx.notify();
+    }
+
+    fn prompt_repo_description(&mut self, cx: &mut Context<Self>) {
+        let current = self.user_repo_description.clone();
+        self.activity = "Enter repository description…".into();
+        cx.spawn(async move |this, cx| {
+            let text = cx
+                .background_spawn(async move {
+                    Command::new("osascript")
+                        .args([
+                            "-e",
+                            &format!(
+                                "text returned of (display dialog \"Repository description\" default answer \"{current}\")"
+                            ),
+                        ])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| {
+                            String::from_utf8_lossy(&output.stdout)
+                                .trim_end()
+                                .to_owned()
+                        })
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if let Some(text) = text {
+                    app.user_repo_description = text;
+                }
+                app.activity = "Ready.".into();
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn widen_sidebar(&mut self, _: &WidenSidebar, _: &mut Window, cx: &mut Context<Self>) {
@@ -3152,12 +3233,26 @@ return remote_url & linefeed & parent_path"#;
         let root = repository.worktree_root.clone();
         self.activity = "Refreshing working copy…".into();
         cx.spawn(async move |this, cx| {
-            let status = cx
+            let refresh = cx
                 .background_spawn(async move {
-                    GitExecutable::discover()
-                        .map_err(|error| error.to_string())?
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let status = git
                         .worktree_status(&repository, false)
-                        .map_err(|error| format!("{error:?}"))
+                        .map_err(|error| format!("{error:?}"))?;
+                    let numstat = git.diff_numstat(&repository).ok();
+                    let last_commit = git
+                        .history_page(
+                            &repository,
+                            &HistoryRequest {
+                                reference: HistoryReference::Current,
+                                before: None,
+                                limit: 1,
+                            },
+                        )
+                        .ok()
+                        .and_then(|page| page.commits.first().cloned())
+                        .map(|commit| String::from_utf8_lossy(&commit.subject).into_owned());
+                    Ok::<_, String>((status, numstat, last_commit))
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
@@ -3167,13 +3262,26 @@ return remote_url & linefeed & parent_path"#;
                 if current.worktree_root != root {
                     return;
                 }
-                match status {
-                    Ok(status) => {
+                match refresh {
+                    Ok((status, numstat, last_commit)) => {
                         app.activity = format!(
                             "Working copy refreshed: {} change(s).",
                             status.entries.len()
                         );
                         app.working_copy = Some(status);
+                        if let Some(stats) = numstat {
+                            app.file_diff_stats = stats
+                                .into_iter()
+                                .filter_map(|(path, (added, deleted))| {
+                                    let added = usize::try_from(added).ok()?;
+                                    let deleted = usize::try_from(deleted).ok()?;
+                                    Some((path, (added, deleted)))
+                                })
+                                .collect();
+                        }
+                        if let Some(summary) = last_commit {
+                            app.last_commit_summary = Some(summary);
+                        }
                     }
                     Err(error) => app.activity = format!("Working copy refresh failed: {error}"),
                 }
@@ -3516,6 +3624,7 @@ return remote_url & linefeed & parent_path"#;
         );
     }
 
+    #[allow(clippy::too_many_lines)]
     fn run_network_command(&mut self, label: String, args: Vec<OsString>, cx: &mut Context<Self>) {
         if self.mutation_in_flight {
             return;
@@ -3536,6 +3645,17 @@ return remote_url & linefeed & parent_path"#;
         self.network_progress = 0.45;
         self.activity = format!("{label} in progress. You can cancel it.");
         cx.spawn(async move |this, cx| {
+            let (progress_tx, progress_rx) = mpsc::channel::<f32>();
+            let progress_this = this.clone();
+            cx.spawn(async move |cx| {
+                while let Ok(pct) = progress_rx.recv() {
+                    let _ = progress_this.update(cx, |app, cx| {
+                        app.network_progress = pct;
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
             let result = cx
                 .background_spawn(async move {
                     let git = GitExecutable::discover().map_err(|error| error.to_string())?;
@@ -3554,8 +3674,18 @@ return remote_url & linefeed & parent_path"#;
                         }
                         operation.child = Some(child);
                     }
-                    let progress =
-                        read_stderr_limited(stderr).map_err(|error| error.to_string())?;
+                    let stderr_reader = thread::spawn(move || {
+                        let reader = BufReader::new(stderr);
+                        let mut output = String::new();
+                        for line in reader.lines().map_while(Result::ok) {
+                            output.push_str(&line);
+                            output.push('\n');
+                            if let Some(pct) = parse_git_progress_line(&line) {
+                                progress_tx.send(pct).ok();
+                            }
+                        }
+                        output
+                    });
                     let mut operation = worker_operation
                         .lock()
                         .map_err(|_| "Network operation state was unavailable.".to_owned())?;
@@ -3566,6 +3696,9 @@ return remote_url & linefeed & parent_path"#;
                         .ok_or_else(|| "Git operation ended unexpectedly.".to_owned())?
                         .wait()
                         .map_err(|error| error.to_string())?;
+                    let progress = stderr_reader
+                        .join()
+                        .map_err(|_| "Git progress reader stopped unexpectedly.".to_owned())?;
                     if cancelled {
                         Err("cancelled".to_owned())
                     } else if status.success() {
@@ -3989,6 +4122,7 @@ return remote_url & linefeed & parent_path"#;
         limit: usize,
         cx: &mut Context<Self>,
     ) {
+        let stats_path = path.clone();
         cx.spawn(async move |this, cx| {
             let diff = cx
                 .background_spawn(async move {
@@ -4000,6 +4134,21 @@ return remote_url & linefeed & parent_path"#;
                 .await;
             let _ = this.update(cx, |app, cx| {
                 if let Ok(diff) = diff {
+                    let mut additions = 0;
+                    let mut deletions = 0;
+                    for file in &diff.diff.files {
+                        for hunk in &file.hunks {
+                            for line in &hunk.lines {
+                                match line.kind {
+                                    git_domain::DiffLineKind::Addition => additions += 1,
+                                    git_domain::DiffLineKind::Removal => deletions += 1,
+                                    git_domain::DiffLineKind::Context => {}
+                                }
+                            }
+                        }
+                    }
+                    app.file_diff_stats
+                        .insert(stats_path, (additions, deletions));
                     app.loaded_diff = Some(diff);
                     app.selected_diff_lines.clear();
                     app.pending_line_discard = None;
@@ -4917,10 +5066,13 @@ return remote_url & linefeed & parent_path"#;
     }
 
     fn edit_commit_subject(&mut self, cx: &mut Context<Self>) {
-        self.prompt_commit_text(true, cx);
+        self.commit_subject_focused = true;
+        cx.notify();
     }
+    #[allow(dead_code)]
     fn edit_commit_body(&mut self, cx: &mut Context<Self>) {
-        self.prompt_commit_text(false, cx);
+        self.commit_options_expanded = true;
+        cx.notify();
     }
     fn toggle_commit_amend(&mut self, cx: &mut Context<Self>) {
         self.commit_amend = !self.commit_amend;
@@ -4929,53 +5081,6 @@ return remote_url & linefeed & parent_path"#;
     fn toggle_commit_sign_off(&mut self, cx: &mut Context<Self>) {
         self.commit_sign_off = !self.commit_sign_off;
         cx.notify();
-    }
-
-    fn prompt_commit_text(&mut self, subject: bool, cx: &mut Context<Self>) {
-        self.activity = if subject {
-            "Enter commit subject…"
-        } else {
-            "Enter commit body…"
-        }
-        .into();
-        cx.spawn(async move |this, cx| {
-            let text = cx
-                .background_spawn(async move {
-                    let label = if subject {
-                        "Commit subject"
-                    } else {
-                        "Commit body"
-                    };
-                    Command::new("osascript")
-                        .args([
-                            "-e",
-                            &format!(
-                                "text returned of (display dialog \"{label}\" default answer \"\")"
-                            ),
-                        ])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| {
-                            String::from_utf8_lossy(&output.stdout)
-                                .trim_end()
-                                .to_owned()
-                        })
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(text) = text {
-                    if subject {
-                        app.commit_subject = text;
-                    } else {
-                        app.commit_body = text;
-                    }
-                    app.activity = "Commit draft updated.".into();
-                }
-                cx.notify();
-            });
-        })
-        .detach();
     }
 
     fn commit_draft(&mut self, cx: &mut Context<Self>) {

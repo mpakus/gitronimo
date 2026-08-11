@@ -369,6 +369,9 @@ impl GitronimoApp {
                 .flex()
                 .items_center()
                 .gap_2()
+                .when(is_selected, |line| {
+                    line.border_l_2().border_color(colors.accent)
+                })
                 .bg(if is_selected {
                     colors.selection
                 } else {

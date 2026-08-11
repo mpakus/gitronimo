@@ -5,10 +5,13 @@ use ui_kit::ThemeColors;
 
 use git_domain::{DiffLineKind, WorktreeRepository};
 
-use crate::app_state::{GitronimoApp, RepositoryView};
-use crate::views::components::file_action_button;
+use crate::app_state::GitronimoApp;
+use crate::views::components::{
+    centered_empty_state, file_action_button, two_pane_view, view_panel_header,
+};
 
 impl GitronimoApp {
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn compare_view(
         &self,
         _repository: &WorktreeRepository,
@@ -59,25 +62,65 @@ impl GitronimoApp {
             .compare_diff
             .as_ref()
             .is_some_and(|loaded| loaded.truncated);
-        div()
+        let list = if self.compare_left.is_empty() && self.compare_right.is_empty() {
+            centered_empty_state(
+                "No comparison loaded",
+                "Compare two refs to inspect their diff.",
+                colors,
+            )
+        } else {
+            div()
+                .p_4()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .child(format!(
+                            "{}…{}  ({} file(s))",
+                            self.compare_left, self.compare_right, file_count
+                        )),
+                )
+                .children(truncated.then(|| {
+                    div()
+                        .text_xs()
+                        .text_color(colors.warning)
+                        .child("Diff truncated to the display limit.")
+                }))
+                .into_any_element()
+        };
+        let detail = if rows.is_empty() {
+            centered_empty_state(
+                "No diff output",
+                "Choose another ref pair or refresh the comparison.",
+                colors,
+            )
+        } else {
+            div()
+                .p_2()
+                .flex()
+                .flex_col()
+                .gap_0()
+                .children(rows)
+                .into_any_element()
+        };
+        let header_actions = div()
             .flex()
-            .flex_col()
-            .gap_3()
-            .child(div().text_xl().child("Compare refs"))
-            .child(div().child(format!(
-                "{}…{}  ({} file(s))",
-                self.compare_left, self.compare_right, file_count
-            )))
-            .child(file_action_button("Working Copy", colors, cx, |app, cx| {
-                app.navigate_to(RepositoryView::WorkingCopy, cx);
-            }))
+            .gap_1()
             .child(file_action_button(
-                "Compare another pair…",
+                "Compare refs…",
                 colors,
                 cx,
                 |_, cx| GitronimoApp::prompt_compare_refs(cx),
             ))
-            .children(rows)
-            .children(truncated.then(|| div().child("Diff truncated to the display limit.")))
+            .into_any_element();
+        two_pane_view(
+            view_panel_header("Compare", colors, Some(header_actions)),
+            list,
+            detail,
+            colors,
+        )
     }
 }

@@ -1,5 +1,37 @@
 # Implementation work log
 
+## 2026-08-11 — Tower 99% UI Parity Plan execution (Phases 0–10)
+
+**Intent:** implement `docs/UI-PLAN.md` — reach ~99% Tower parity across welcome and in-repo views.
+
+**Design:** Phase 0 creates UI-PLAN.md; Phase 1 adds GPUI `SingleLineInput` for search/composer; Phases 2–9 cover welcome shell, toolbar, WC polish, settings, remote progress, secondary views, theme; Phase 10 sign-off.
+
+**Files (planned):** `docs/UI-PLAN.md`, `views/single_line_input.rs`, `views/settings.rs`, `views/components.rs`, `views/toolbar.rs`, `views/working_copy.rs`, `views/commit_composer.rs`, `views/diff_viewer.rs`, `views/welcome.rs`, `views/sidebar.rs`, secondary view modules, `git_cli`, `app_state.rs`, `main.rs`, `ui_kit/theme.rs`, `docs/UI-IMPROVE.md`
+
+**Acceptance checks:** all UI-PLAN phases checked off; sign-off table complete; workspace gates pass; app launches.
+
+## 2026-08-10 — Tower UI consistency pass (cross-view design language)
+
+**Intent:** unify typography, selection states, row heights, empty states, panel headers, and two-pane layouts across all views vs Tower reference screenshots — full-width accent list selection, shared section headers/detail rows, 28px panel headers, 22px compact rows, Services/PRs two-pane parity with Stashes/Remotes.
+
+**Design:** extract `section_header`, `detail_section`, `detail_row`, `view_panel_header`, `two_pane_view`, `accent_list_row`, `head_badge`, layout constants in `components.rs`; nav rows edge-to-edge accent (no rounded inset); welcome/services/PRs/history empty states via `centered_empty_state`; services + pull requests adopt list|detail split; welcome detail uses shared detail helpers; theme documents layout heights.
+
+**Files changed:**
+- `apps/desktop/src/views/components.rs` — shared layout helpers and constants
+- `apps/desktop/src/views/sidebar.rs` — full-width nav selection, section headers
+- `apps/desktop/src/views/welcome.rs` — shared detail/empty state helpers
+- `apps/desktop/src/views/services.rs` — two-pane layout, accent list rows
+- `apps/desktop/src/views/pull_requests.rs` — two-pane layout, accent list rows
+- `apps/desktop/src/views/stashes.rs` — shared panel header (28px)
+- `apps/desktop/src/views/remotes.rs` — shared panel header (28px)
+- `apps/desktop/src/views/history.rs` — shared empty state
+- `apps/desktop/src/views/working_copy.rs` — shared empty state
+- `crates/ui_kit/src/theme.rs` — color tokens (light/dark)
+- `apps/desktop/src/views/components.rs` — layout height constants + shared helpers
+- `docs/UI-IMPROVE.md` — consistency pass status
+
+**Acceptance checks:** all list selections use full-width accent bars; section headers match across welcome/sidebar/detail; panel headers 28px; empty states use icon + title + detail pattern; Services/PRs match Stashes/Remotes two-pane density; all workspace gates pass; app launches.
+
 ## 2026-08-10 — Tower interior views polish (sidebar, WC, history, diff, stashes, remotes)
 
 **Intent:** close visual gaps inside opened-repository views vs Tower reference screenshots (overview-05/06/08, workflow-03/04/05/06) — repo sidebar IA, WC composer layout, file-row selection/badges, toolbar subtitle, history density, diff line backgrounds, stashes/remotes two-pane layouts.
@@ -1515,3 +1547,19 @@
 **Acceptance checks:** drop is not executed by the first click; confirmation removes only the latest stash and refreshes status.
 
 **Verification:** the stash integration test creates a fresh latest stash and drops it, proving the final stash count is zero. Desktop tests, Clippy with warnings denied, and formatting passed.
+
+## 2026-08-11 — UI-PLAN Phases 1–10 (Tower 99% parity)
+
+**Intent:** complete the remaining `docs/UI-PLAN.md` phases on `feature/ui-improvements`: GPUI single-line inputs, toolbar quick open, working copy polish, welcome workflow hub, settings routing, Git progress streaming, secondary view two-pane consistency, and theme tokens.
+
+**Files:** `apps/desktop/src/views/single_line_input.rs`, `toolbar.rs`, `sidebar.rs`, `commit_composer.rs`, `welcome.rs`, `workspace.rs`, `settings.rs`, `working_copy.rs`, `diff_viewer.rs`, secondary views (`reflog.rs`, `file_history.rs`, `blame.rs`, `compare.rs`, `worktrees.rs`, `submodules.rs`, `lfs.rs`, `tree.rs`), `apps/desktop/src/main.rs`, `apps/desktop/src/app_state.rs`, `crates/git_cli/src/lib.rs`, `crates/ui_kit/src/theme.rs`, `docs/UI-PLAN.md`, `docs/UI-IMPROVE.md`.
+
+**Acceptance checks:**
+- Toolbar, welcome sidebar, and commit composer use `single_line_input` (paste/caret; no osascript subject prompt).
+- Quick Open overlay lists recents; Settings navigates to dedicated view; theme buttons call `apply_theme_mode`.
+- Working copy shows +/- counts when numstat available; Description chip expands body row; diff lines highlight selection.
+- `parse_git_progress_line` streams fetch/pull/push progress to `network_progress`.
+- Reflog and other secondary views use `two_pane_view` / `view_panel_header`.
+- Theme adds `toolbar_background`, `search_field_background`, `list_row_border`.
+
+**Verification:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (102 tests), and `cargo deny check` all pass. `cargo run -p gitronimo-desktop` launches successfully.

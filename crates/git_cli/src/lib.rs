@@ -294,6 +294,38 @@ impl GitExecutable {
         Ok(status)
     }
 
+    /// Returns per-path addition/deletion counts from staged and unstaged diffs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when Git cannot run or rejects the request.
+    pub fn diff_numstat(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<std::collections::HashMap<GitPath, (u64, u64)>, GitStatusError> {
+        use std::collections::HashMap;
+
+        let mut stats = HashMap::new();
+        for args in [
+            vec!["diff", "--numstat"],
+            vec!["diff", "--cached", "--numstat"],
+        ] {
+            let output = self.run(&repository.worktree_root, args)?;
+            if !output.status.success() {
+                return Err(command_error(&output));
+            }
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines().filter(|line| !line.trim().is_empty()) {
+                if let Some((path, added, deleted)) = parse_numstat_line(line) {
+                    let entry = stats.entry(path).or_insert((0_u64, 0_u64));
+                    entry.0 = entry.0.saturating_add(added);
+                    entry.1 = entry.1.saturating_add(deleted);
+                }
+            }
+        }
+        Ok(stats)
+    }
+
     /// Detects a history-changing operation paused in the repository by looking for
     /// Git's per-worktree state files under the absolute Git directory. The target
     /// hex oid is read best-effort; a missing or unreadable marker reports `None`.
@@ -2083,6 +2115,29 @@ pub fn read_stderr_limited(stderr: ChildStderr) -> io::Result<String> {
     Ok(String::from_utf8_lossy(&read_limited(stderr)?).into_owned())
 }
 
+/// Parses a Git `--progress` stderr line for a percentage value in `[0.0, 1.0]`.
+#[must_use]
+pub fn parse_git_progress_line(line: &str) -> Option<f32> {
+    for token in line.split_whitespace() {
+        if let Some(number) = token.strip_suffix('%')
+            && let Ok(value) = number.parse::<f32>()
+        {
+            return Some((value / 100.0).clamp(0.0, 1.0));
+        }
+    }
+    None
+}
+
+/// Parses one `git diff --numstat` output line into path and line counts.
+#[must_use]
+pub fn parse_numstat_line(line: &str) -> Option<(GitPath, u64, u64)> {
+    let mut fields = line.split('\t');
+    let added = fields.next()?.parse().ok()?;
+    let deleted = fields.next()?.parse().ok()?;
+    let path = fields.next()?;
+    Some((GitPath(path.as_bytes().to_vec()), added, deleted))
+}
+
 fn read_limited(mut reader: impl Read) -> io::Result<Vec<u8>> {
     let mut output = Vec::new();
     let mut buffer = [0_u8; 8192];
@@ -2963,9 +3018,9 @@ mod tests {
 
     use super::{
         CommitRequest, GitExecutable, GitStatusError, MAX_PROCESS_OUTPUT_BYTES, RenameKind,
-        git_candidates, parse_commit_records, parse_lfs_status, parse_nul_paths,
-        parse_porcelain_v2_z, parse_rebase_todo, parse_signature, parse_stash_records,
-        parse_unified_diff, read_limited, trim_oid,
+        git_candidates, parse_commit_records, parse_git_progress_line, parse_lfs_status,
+        parse_nul_paths, parse_numstat_line, parse_porcelain_v2_z, parse_rebase_todo,
+        parse_signature, parse_stash_records, parse_unified_diff, read_limited, trim_oid,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
@@ -5995,5 +6050,27 @@ index 1111111..2222222 100644\n\
                 GitPath(b"src/lib.rs".to_vec())
             ]
         );
+    }
+
+    #[test]
+    fn parse_git_progress_line_reads_percentage_tokens() {
+        assert_eq!(
+            parse_git_progress_line("Receiving objects:  45% (123/456)"),
+            Some(0.45)
+        );
+        assert_eq!(
+            parse_git_progress_line("Counting objects: 100% (10/10), done."),
+            Some(1.0)
+        );
+        assert_eq!(parse_git_progress_line("remote: Enumerating objects"), None);
+    }
+
+    #[test]
+    fn parse_numstat_line_reads_tab_separated_counts() {
+        let (path, added, deleted) =
+            parse_numstat_line("12\t3\tapps/desktop/src/main.rs").expect("numstat line");
+        assert_eq!(added, 12);
+        assert_eq!(deleted, 3);
+        assert_eq!(path.0, b"apps/desktop/src/main.rs".to_vec());
     }
 }
