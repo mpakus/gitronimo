@@ -14,6 +14,7 @@ use crate::app_state::{
 use crate::views::components::{
     NAV_ROW_HEIGHT, count_badge, head_badge, remote_progress_footer, sidebar_section_label,
 };
+use crate::views::icons::{IconKind, icon};
 
 /// Distinct drag type for bookmark repository rows (does not cross-fire with pane dividers).
 #[derive(Clone)]
@@ -549,7 +550,11 @@ fn welcome_sidebar_view(
 
         let folder_id = folder.id.clone();
         let expanded = folder.expanded || searching;
-        let chevron = if expanded { "\u{25BC}" } else { "\u{25B6}" };
+        let chevron = if expanded {
+            IconKind::ChevronDown
+        } else {
+            IconKind::ChevronRight
+        };
         let toggle_id = folder_id.clone();
         let menu_id = folder_id.clone();
         let drop_id = folder_id.clone();
@@ -583,28 +588,15 @@ fn welcome_sidebar_view(
                 .on_drop(cx.listener(move |app, drag: &BookmarkRepoDrag, _, cx| {
                     app.move_repository_to_folder(drag.path.clone(), Some(drop_id.clone()), cx);
                 }))
-                .child(
-                    div()
-                        .w(px(14.0))
-                        .flex_shrink_0()
-                        .text_xs()
-                        .text_color(colors.text_muted)
-                        .child(chevron),
-                )
-                .child(
-                    div()
-                        .w(px(14.0))
-                        .flex_shrink_0()
-                        .text_xs()
-                        .text_color(colors.text_muted)
-                        .child("\u{25A3}"),
-                )
+                .child(icon(chevron, 12.0, colors.text_muted))
+                .child(icon(IconKind::Folder, 14.0, colors.text_muted))
                 .child(
                     div()
                         .flex_1()
                         .min_w(px(0.0))
                         .overflow_hidden()
                         .whitespace_nowrap()
+                        .font_weight(gpui::FontWeight::MEDIUM)
                         .child(folder.name.clone()),
                 )
                 .into_any_element(),
@@ -638,8 +630,6 @@ fn welcome_sidebar_view(
         .flex()
         .flex_col()
         .bg(colors.sidebar_background)
-        .border_r_1()
-        .border_color(colors.border)
         .child(
             div().px_3().pt_3().pb_2().flex().items_center().child(
                 div()
@@ -663,10 +653,14 @@ fn welcome_sidebar_view(
         )
         .child(
             div()
-                .px_2()
+                .h(px(40.0))
+                .px_3()
                 .py_2()
+                .flex()
+                .items_center()
                 .border_t_1()
                 .border_color(colors.border)
+                .bg(colors.sidebar_background)
                 .on_drop(cx.listener(|app, drag: &BookmarkRepoDrag, _, cx| {
                     app.move_repository_to_folder(drag.path.clone(), None, cx);
                 }))
@@ -678,15 +672,13 @@ fn welcome_sidebar_view(
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded(px(4.0))
-                        .text_sm()
-                        .text_color(colors.text_secondary)
+                        .rounded(px(6.0))
                         .cursor_pointer()
                         .hover(|style| style.bg(colors.raised_background))
                         .on_click(cx.listener(|app, _, _, cx| {
                             app.begin_choice_prompt(ChoicePromptKind::WelcomeSidebarPlus, cx);
                         }))
-                        .child("+"),
+                        .child(icon(IconKind::Plus, 16.0, colors.text_secondary)),
                 ),
         )
         .into_any_element()
@@ -701,8 +693,6 @@ fn welcome_workflow_sidebar(width: f32, colors: &ThemeColors) -> AnyElement {
         .flex()
         .flex_col()
         .bg(colors.sidebar_background)
-        .border_r_1()
-        .border_color(colors.border)
         .child(
             div()
                 .px_3()
@@ -736,8 +726,6 @@ fn welcome_services_sidebar(app: &GitronimoApp, width: f32, colors: &ThemeColors
         .flex()
         .flex_col()
         .bg(colors.sidebar_background)
-        .border_r_1()
-        .border_color(colors.border)
         .child(
             div()
                 .px_3()
@@ -818,18 +806,15 @@ fn welcome_repo_row(
             BookmarkRepoDrag { path: drag_path },
             |drag, _offset, _, cx| cx.new(|_| drag.clone()),
         )
-        .child(
-            div()
-                .w(px(14.0))
-                .flex_shrink_0()
-                .text_xs()
-                .text_color(if selected {
-                    colors.panel_background
-                } else {
-                    colors.text_muted
-                })
-                .child("\u{25A3}"),
-        )
+        .child(icon(
+            IconKind::Repo,
+            14.0,
+            if selected {
+                colors.panel_background
+            } else {
+                colors.text_muted
+            },
+        ))
         .child(
             div()
                 .flex_1()

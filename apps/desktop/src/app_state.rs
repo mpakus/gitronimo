@@ -196,7 +196,7 @@ impl ChoicePromptKind {
                 format!("Merge pull request #{number} using {label}?")
             }
             Self::WelcomeSidebarPlus => "Bookmarks".into(),
-            Self::BookmarkFolderActions { .. } => "Folder".into(),
+            Self::BookmarkFolderActions { .. } => "Group".into(),
         }
     }
 
@@ -208,8 +208,8 @@ impl ChoicePromptKind {
                 .map(|(label, _)| *label)
                 .collect(),
             Self::ConfirmMergePullRequest { .. } => Vec::new(),
-            Self::WelcomeSidebarPlus => vec!["Add Repository…", "New Folder…"],
-            Self::BookmarkFolderActions { .. } => vec!["Rename…", "Delete Folder"],
+            Self::WelcomeSidebarPlus => vec!["Add Repository…", "New Group…"],
+            Self::BookmarkFolderActions { .. } => vec!["Rename…", "Delete Group"],
         }
     }
 
@@ -498,13 +498,11 @@ pub(crate) struct GitronimoApp {
     pub worktree_search_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub commit_subject_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub commit_body_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
-    pub repo_description_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub text_prompt_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub command_palette_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub choice_prompt_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub show_quick_open: bool,
     pub commit_options_expanded: bool,
-    pub user_repo_description: String,
     pub last_commit_summary: Option<String>,
     pub file_diff_stats: std::collections::HashMap<git_domain::GitPath, (usize, usize)>,
 }

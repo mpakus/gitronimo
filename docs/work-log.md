@@ -1,5 +1,17 @@
 # Implementation work log
 
+## 2026-08-11 — Welcome/bookmarks UI polish (six issues)
+
+**Intent:** Fix welcome/bookmarks UX from annotated screenshots: (1) sidebar `+` footer padding/hit target Tower-like with New Group / Add Repository menu; (2) remove unwanted welcome detail rename/"some repo" field and redundant sidebar border gap (keep resize handle); (3) ensure folder/group tree renders with chevron/folder icons, nested repos, create via `+`, rename/delete, DnD; (4) shell tabs more horizontal space + icon-over-label; (5) toolbar search padding/placeholder/alignment; (6) replace unicode/letter placeholders with Heroicons-style outline SVGs (MIT, vendored; no Tower assets, no new crates).
+
+**XERJ:** searched `sidebar folder tree bookmark`, toolbar icon+label, welcome plus menu; adapted approach from in-repo sidebar/toolbar + rgitui SVG AssetSource pattern (MIT); GitComet approach-only.
+
+**Files:** `docs/work-log.md`, `apps/desktop/assets/icons/*`, `apps/desktop/src/assets.rs`, `apps/desktop/src/views/icons.rs`, `sidebar.rs`, `welcome.rs`, `toolbar.rs`, `components.rs`, `single_line_input.rs`, `app_state.rs`, `main.rs`.
+
+**Acceptance:** footer `+` comfortable; no demo description field; folders visible/creatable; shell tabs + search polished; outline icons attributed; fmt/clippy/test/deny pass.
+
+**Verification:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` all pass. Icons: Heroicons v2.1.5 outline (MIT) in `apps/desktop/assets/icons/` with `README.md` + `HEROICONS-LICENSE.txt`.
+
 ## 2026-08-11 — Bookmark folder tree + toolbar shell tabs
 
 **Intent:** Tower-like bookmarks: explicit folders (create/rename/delete, expand/collapse, drag repos between folders; delete folder unwraps repos to root). Move Services/Bookmarks/Workflow from left rail into the top toolbar and keep them visible when a repository is open.

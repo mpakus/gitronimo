@@ -844,10 +844,9 @@ pub(crate) fn toolbar_divider(colors: &ThemeColors) -> gpui::AnyElement {
         .into_any_element()
 }
 
-#[allow(clippy::redundant_closure)]
 pub(crate) fn stacked_toolbar_button(
     tooltip_label: &'static str,
-    icon: &'static str,
+    kind: crate::views::icons::IconKind,
     colors: &ThemeColors,
     cx: &mut gpui::Context<GitronimoApp>,
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Window, &mut gpui::Context<GitronimoApp>) + 'static,
@@ -861,14 +860,14 @@ pub(crate) fn stacked_toolbar_button(
     };
     div()
         .id(tooltip_label)
-        .w(px(44.0))
-        .h(px(44.0))
+        .w(px(48.0))
+        .h(px(48.0))
         .flex()
         .flex_col()
         .items_center()
         .justify_center()
         .gap_0p5()
-        .rounded(px(4.0))
+        .rounded(px(6.0))
         .when(!disabled, gpui::Styled::cursor_pointer)
         .when(!disabled, |d| {
             d.tooltip(move |_, cx| {
@@ -884,10 +883,11 @@ pub(crate) fn stacked_toolbar_button(
                 on_click(app, window, cx);
             }))
         })
-        .child(div().text_sm().text_color(icon_color).child(icon))
+        .child(crate::views::icons::icon(kind, 16.0, icon_color))
         .child(
             div()
                 .text_xs()
+                .text_center()
                 .text_color(if disabled {
                     colors.text_muted
                 } else {

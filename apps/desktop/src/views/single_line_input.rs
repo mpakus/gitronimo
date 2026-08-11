@@ -42,7 +42,6 @@ pub(crate) enum TextFieldBinding {
     WorktreeSearch,
     CommitSubject,
     CommitBody,
-    RepoDescription,
     TextPrompt,
     CommandPalette,
     ChoicePrompt,
@@ -738,8 +737,47 @@ pub(crate) fn single_line_input_shell(
         .child(input)
 }
 
+/// Toolbar search field with leading magnifier and optional shortcut hint.
+pub(crate) fn toolbar_search_shell(
+    input: Entity<SingleLineInput>,
+    colors: &ThemeColors,
+    show_shortcut: bool,
+) -> impl IntoElement {
+    use crate::views::icons::{IconKind, icon};
+
+    div()
+        .flex_1()
+        .min_w(px(140.0))
+        .h(px(30.0))
+        .px_2()
+        .flex()
+        .items_center()
+        .gap_2()
+        .rounded(px(6.0))
+        .bg(colors.search_field_background)
+        .border_1()
+        .border_color(colors.border)
+        .child(icon(IconKind::Search, 14.0, colors.text_muted))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .h_full()
+                .flex()
+                .items_center()
+                .child(input),
+        )
+        .children(show_shortcut.then(|| {
+            div()
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(colors.text_muted)
+                .child("\u{2318}F")
+                .into_any_element()
+        }))
+}
+
 pub(crate) type TextInputBundle = (
-    Entity<SingleLineInput>,
     Entity<SingleLineInput>,
     Entity<SingleLineInput>,
     Entity<SingleLineInput>,
@@ -756,7 +794,6 @@ impl GitronimoApp {
             TextFieldBinding::WorktreeSearch => self.worktree_file_search.as_str(),
             TextFieldBinding::CommitSubject => self.commit_subject.as_str(),
             TextFieldBinding::CommitBody => self.commit_body.as_str(),
-            TextFieldBinding::RepoDescription => self.user_repo_description.as_str(),
             TextFieldBinding::TextPrompt => self.text_prompt_value.as_str(),
             TextFieldBinding::CommandPalette => self.command_palette_query.as_str(),
             TextFieldBinding::ChoicePrompt => self.choice_prompt_query.as_str(),
@@ -772,7 +809,6 @@ impl GitronimoApp {
                 self.commit_subject_focused = true;
             }
             TextFieldBinding::CommitBody => self.commit_body = value,
-            TextFieldBinding::RepoDescription => self.user_repo_description = value,
             TextFieldBinding::TextPrompt => self.text_prompt_value = value,
             TextFieldBinding::CommandPalette => {
                 self.command_palette_query = value;
@@ -791,7 +827,7 @@ impl GitronimoApp {
             SingleLineInput::new(
                 TextFieldBinding::WelcomeSearch,
                 app.clone(),
-                "Search for Repositories",
+                "Search repositories",
                 cx,
             )
         });
@@ -814,14 +850,6 @@ impl GitronimoApp {
         let body = cx.new(|cx| {
             SingleLineInput::new(TextFieldBinding::CommitBody, app.clone(), "Description", cx)
         });
-        let description = cx.new(|cx| {
-            SingleLineInput::new(
-                TextFieldBinding::RepoDescription,
-                app.clone(),
-                "Add a description…",
-                cx,
-            )
-        });
         let text_prompt = cx.new(|cx| {
             SingleLineInput::new(TextFieldBinding::TextPrompt, app.clone(), "Enter value", cx)
         });
@@ -841,7 +869,6 @@ impl GitronimoApp {
             worktree,
             subject,
             body,
-            description,
             text_prompt,
             command_palette,
             choice_prompt,

@@ -6,7 +6,8 @@ use ui_kit::ThemeColors;
 use crate::actions::{CommandPalette, NavigateBack, NavigateForward, OpenRepository, Refresh};
 use crate::app_state::{GitronimoApp, RepositoryView, ShellState, WelcomeShellView};
 use crate::views::components::{ActionTooltip, stacked_toolbar_button, toolbar_divider};
-use crate::views::single_line_input::single_line_input_shell;
+use crate::views::icons::{IconKind, icon};
+use crate::views::single_line_input::toolbar_search_shell;
 use git_domain::HeadStatus;
 
 impl GitronimoApp {
@@ -122,7 +123,7 @@ impl GitronimoApp {
             self.welcome_search_input.clone()
         };
         div()
-            .h(px(52.0))
+            .h(px(56.0))
             .px_3()
             .flex()
             .items_center()
@@ -147,7 +148,7 @@ impl GitronimoApp {
                             .flex_shrink_0()
                             .child(icon_toolbar_button(
                                 "Quick Open",
-                                "\u{2318}",
+                                IconKind::Grid,
                                 colors,
                                 cx,
                                 |app, _, cx| {
@@ -221,15 +222,15 @@ impl GitronimoApp {
                     .flex_shrink_0()
                     .children(self.repository_actions(colors, cx))
                     .children(self.working_copy_toolbar_actions(colors, cx))
-                    .child(div().w(px(168.0)).child(single_line_input_shell(
+                    .child(div().w(px(220.0)).child(toolbar_search_shell(
                         search_input,
                         colors,
-                        true,
+                        matches!(self.state, ShellState::Welcome),
                     )))
                     .child(toolbar_divider(colors))
                     .child(icon_toolbar_button(
                         "Palette",
-                        "\u{2318}",
+                        IconKind::Palette,
                         colors,
                         cx,
                         |_, window, cx| {
@@ -239,7 +240,7 @@ impl GitronimoApp {
                     ))
                     .child(icon_toolbar_button(
                         "Open",
-                        "+",
+                        IconKind::Plus,
                         colors,
                         cx,
                         |_, window, cx| {
@@ -259,7 +260,7 @@ impl GitronimoApp {
             .flex_shrink_0()
             .child(shell_tab_button(
                 "Services",
-                "\u{2601}",
+                IconKind::Cloud,
                 on_welcome && self.welcome_shell_view == WelcomeShellView::Services,
                 colors,
                 cx,
@@ -267,7 +268,7 @@ impl GitronimoApp {
             ))
             .child(shell_tab_button(
                 "Bookmarks",
-                "\u{2605}",
+                IconKind::Bookmark,
                 on_welcome && self.welcome_shell_view == WelcomeShellView::Repositories,
                 colors,
                 cx,
@@ -275,7 +276,7 @@ impl GitronimoApp {
             ))
             .child(shell_tab_button(
                 "Workflow",
-                "\u{21BB}",
+                IconKind::Workflow,
                 on_welcome && self.welcome_shell_view == WelcomeShellView::Workflow,
                 colors,
                 cx,
@@ -292,9 +293,9 @@ impl GitronimoApp {
         let has_back = !self.navigation_back.is_empty();
         let has_forward = !self.navigation_forward.is_empty();
         vec![
-            labeled_toolbar_button(
+            icon_toolbar_button(
                 "Prev",
-                "\u{2039}",
+                IconKind::ChevronLeft,
                 colors,
                 cx,
                 |_, window, cx| {
@@ -302,9 +303,9 @@ impl GitronimoApp {
                 },
                 !has_back,
             ),
-            labeled_toolbar_button(
+            icon_toolbar_button(
                 "Next",
-                "\u{203A}",
+                IconKind::ChevronRight,
                 colors,
                 cx,
                 |_, window, cx| {
@@ -326,7 +327,7 @@ impl GitronimoApp {
         vec![
             stacked_toolbar_button(
                 "Fetch",
-                "\u{2193}",
+                IconKind::Fetch,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -336,7 +337,7 @@ impl GitronimoApp {
             ),
             stacked_toolbar_button(
                 "Pull",
-                "\u{2913}",
+                IconKind::Pull,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -346,7 +347,7 @@ impl GitronimoApp {
             ),
             stacked_toolbar_button(
                 "Push",
-                "\u{2B06}",
+                IconKind::Push,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -356,7 +357,7 @@ impl GitronimoApp {
             ),
             stacked_toolbar_button(
                 "Sync",
-                "\u{27F3}",
+                IconKind::Sync,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -383,7 +384,7 @@ impl GitronimoApp {
         vec![
             stacked_toolbar_button(
                 "Apply",
-                "\u{21A9}",
+                IconKind::StashApply,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -393,7 +394,7 @@ impl GitronimoApp {
             ),
             stacked_toolbar_button(
                 "Save",
-                "\u{21AA}",
+                IconKind::StashSave,
                 colors,
                 cx,
                 |app, _, cx| {
@@ -403,7 +404,7 @@ impl GitronimoApp {
             ),
             stacked_toolbar_button(
                 "Refresh",
-                "\u{21BB}",
+                IconKind::Sync,
                 colors,
                 cx,
                 |_, window, cx| {
@@ -416,72 +417,31 @@ impl GitronimoApp {
     }
 }
 
-#[allow(clippy::redundant_closure)]
-fn labeled_toolbar_button(
-    tooltip_label: &'static str,
-    icon: &'static str,
-    colors: &ThemeColors,
-    cx: &mut gpui::Context<GitronimoApp>,
-    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Window, &mut gpui::Context<GitronimoApp>) + 'static,
-    disabled: bool,
-) -> AnyElement {
-    let tooltip_colors = *colors;
-    let icon_color = if disabled {
-        colors.text_muted
-    } else {
-        colors.text_primary
-    };
-    div()
-        .id(tooltip_label)
-        .h(px(28.0))
-        .px_1p5()
-        .flex()
-        .items_center()
-        .gap_0p5()
-        .rounded(px(4.0))
-        .text_xs()
-        .when(!disabled, |d| {
-            #[allow(clippy::redundant_closure)]
-            d.cursor_pointer()
-        })
-        .when(!disabled, |d| {
-            d.tooltip(move |_, cx| {
-                cx.new(|_| ActionTooltip {
-                    label: tooltip_label,
-                    colors: tooltip_colors,
-                })
-                .into()
-            })
-        })
-        .when(!disabled, |d| {
-            d.on_click(cx.listener(move |app, _, window, cx| {
-                on_click(app, window, cx);
-            }))
-        })
-        .text_color(icon_color)
-        .child(icon)
-        .child(tooltip_label)
-        .into_any_element()
-}
-
 fn shell_tab_button(
     label: &'static str,
-    icon: &'static str,
+    kind: IconKind,
     active: bool,
     colors: &ThemeColors,
     cx: &mut gpui::Context<GitronimoApp>,
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> AnyElement {
+    let icon_color = if active {
+        colors.text_primary
+    } else {
+        colors.text_muted
+    };
     div()
         .id(label)
-        .w(px(56.0))
-        .px_1()
+        .w(px(72.0))
+        .h(px(48.0))
+        .px_2()
         .py_1()
         .flex()
         .flex_col()
         .items_center()
+        .justify_center()
         .gap_0p5()
-        .rounded(px(4.0))
+        .rounded(px(6.0))
         .cursor_pointer()
         .bg(if active {
             colors.raised_background
@@ -489,17 +449,18 @@ fn shell_tab_button(
             colors.toolbar_background
         })
         .hover(|style| style.bg(colors.selection))
-        .text_color(if active {
-            colors.text_primary
-        } else {
-            colors.text_muted
-        })
         .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)))
-        .child(div().text_sm().child(icon))
+        .child(icon(kind, 18.0, icon_color))
         .child(
             div()
                 .text_xs()
                 .whitespace_nowrap()
+                .text_center()
+                .text_color(if active {
+                    colors.text_primary
+                } else {
+                    colors.text_muted
+                })
                 .font_weight(if active {
                     gpui::FontWeight::MEDIUM
                 } else {
@@ -513,7 +474,7 @@ fn shell_tab_button(
 #[allow(clippy::redundant_closure)]
 fn icon_toolbar_button(
     tooltip_label: &'static str,
-    icon: &'static str,
+    kind: IconKind,
     colors: &ThemeColors,
     cx: &mut gpui::Context<GitronimoApp>,
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Window, &mut gpui::Context<GitronimoApp>) + 'static,
@@ -533,7 +494,6 @@ fn icon_toolbar_button(
         .items_center()
         .justify_center()
         .rounded(px(4.0))
-        .text_sm()
         .when(!disabled, |d| {
             #[allow(clippy::redundant_closure)]
             d.cursor_pointer()
@@ -552,7 +512,6 @@ fn icon_toolbar_button(
                 on_click(app, window, cx);
             }))
         })
-        .text_color(icon_color)
-        .child(icon)
+        .child(icon(kind, 16.0, icon_color))
         .into_any_element()
 }

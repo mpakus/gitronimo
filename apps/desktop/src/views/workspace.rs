@@ -155,7 +155,7 @@ impl GitronimoApp {
         let recents = self.recents.clone();
         div()
             .absolute()
-            .top(px(52.0))
+            .top(px(56.0))
             .left_0()
             .right_0()
             .bottom_0()
@@ -236,7 +236,7 @@ impl GitronimoApp {
             .min(commands.len().saturating_sub(1));
         div()
             .absolute()
-            .top(px(52.0))
+            .top(px(56.0))
             .left_0()
             .right_0()
             .bottom_0()
@@ -354,12 +354,12 @@ impl GitronimoApp {
             TextPromptKind::MergeToolPath => {
                 ("Conflicted path (leave empty for all)".into(), "Open tool")
             }
-            TextPromptKind::CreateBookmarkFolder => ("New folder".into(), "Create"),
-            TextPromptKind::RenameBookmarkFolder { .. } => ("Rename folder".into(), "Rename"),
+            TextPromptKind::CreateBookmarkFolder => ("New group".into(), "Create"),
+            TextPromptKind::RenameBookmarkFolder { .. } => ("Rename group".into(), "Rename"),
         };
         div()
             .absolute()
-            .top(px(52.0))
+            .top(px(56.0))
             .left_0()
             .right_0()
             .bottom_0()
@@ -440,7 +440,7 @@ impl GitronimoApp {
             .min(options.len().saturating_sub(1));
         div()
             .absolute()
-            .top(px(52.0))
+            .top(px(56.0))
             .left_0()
             .right_0()
             .bottom_0()

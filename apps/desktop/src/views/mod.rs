@@ -14,6 +14,7 @@ pub(crate) mod conflicts;
 pub(crate) mod diff_viewer;
 pub(crate) mod file_history;
 pub(crate) mod history;
+pub(crate) mod icons;
 pub(crate) mod lfs;
 pub(crate) mod pull_requests;
 pub(crate) mod rebase;

@@ -11,7 +11,7 @@ use crate::app_state::{GitronimoApp, WelcomeRepoSnapshot, WelcomeShellView};
 use crate::views::components::{
     detail_row, detail_section, file_action_button, primary_window_action_button,
 };
-use crate::views::single_line_input::single_line_input_shell;
+use crate::views::icons::{IconKind, icon};
 
 impl GitronimoApp {
     #[allow(clippy::unused_self)]
@@ -87,12 +87,7 @@ fn welcome_empty_state(colors: &ThemeColors, cx: &mut gpui::Context<GitronimoApp
                 .border_color(colors.border)
                 .border_dashed()
                 .bg(colors.panel_background)
-                .child(
-                    div()
-                        .text_3xl()
-                        .text_color(colors.text_muted)
-                        .child("\u{25A3}"),
-                )
+                .child(icon(IconKind::Folder, 36.0, colors.text_muted))
                 .child(
                     div()
                         .text_sm()
@@ -179,10 +174,6 @@ fn welcome_repo_detail(
         (Some(name), None) => Some(name.clone()),
         _ => None,
     });
-    let author_initial = snapshot
-        .and_then(|data| data.author_name.as_ref())
-        .and_then(|name| name.chars().next())
-        .map_or_else(|| "?".to_owned(), |ch| ch.to_uppercase().to_string());
     let last_commit = snapshot
         .and_then(|data| data.last_commit_subject.clone())
         .or_else(|| app.last_commit_summary.clone())
@@ -226,12 +217,9 @@ fn welcome_repo_detail(
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded_full()
-                                .bg(colors.accent)
-                                .text_sm()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .text_color(colors.panel_background)
-                                .child(author_initial),
+                                .rounded(px(8.0))
+                                .bg(colors.raised_background)
+                                .child(icon(IconKind::Repo, 20.0, colors.accent)),
                         )
                         .child(
                             div()
@@ -252,15 +240,6 @@ fn welcome_repo_detail(
                                         .child(last_commit),
                                 ),
                         ),
-                )
-                .child(
-                    div()
-                        .id("repo-description-field")
-                        .child(single_line_input_shell(
-                            app.repo_description_input.clone(),
-                            colors,
-                            false,
-                        )),
                 )
                 .child(
                     div()

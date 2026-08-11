@@ -6,6 +6,7 @@
 
 mod actions;
 mod app_state;
+mod assets;
 mod keymap;
 mod menus;
 #[cfg(test)]
@@ -68,26 +69,28 @@ set base_text to text returned of (display dialog "Base branch" default answer "
 return title_text & linefeed & body_text & linefeed & head_text & linefeed & base_text"#;
 fn main() {
     install_panic_reporter();
-    Application::new().run(|cx: &mut App| {
-        cx.bind_keys(keymap::bindings());
-        cx.set_menus(menus::application_menus());
-        register_input_bindings(cx);
+    Application::new()
+        .with_assets(assets::DesktopAssets)
+        .run(|cx: &mut App| {
+            cx.bind_keys(keymap::bindings());
+            cx.set_menus(menus::application_menus());
+            register_input_bindings(cx);
 
-        let store = RecentRepositoryStore::new(preferences_path());
-        let _ = store.recover_corrupted_preferences();
-        let recents = store.load().unwrap_or_default();
-        let geometry = store.load_window_geometry().ok().flatten();
-        install_folder_picker(cx, store.clone());
-        if let Err(error) = cx.open_window(window_options(cx, geometry), |window, cx| {
-            let app = cx.new(|cx| GitronimoApp::welcome(recents, store, window, cx));
-            window.focus(&app.read(cx).focus_handle);
-            app
-        }) {
-            eprintln!("Unable to open the Gitronimo window: {error}");
-            return;
-        }
-        cx.activate(true);
-    });
+            let store = RecentRepositoryStore::new(preferences_path());
+            let _ = store.recover_corrupted_preferences();
+            let recents = store.load().unwrap_or_default();
+            let geometry = store.load_window_geometry().ok().flatten();
+            install_folder_picker(cx, store.clone());
+            if let Err(error) = cx.open_window(window_options(cx, geometry), |window, cx| {
+                let app = cx.new(|cx| GitronimoApp::welcome(recents, store, window, cx));
+                window.focus(&app.read(cx).focus_handle);
+                app
+            }) {
+                eprintln!("Unable to open the Gitronimo window: {error}");
+                return;
+            }
+            cx.activate(true);
+        });
 }
 
 fn install_folder_picker(cx: &mut App, store: RecentRepositoryStore) {
@@ -327,7 +330,6 @@ impl GitronimoApp {
             worktree_search_input,
             commit_subject_input,
             commit_body_input,
-            repo_description_input,
             text_prompt_input,
             command_palette_input,
             choice_prompt_input,
@@ -467,13 +469,11 @@ impl GitronimoApp {
             worktree_search_input,
             commit_subject_input,
             commit_body_input,
-            repo_description_input,
             text_prompt_input,
             command_palette_input,
             choice_prompt_input,
             show_quick_open: false,
             commit_options_expanded: false,
-            user_repo_description: String::new(),
             last_commit_summary: None,
             file_diff_stats: std::collections::HashMap::new(),
         };
@@ -548,7 +548,6 @@ impl GitronimoApp {
             worktree_search_input,
             commit_subject_input,
             commit_body_input,
-            repo_description_input,
             text_prompt_input,
             command_palette_input,
             choice_prompt_input,
@@ -688,13 +687,11 @@ impl GitronimoApp {
             worktree_search_input,
             commit_subject_input,
             commit_body_input,
-            repo_description_input,
             text_prompt_input,
             command_palette_input,
             choice_prompt_input,
             show_quick_open: false,
             commit_options_expanded: false,
-            user_repo_description: String::new(),
             last_commit_summary: None,
             file_diff_stats: std::collections::HashMap::new(),
         };
@@ -1706,7 +1703,7 @@ return remote_url & linefeed & parent_path"#;
                         })
                         .detach();
                     }
-                    "New Folder…" => {
+                    "New Group…" => {
                         self.begin_text_prompt(TextPromptKind::CreateBookmarkFolder, "", cx);
                     }
                     _ => {}
@@ -1731,7 +1728,7 @@ return remote_url & linefeed & parent_path"#;
                             cx,
                         );
                     }
-                    "Delete Folder" => {
+                    "Delete Group" => {
                         self.delete_bookmark_folder(id, cx);
                     }
                     _ => {}
