@@ -10,8 +10,7 @@ use git_domain::NamedRef;
 
 use crate::app_state::{GitronimoApp, RefContext, RefKind, WelcomeRepoSnapshot, WelcomeShellView};
 use crate::views::components::{
-    LIST_ROW_HEIGHT, NAV_ROW_HEIGHT, count_badge, head_badge, remote_progress_footer,
-    sidebar_section_label,
+    NAV_ROW_HEIGHT, count_badge, head_badge, remote_progress_footer, sidebar_section_label,
 };
 use crate::views::single_line_input::single_line_input_shell;
 
@@ -675,25 +674,33 @@ fn welcome_repo_row(
     let snapshot = app.welcome_list_snapshots.get(&path);
     let branch_hint = snapshot.and_then(|data| data.branch.as_deref());
     let upstream_badge = snapshot.and_then(welcome_upstream_badge);
-    let show_branch_hint = upstream_badge.is_none();
+    let secondary = upstream_badge.or_else(|| branch_hint.map(str::to_owned));
+    let text_primary = if selected {
+        colors.panel_background
+    } else {
+        colors.text_primary
+    };
+    let text_secondary = if selected {
+        colors.panel_background
+    } else {
+        colors.text_muted
+    };
     div()
         .id(("welcome-repository", index))
-        .h(px(LIST_ROW_HEIGHT))
+        .min_h(px(36.0))
         .px_3()
+        .py_1()
         .flex()
-        .items_center()
-        .gap_2()
+        .flex_col()
+        .justify_center()
+        .gap_0p5()
         .text_sm()
         .bg(if selected {
             colors.accent
         } else {
             colors.sidebar_background
         })
-        .text_color(if selected {
-            colors.panel_background
-        } else {
-            colors.text_primary
-        })
+        .text_color(text_primary)
         .cursor_pointer()
         .on_click(cx.listener(move |app, event: &ClickEvent, window, cx| {
             app.select_recent(index, cx);
@@ -701,24 +708,24 @@ fn welcome_repo_row(
                 app.open_recent(path.clone(), window, cx);
             }
         }))
-        .child(div().flex_1().overflow_hidden().child(name))
-        .children(upstream_badge.map(|text| count_badge(text, selected, colors)))
-        .children(
-            show_branch_hint
-                .then_some(branch_hint)
-                .flatten()
-                .map(|branch| {
-                    div()
-                        .text_xs()
-                        .text_color(if selected {
-                            colors.panel_background
-                        } else {
-                            colors.text_muted
-                        })
-                        .child(branch.to_owned())
-                        .into_any_element()
-                }),
+        .child(
+            div()
+                .w_full()
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .child(name),
         )
+        .children(secondary.map(|text| {
+            div()
+                .w_full()
+                .text_xs()
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .text_color(text_secondary)
+                .child(text)
+                .into_any_element()
+        }))
         .into_any_element()
 }
 

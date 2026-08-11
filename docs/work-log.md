@@ -1,5 +1,21 @@
 # Implementation work log
 
+## 2026-08-11 — Full-height draggable panes + left toolbar title
+
+**Intent:** make sidebar|content and list|diff dividers full-height and draggable with persisted widths; left-align toolbar title (repo › branch).
+
+**Files:** `crates/app_core` (persist widths), `apps/desktop` workspace/sidebar/working_copy/toolbar, work-log.
+
+**Acceptance:** both dividers span content height; drag left/right updates and remembers widths across relaunch; toolbar title left-aligned.
+
+## 2026-08-11 — Welcome page text/layout fixes
+
+**Intent:** fix welcome UI issues from screenshot: hide Prev/Next on first page, stop Bookmarks rail label wrapping, stop repo list name truncation beside branch.
+
+**Files:** `apps/desktop/src/views/toolbar.rs`, `components.rs` (`welcome_rail_tab`), `sidebar.rs` (`welcome_repo_row`), `docs/work-log.md`
+
+**Acceptance:** welcome toolbar has no Prev/Next; Bookmarks fits on one line in the rail; selected repo name shows in full (branch on second line or truncated secondarily).
+
 ## 2026-08-11 — GPUI choice overlays + reword / merge-tool prompts
 
 **Intent:** replace remaining high-frequency osascript `choose from list` and text dialogs (set merge tool, merge PR method, reword last commit, open merge tool path) with in-app GPUI overlays.

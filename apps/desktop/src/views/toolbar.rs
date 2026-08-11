@@ -134,66 +134,89 @@ impl GitronimoApp {
                 div()
                     .flex()
                     .items_center()
-                    .gap_1()
-                    .child(icon_toolbar_button(
-                        "Quick Open",
-                        "\u{2318}",
-                        colors,
-                        cx,
-                        |app, _, cx| {
-                            app.show_command_palette = false;
-                            app.show_quick_open = !app.show_quick_open;
-                            cx.notify();
-                        },
-                        false,
-                    ))
-                    .children(self.navigation_buttons(colors, cx)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
+                    .gap_3()
+                    .min_w(px(0.0))
+                    .overflow_hidden()
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap_2()
+                            .gap_1()
+                            .flex_shrink_0()
+                            .child(icon_toolbar_button(
+                                "Quick Open",
+                                "\u{2318}",
+                                colors,
+                                cx,
+                                |app, _, cx| {
+                                    app.show_command_palette = false;
+                                    app.show_quick_open = !app.show_quick_open;
+                                    cx.notify();
+                                },
+                                false,
+                            ))
+                            .children(
+                                matches!(self.state, ShellState::Repository(_))
+                                    .then(|| self.navigation_buttons(colors, cx))
+                                    .into_iter()
+                                    .flatten(),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .min_w(px(0.0))
+                            .overflow_hidden()
                             .child(
                                 div()
-                                    .text_base()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(colors.text_primary)
-                                    .child(repo_name),
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .text_base()
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .text_color(colors.text_primary)
+                                            .whitespace_nowrap()
+                                            .child(repo_name),
+                                    )
+                                    .children((!branch_info.is_empty()).then(|| {
+                                        div()
+                                            .text_xs()
+                                            .text_color(colors.text_muted)
+                                            .child("\u{203A}")
+                                            .into_any_element()
+                                    }))
+                                    .children((!branch_info.is_empty()).then(|| {
+                                        div()
+                                            .text_xs()
+                                            .text_color(colors.text_secondary)
+                                            .whitespace_nowrap()
+                                            .overflow_hidden()
+                                            .child(branch_info.clone())
+                                            .into_any_element()
+                                    })),
                             )
-                            .children((!branch_info.is_empty()).then(|| {
+                            .children((!subtitle.is_empty()).then(|| {
                                 div()
                                     .text_xs()
                                     .text_color(colors.text_muted)
-                                    .child("\u{203A}")
-                                    .into_any_element()
-                            }))
-                            .children((!branch_info.is_empty()).then(|| {
-                                div()
-                                    .text_xs()
-                                    .text_color(colors.text_secondary)
-                                    .child(branch_info.clone())
+                                    .whitespace_nowrap()
+                                    .overflow_hidden()
+                                    .child(subtitle)
                                     .into_any_element()
                             })),
-                    )
-                    .children((!subtitle.is_empty()).then(|| {
-                        div()
-                            .text_xs()
-                            .text_color(colors.text_muted)
-                            .child(subtitle)
-                            .into_any_element()
-                    })),
+                    ),
             )
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_0p5()
+                    .flex_shrink_0()
                     .children(self.repository_actions(colors, cx))
                     .children(self.working_copy_toolbar_actions(colors, cx))
                     .child(div().w(px(168.0)).child(single_line_input_shell(

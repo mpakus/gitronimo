@@ -305,6 +305,42 @@ impl RecentRepositoryStore {
         self.save(&document)
     }
 
+    /// Returns the last saved sidebar width, if any.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_sidebar_width(&self) -> Result<Option<f32>, RecentRepositoryStoreError> {
+        Ok(self.load_document()?.sidebar_width)
+    }
+
+    /// Persists the sidebar width while retaining other preferences.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_sidebar_width(&self, width: f32) -> Result<(), RecentRepositoryStoreError> {
+        let mut document = self.load_document()?;
+        document.sidebar_width = Some(width);
+        self.save(&document)
+    }
+
+    /// Returns the last saved working-copy list pane width, if any.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_list_pane_width(&self) -> Result<Option<f32>, RecentRepositoryStoreError> {
+        Ok(self.load_document()?.list_pane_width)
+    }
+
+    /// Persists the list pane width while retaining other preferences.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_list_pane_width(&self, width: f32) -> Result<(), RecentRepositoryStoreError> {
+        let mut document = self.load_document()?;
+        document.list_pane_width = Some(width);
+        self.save(&document)
+    }
+
     fn load_document(&self) -> Result<RecentRepositoryDocument, RecentRepositoryStoreError> {
         match fs::read(&self.path) {
             Ok(bytes) => {
@@ -490,6 +526,10 @@ struct RecentRepositoryDocument {
     window_geometry: Option<WindowGeometry>,
     #[serde(default)]
     expanded_ref_groups: Vec<String>,
+    #[serde(default)]
+    sidebar_width: Option<f32>,
+    #[serde(default)]
+    list_pane_width: Option<f32>,
 }
 
 impl Default for RecentRepositoryDocument {
@@ -499,6 +539,8 @@ impl Default for RecentRepositoryDocument {
             recent_repositories: Vec::new(),
             window_geometry: None,
             expanded_ref_groups: Vec::new(),
+            sidebar_width: None,
+            list_pane_width: None,
         }
     }
 }
@@ -595,6 +637,30 @@ mod tests {
                 .load_expanded_ref_groups()
                 .expect("groups should reload"),
             groups
+        );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn pane_widths_survive_restart() {
+        let (directory, store) = temporary_store();
+        store
+            .save_sidebar_width(248.0)
+            .expect("sidebar width should save");
+        store
+            .save_list_pane_width(360.0)
+            .expect("list pane width should save");
+        assert_eq!(
+            store
+                .load_sidebar_width()
+                .expect("sidebar width should reload"),
+            Some(248.0)
+        );
+        assert_eq!(
+            store
+                .load_list_pane_width()
+                .expect("list pane width should reload"),
+            Some(360.0)
         );
         let _ = fs::remove_dir_all(directory);
     }

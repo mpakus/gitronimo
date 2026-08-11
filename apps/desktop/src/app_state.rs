@@ -24,6 +24,10 @@ use ui_kit::Appearance;
 
 pub(crate) const MINIMUM_PANE_WIDTH: f32 = 180.0;
 pub(crate) const MAXIMUM_PANE_WIDTH: f32 = 440.0;
+pub(crate) const DEFAULT_SIDEBAR_WIDTH: f32 = 220.0;
+pub(crate) const MINIMUM_LIST_PANE_WIDTH: f32 = 200.0;
+pub(crate) const MAXIMUM_LIST_PANE_WIDTH: f32 = 600.0;
+pub(crate) const DEFAULT_LIST_PANE_WIDTH: f32 = 400.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LastAction {
@@ -576,6 +580,14 @@ pub(crate) fn window_title(state: &ShellState, has_commit_draft: bool) -> String
 
 pub(crate) fn resize_width(width: f32) -> f32 {
     (width + 20.0).clamp(MINIMUM_PANE_WIDTH, MAXIMUM_PANE_WIDTH)
+}
+
+pub(crate) fn clamp_sidebar_width(width: f32) -> f32 {
+    width.clamp(MINIMUM_PANE_WIDTH, MAXIMUM_PANE_WIDTH)
+}
+
+pub(crate) fn clamp_list_pane_width(width: f32) -> f32 {
+    width.clamp(MINIMUM_LIST_PANE_WIDTH, MAXIMUM_LIST_PANE_WIDTH)
 }
 
 pub(crate) fn discard_selected(

@@ -21,7 +21,7 @@ impl GitronimoApp {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         div()
-            .w(px(56.0))
+            .w(px(72.0))
             .h_full()
             .flex()
             .flex_col()

@@ -12,9 +12,11 @@ use crate::app_state::{
 
 use super::components::{
     activity_color, activity_label, error_view, file_action_button, loading_view,
+    sidebar_resize_handle,
 };
 
 impl Render for GitronimoApp {
+    #[allow(clippy::too_many_lines)]
     fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         window.set_window_title(&window_title(&self.state, self.has_commit_draft()));
         if let Some(focus) = self.pending_overlay_focus.take() {
@@ -80,15 +82,18 @@ impl Render for GitronimoApp {
                 div()
                     .flex_1()
                     .flex()
+                    .h_full()
                     .children(
                         matches!(self.state, ShellState::Welcome)
                             .then(|| self.welcome_vertical_rail(&colors, cx).into_any_element()),
                     )
                     .child(self.sidebar_view(sidebar_width, &colors, cx))
+                    .child(sidebar_resize_handle(sidebar_width, &colors, cx))
                     .child(
                         div()
                             .flex_1()
                             .h_full()
+                            .overflow_hidden()
                             .child(content)
                             .children(self.shortcut_reference_view(&colors, cx)),
                     ),

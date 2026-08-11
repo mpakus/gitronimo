@@ -1,8 +1,6 @@
 //! Working Copy view: status groups, changes, sync, branch controls, confirmations.
 
-use std::sync::{Arc, Mutex};
-
-use gpui::{AnyElement, ClickEvent, MouseButton, Window, div, prelude::*, px};
+use gpui::{AnyElement, ClickEvent, MouseButton, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use git_domain::{GitPath, HeadStatus, InProgressOperation, StatusEntry, WorktreeRepository};
@@ -12,23 +10,9 @@ use crate::app_state::{
     StashAction,
 };
 use crate::views::components::{
-    centered_empty_state, file_action_button, mutation_button, state_panel, status_badge_info,
-    status_badge_square, status_label, status_path,
+    centered_empty_state, file_action_button, list_pane_resize_handle, mutation_button,
+    state_panel, status_badge_info, status_badge_square, status_label, status_path,
 };
-
-#[derive(Clone)]
-struct ColumnDrag {
-    start_x: Arc<Mutex<f32>>,
-    start_width: Arc<Mutex<f32>>,
-}
-
-struct DragHandle;
-
-impl Render for DragHandle {
-    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
-        div().w(px(4.0)).h_full().bg(gpui::transparent_black())
-    }
-}
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -105,6 +89,9 @@ impl GitronimoApp {
         div()
             .flex()
             .flex_col()
+            .flex_1()
+            .h_full()
+            .overflow_hidden()
             .children(self.navigation_controls(colors, cx))
             .children(self.operation_banner_view(colors, cx))
             .children(self.operation_confirmation_view(colors, cx))
@@ -223,64 +210,29 @@ impl GitronimoApp {
             };
             centered_empty_state(title, detail, colors)
         });
-        let diff_pane = div().flex_1().overflow_hidden().child(diff);
+        let diff_pane = div().flex_1().h_full().overflow_hidden().child(diff);
         let col_w = px(self.column_width);
         div()
             .id("workspace-flex")
             .flex()
             .flex_1()
-            .items_start()
-            .on_drag_move::<ColumnDrag>(cx.listener(
-                |app, event: &gpui::DragMoveEvent<ColumnDrag>, _window, cx| {
-                    let drag = event.drag(cx);
-                    let start_x = *drag.start_x.lock().unwrap();
-                    let start_width = *drag.start_width.lock().unwrap();
-                    let delta = f32::from(event.event.position.x) - start_x;
-                    app.column_width = (start_width + delta).clamp(200.0, 600.0);
-                    cx.notify();
-                },
-            ))
+            .h_full()
             .child(
                 div()
                     .w(col_w)
-                    .min_w(px(200.0))
-                    .max_w(px(600.0))
+                    .min_w(px(crate::app_state::MINIMUM_LIST_PANE_WIDTH))
+                    .max_w(px(crate::app_state::MAXIMUM_LIST_PANE_WIDTH))
+                    .h_full()
                     .flex()
                     .flex_col()
+                    .overflow_hidden()
                     .child(self.branch_context_view(false, colors, cx))
                     .child(self.commit_composer_view(colors, cx))
                     .child(file_list),
             )
-            .child(self.column_resize_handle(colors, cx))
+            .child(list_pane_resize_handle(self.column_width, colors, cx))
             .child(diff_pane)
             .into_any_element()
-    }
-
-    #[allow(clippy::unused_self)]
-    fn column_resize_handle(
-        &self,
-        colors: &ThemeColors,
-        _cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        let mut handle = div()
-            .w(px(2.0))
-            .h_full()
-            .cursor_col_resize()
-            .bg(colors.list_row_border)
-            .hover(|s| s.bg(colors.separator));
-        let start_width = self.column_width;
-        handle.interactivity().on_drag(
-            ColumnDrag {
-                start_x: Arc::new(Mutex::new(0.0)),
-                start_width: Arc::new(Mutex::new(start_width)),
-            },
-            move |drag, offset, _window, app| {
-                *drag.start_x.lock().unwrap() = f32::from(offset.x);
-                *drag.start_width.lock().unwrap() = start_width;
-                app.new(|_| DragHandle)
-            },
-        );
-        handle.into_any_element()
     }
 
     pub(crate) fn status_groups(&self) -> crate::views::components::StatusGroups<'_> {

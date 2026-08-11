@@ -2,11 +2,13 @@
 //!
 //! These are presentational only: they never touch Git or domain logic.
 
+use std::sync::{Arc, Mutex};
+
 use git_domain::StatusEntry;
-use gpui::{IntoElement, Render, Window, div, prelude::*, px, relative};
+use gpui::{AnyElement, DragMoveEvent, IntoElement, Render, Window, div, prelude::*, px, relative};
 use ui_kit::ThemeColors;
 
-use crate::app_state::{GitronimoApp, Mutation};
+use crate::app_state::{GitronimoApp, Mutation, clamp_list_pane_width, clamp_sidebar_width};
 
 /// Compact list row height (file lists, ref tree, welcome repos).
 pub(crate) const LIST_ROW_HEIGHT: f32 = 22.0;
@@ -18,6 +20,106 @@ pub(crate) const PANEL_HEADER_HEIGHT: f32 = 28.0;
 pub(crate) const ACTION_BUTTON_HEIGHT: f32 = 26.0;
 /// Standard width for list panes in two-pane views.
 pub(crate) const LIST_PANE_WIDTH: f32 = 280.0;
+/// Hit target width for vertical pane resize handles.
+pub(crate) const PANE_RESIZE_HIT_WIDTH: f32 = 8.0;
+
+/// Distinct drag types so GPUI `on_drag_move` listeners do not cross-fire.
+#[derive(Clone)]
+struct SidebarResizeDrag {
+    start_x: Arc<Mutex<f32>>,
+    start_width: Arc<Mutex<f32>>,
+}
+
+#[derive(Clone)]
+struct ListPaneResizeDrag {
+    start_x: Arc<Mutex<f32>>,
+    start_width: Arc<Mutex<f32>>,
+}
+
+impl Render for SidebarResizeDrag {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div().w(px(0.0)).h(px(0.0))
+    }
+}
+
+impl Render for ListPaneResizeDrag {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div().w(px(0.0)).h(px(0.0))
+    }
+}
+
+fn resize_handle_shell(id: &'static str, colors: &ThemeColors) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .w(px(PANE_RESIZE_HIT_WIDTH))
+        .h_full()
+        .flex_shrink_0()
+        .flex()
+        .justify_center()
+        .cursor_col_resize()
+        .hover(|style| style.bg(colors.selection))
+        .child(div().w(px(2.0)).h_full().bg(colors.list_row_border))
+}
+
+/// Full-height handle between sidebar (panel 1) and content; only changes `sidebar_width`.
+pub(crate) fn sidebar_resize_handle(
+    start_width: f32,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+) -> AnyElement {
+    let drag = SidebarResizeDrag {
+        start_x: Arc::new(Mutex::new(0.0)),
+        start_width: Arc::new(Mutex::new(start_width)),
+    };
+    resize_handle_shell("sidebar-resize-handle", colors)
+        .on_drag(drag, move |drag, _offset, window, cx| {
+            *drag.start_x.lock().unwrap() = f32::from(window.mouse_position().x);
+            *drag.start_width.lock().unwrap() = start_width;
+            cx.new(|_| drag.clone())
+        })
+        .on_drag_move(cx.listener(
+            move |app, event: &DragMoveEvent<SidebarResizeDrag>, _, cx| {
+                let drag = event.drag(cx);
+                let start_x = *drag.start_x.lock().unwrap();
+                let start_width = *drag.start_width.lock().unwrap();
+                let delta = f32::from(event.event.position.x) - start_x;
+                app.sidebar_width = clamp_sidebar_width(start_width + delta);
+                let _ = app.store.save_sidebar_width(app.sidebar_width);
+                cx.notify();
+            },
+        ))
+        .into_any_element()
+}
+
+/// Full-height handle between list pane (panel 2) and detail (panel 3); only changes `column_width`.
+pub(crate) fn list_pane_resize_handle(
+    start_width: f32,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+) -> AnyElement {
+    let drag = ListPaneResizeDrag {
+        start_x: Arc::new(Mutex::new(0.0)),
+        start_width: Arc::new(Mutex::new(start_width)),
+    };
+    resize_handle_shell("list-pane-resize-handle", colors)
+        .on_drag(drag, move |drag, _offset, window, cx| {
+            *drag.start_x.lock().unwrap() = f32::from(window.mouse_position().x);
+            *drag.start_width.lock().unwrap() = start_width;
+            cx.new(|_| drag.clone())
+        })
+        .on_drag_move(cx.listener(
+            move |app, event: &DragMoveEvent<ListPaneResizeDrag>, _, cx| {
+                let drag = event.drag(cx);
+                let start_x = *drag.start_x.lock().unwrap();
+                let start_width = *drag.start_width.lock().unwrap();
+                let delta = f32::from(event.event.position.x) - start_x;
+                app.column_width = clamp_list_pane_width(start_width + delta);
+                let _ = app.store.save_list_pane_width(app.column_width);
+                cx.notify();
+            },
+        ))
+        .into_any_element()
+}
 
 #[derive(Default)]
 pub(crate) struct StatusGroups<'a> {
@@ -719,7 +821,11 @@ pub(crate) fn welcome_rail_tab(
         .child(div().text_sm().child(icon))
         .child(
             div()
+                .px_0p5()
                 .text_xs()
+                .whitespace_nowrap()
+                .overflow_hidden()
+                .text_center()
                 .font_weight(if active {
                     gpui::FontWeight::MEDIUM
                 } else {

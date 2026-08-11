@@ -48,10 +48,11 @@ use crate::actions::{
     OpenRepository, Refresh, ShortcutReference, ToggleAppearance, WidenSidebar,
 };
 use crate::app_state::{
-    ChoicePromptKind, ForcePushState, GitronimoApp, HistoryDetailMode, LastAction, Mutation,
-    NetworkOperation, OpenedRepository, OperationAction, OverlayFocus, PR_MERGE_METHOD_CHOICES,
-    PaletteCommand, RefContext, RepositoryView, ShellState, ShortcutReferenceState, StashAction,
-    TextPromptKind, ThemeMode, WelcomeRepoSnapshot, WelcomeShellView, appearance_from_window,
+    ChoicePromptKind, DEFAULT_LIST_PANE_WIDTH, DEFAULT_SIDEBAR_WIDTH, ForcePushState, GitronimoApp,
+    HistoryDetailMode, LastAction, Mutation, NetworkOperation, OpenedRepository, OperationAction,
+    OverlayFocus, PR_MERGE_METHOD_CHOICES, PaletteCommand, RefContext, RepositoryView, ShellState,
+    ShortcutReferenceState, StashAction, TextPromptKind, ThemeMode, WelcomeRepoSnapshot,
+    WelcomeShellView, appearance_from_window, clamp_list_pane_width, clamp_sidebar_width,
     discard_selected, git_failure_message, network_failure_message, repository_is_available,
     repository_unavailable_message, resize_width,
 };
@@ -303,6 +304,16 @@ impl GitronimoApp {
             .unwrap_or_default()
             .into_iter()
             .collect();
+        let sidebar_width = store
+            .load_sidebar_width()
+            .ok()
+            .flatten()
+            .map_or(DEFAULT_SIDEBAR_WIDTH, clamp_sidebar_width);
+        let column_width = store
+            .load_list_pane_width()
+            .ok()
+            .flatten()
+            .map_or(DEFAULT_LIST_PANE_WIDTH, clamp_list_pane_width);
         let selected_recent = (!recents.is_empty()).then_some(0);
         let (
             welcome_search_input,
@@ -319,7 +330,7 @@ impl GitronimoApp {
             last_action: None,
             appearance: appearance_from_window(window.appearance()),
             theme_mode: ThemeMode::System,
-            sidebar_width: 220.0,
+            sidebar_width,
             state: ShellState::Welcome,
             recents,
             selected_recent,
@@ -443,7 +454,7 @@ impl GitronimoApp {
             store,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
-            column_width: 400.0,
+            column_width,
             welcome_search_input,
             worktree_search_input,
             commit_subject_input,
@@ -507,6 +518,16 @@ impl GitronimoApp {
             .unwrap_or_default()
             .into_iter()
             .collect();
+        let sidebar_width = store
+            .load_sidebar_width()
+            .ok()
+            .flatten()
+            .map_or(DEFAULT_SIDEBAR_WIDTH, clamp_sidebar_width);
+        let column_width = store
+            .load_list_pane_width()
+            .ok()
+            .flatten()
+            .map_or(DEFAULT_LIST_PANE_WIDTH, clamp_list_pane_width);
         let (
             welcome_search_input,
             worktree_search_input,
@@ -522,7 +543,7 @@ impl GitronimoApp {
             last_action: None,
             appearance: appearance_from_window(window.appearance()),
             theme_mode: ThemeMode::System,
-            sidebar_width: 220.0,
+            sidebar_width,
             state,
             recents,
             selected_recent: None,
@@ -646,7 +667,7 @@ impl GitronimoApp {
             store,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
-            column_width: 400.0,
+            column_width,
             welcome_search_input,
             worktree_search_input,
             commit_subject_input,
@@ -3165,6 +3186,7 @@ return remote_url & linefeed & parent_path"#;
 
     fn widen_sidebar(&mut self, _: &WidenSidebar, _: &mut Window, cx: &mut Context<Self>) {
         self.sidebar_width = resize_width(self.sidebar_width);
+        let _ = self.store.save_sidebar_width(self.sidebar_width);
         cx.notify();
     }
 
