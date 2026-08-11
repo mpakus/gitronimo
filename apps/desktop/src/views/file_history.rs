@@ -108,9 +108,14 @@ impl GitronimoApp {
         let header_actions = div()
             .flex()
             .gap_1()
-            .child(file_action_button("Choose path…", colors, cx, |_, cx| {
-                GitronimoApp::prompt_file_history(cx);
-            }))
+            .child(file_action_button(
+                "Choose path…",
+                colors,
+                cx,
+                |app, cx| {
+                    app.prompt_file_history(cx);
+                },
+            ))
             .into_any_element();
         two_pane_view(
             view_panel_header("File History", colors, Some(header_actions)),

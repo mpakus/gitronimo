@@ -3,7 +3,9 @@
 use gpui::{AnyElement, MouseButton, MouseDownEvent, Render, Window, div, prelude::*, px};
 use ui_kit::Theme;
 
-use crate::app_state::{GitronimoApp, ShellState, ShortcutReferenceState, window_title};
+use crate::app_state::{
+    GitronimoApp, ShellState, ShortcutReferenceState, TextPromptKind, window_title,
+};
 
 use super::components::{
     activity_color, activity_label, error_view, file_action_button, loading_view,
@@ -48,9 +50,9 @@ impl Render for GitronimoApp {
                     .then(|| self.quick_open_overlay(&colors, cx).into_any_element()),
             )
             .children(
-                self.pending_branch_rename
+                self.pending_text_prompt
                     .is_some()
-                    .then(|| self.branch_rename_overlay(&colors, cx).into_any_element()),
+                    .then(|| self.text_prompt_overlay(&colors, cx).into_any_element()),
             )
             .child(
                 div()
@@ -200,15 +202,26 @@ impl GitronimoApp {
             .into_any_element()
     }
 
-    pub(crate) fn branch_rename_overlay(
+    pub(crate) fn text_prompt_overlay(
         &self,
         colors: &ui_kit::ThemeColors,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
-        let current = self
-            .pending_branch_rename
-            .clone()
-            .unwrap_or_else(|| "branch".into());
+        let Some(kind) = self.pending_text_prompt.clone() else {
+            return div().into_any_element();
+        };
+        let (title, confirm_label) = match &kind {
+            TextPromptKind::BranchRename { current } => {
+                (format!("Rename branch '{current}'"), "Rename")
+            }
+            TextPromptKind::CreateBranch { .. } => ("New branch".into(), "Create"),
+            TextPromptKind::FileHistoryPath => ("File history for path".into(), "Show history"),
+            TextPromptKind::BlamePath => ("Blame path".into(), "Show blame"),
+            TextPromptKind::CompareFrom => ("Compare from ref".into(), "Next"),
+            TextPromptKind::CompareTo { left } => {
+                (format!("Compare to ref (from {left})"), "Compare")
+            }
+        };
         div()
             .absolute()
             .top(px(52.0))
@@ -222,7 +235,7 @@ impl GitronimoApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|app, _: &MouseDownEvent, _, cx| {
-                    app.cancel_branch_rename(cx);
+                    app.cancel_text_prompt(cx);
                 }),
             )
             .child(
@@ -249,11 +262,11 @@ impl GitronimoApp {
                             .border_color(colors.border)
                             .text_sm()
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(format!("Rename branch '{current}'")),
+                            .child(title),
                     )
                     .child(div().px_3().py_2().child(
                         crate::views::single_line_input::single_line_input_shell(
-                            self.branch_rename_input.clone(),
+                            self.text_prompt_input.clone(),
                             colors,
                             false,
                         ),
@@ -264,11 +277,11 @@ impl GitronimoApp {
                             .py_2()
                             .flex()
                             .gap_2()
-                            .child(file_action_button("Rename", colors, cx, |app, cx| {
-                                app.confirm_branch_rename(cx);
+                            .child(file_action_button(confirm_label, colors, cx, |app, cx| {
+                                app.confirm_text_prompt(cx);
                             }))
                             .child(file_action_button("Cancel", colors, cx, |app, cx| {
-                                app.cancel_branch_rename(cx);
+                                app.cancel_text_prompt(cx);
                             })),
                     ),
             )

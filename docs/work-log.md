@@ -1,5 +1,21 @@
 # Implementation work log
 
+## 2026-08-11 — GPUI text prompts + Branches Review filter
+
+**Intent:** replace frequent osascript text dialogs with in-app GPUI overlays (same pattern as branch rename) and default Branches Review to diverged/unpublished branches with a Show all toggle.
+
+**Design:** introduce `TextPromptKind` + unified `text_prompt_overlay` (`overlay_scrim` + `single_line_input` with `TextFieldBinding::TextPrompt`); migrate branch rename into the shared prompt; replace osascript for create branch from ref/commit, file history path, blame path, and two-step compare refs; Branches Review filters to unpublished or ahead/behind branches unless `branches_review_show_all` is set, with header toggle and selection by branch name.
+
+**Files changed:**
+- `apps/desktop/src/app_state.rs` — `TextPromptKind`, text prompt state, review filter flag, selection by name
+- `apps/desktop/src/views/single_line_input.rs` — `TextPrompt` binding
+- `apps/desktop/src/views/workspace.rs` — unified text prompt overlay
+- `apps/desktop/src/main.rs` — prompt begin/confirm/cancel, remove osascript for targeted flows
+- `apps/desktop/src/views/branches_review.rs` — diverged filter + Show all toggle
+- `apps/desktop/src/views/working_copy.rs`, `history.rs`, `compare.rs`, `file_history.rs`, `blame.rs` — call GPUI prompts
+
+**Acceptance checks:** create branch from ref/tag/commit menu uses GPUI overlay; file history and compare refs palette/view actions use GPUI overlays (compare is two-step); branch rename still uses overlay; Branches Review defaults to diverged/unpublished with Show all; full workspace gates pass.
+
 ## 2026-08-11 — Branches Review list + GPUI branch rename
 
 **Intent:** continue post–UI-PLAN polish on `feature/ui-improvements`: flesh out Branches Review beyond empty state and replace the branch-rename osascript dialog with an in-app GPUI prompt.

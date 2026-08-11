@@ -39,7 +39,7 @@ pub(crate) enum TextFieldBinding {
     CommitSubject,
     CommitBody,
     RepoDescription,
-    BranchRename,
+    TextPrompt,
 }
 
 pub(crate) struct SingleLineInput {
@@ -683,7 +683,7 @@ impl GitronimoApp {
             TextFieldBinding::CommitSubject => self.commit_subject.as_str(),
             TextFieldBinding::CommitBody => self.commit_body.as_str(),
             TextFieldBinding::RepoDescription => self.user_repo_description.as_str(),
-            TextFieldBinding::BranchRename => self.branch_rename_value.as_str(),
+            TextFieldBinding::TextPrompt => self.text_prompt_value.as_str(),
         }
     }
 
@@ -697,7 +697,7 @@ impl GitronimoApp {
             }
             TextFieldBinding::CommitBody => self.commit_body = value,
             TextFieldBinding::RepoDescription => self.user_repo_description = value,
-            TextFieldBinding::BranchRename => self.branch_rename_value = value,
+            TextFieldBinding::TextPrompt => self.text_prompt_value = value,
         }
     }
 
@@ -738,10 +738,9 @@ impl GitronimoApp {
                 cx,
             )
         });
-        let branch_rename = cx.new(|cx| {
-            SingleLineInput::new(TextFieldBinding::BranchRename, app, "New branch name", cx)
-        });
-        (welcome, worktree, subject, body, description, branch_rename)
+        let text_prompt =
+            cx.new(|cx| SingleLineInput::new(TextFieldBinding::TextPrompt, app, "Enter value", cx));
+        (welcome, worktree, subject, body, description, text_prompt)
     }
 }
 

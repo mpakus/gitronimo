@@ -522,8 +522,8 @@ impl GitronimoApp {
                         "New Branch from Here…",
                         colors,
                         cx,
-                        move |_, _, cx| {
-                            GitronimoApp::prompt_branch_from_ref(create_start.clone(), cx);
+                        move |app, _, cx| {
+                            app.prompt_create_branch_from_ref(create_start.clone(), cx);
                         },
                     ))
                     .child(menu_item("View History", colors, cx, move |app, _, cx| {
@@ -547,8 +547,8 @@ impl GitronimoApp {
                         "New Branch from Here…",
                         colors,
                         cx,
-                        move |_, _, cx| {
-                            GitronimoApp::prompt_branch_from_ref(create_start.clone(), cx);
+                        move |app, _, cx| {
+                            app.prompt_create_branch_from_ref(create_start.clone(), cx);
                         },
                     ))
                     .child(menu_item("View History", colors, cx, move |app, _, cx| {

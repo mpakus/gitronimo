@@ -50,9 +50,9 @@ use crate::actions::{
 use crate::app_state::{
     ForcePushState, GitronimoApp, HistoryDetailMode, LastAction, Mutation, NetworkOperation,
     OpenedRepository, OperationAction, RefContext, RepositoryView, ShellState,
-    ShortcutReferenceState, StashAction, ThemeMode, WelcomeRepoSnapshot, WelcomeShellView,
-    appearance_from_window, discard_selected, git_failure_message, network_failure_message,
-    repository_is_available, repository_unavailable_message, resize_width,
+    ShortcutReferenceState, StashAction, TextPromptKind, ThemeMode, WelcomeRepoSnapshot,
+    WelcomeShellView, appearance_from_window, discard_selected, git_failure_message,
+    network_failure_message, repository_is_available, repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
 use crate::views::single_line_input::register_input_bindings;
@@ -309,7 +309,7 @@ impl GitronimoApp {
             commit_subject_input,
             commit_body_input,
             repo_description_input,
-            branch_rename_input,
+            text_prompt_input,
         ) = Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
@@ -352,9 +352,10 @@ impl GitronimoApp {
             pending_stash_action: None,
             pending_operation_action: None,
             pending_branch_delete: None,
-            pending_branch_rename: None,
-            branch_rename_value: String::new(),
+            pending_text_prompt: None,
+            text_prompt_value: String::new(),
             selected_branch_review: None,
+            branches_review_show_all: false,
             force_push_state: ForcePushState::Idle,
             shortcut_reference_state: ShortcutReferenceState::Hidden,
             commit_subject: String::new(),
@@ -438,7 +439,7 @@ impl GitronimoApp {
             commit_subject_input,
             commit_body_input,
             repo_description_input,
-            branch_rename_input,
+            text_prompt_input,
             show_quick_open: false,
             commit_options_expanded: false,
             user_repo_description: String::new(),
@@ -500,7 +501,7 @@ impl GitronimoApp {
             commit_subject_input,
             commit_body_input,
             repo_description_input,
-            branch_rename_input,
+            text_prompt_input,
         ) = Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
@@ -543,9 +544,10 @@ impl GitronimoApp {
             pending_stash_action: None,
             pending_operation_action: None,
             pending_branch_delete: None,
-            pending_branch_rename: None,
-            branch_rename_value: String::new(),
+            pending_text_prompt: None,
+            text_prompt_value: String::new(),
             selected_branch_review: None,
+            branches_review_show_all: false,
             force_push_state: ForcePushState::Idle,
             shortcut_reference_state: ShortcutReferenceState::Hidden,
             commit_subject: String::new(),
@@ -629,7 +631,7 @@ impl GitronimoApp {
             commit_subject_input,
             commit_body_input,
             repo_description_input,
-            branch_rename_input,
+            text_prompt_input,
             show_quick_open: false,
             commit_options_expanded: false,
             user_repo_description: String::new(),
@@ -969,9 +971,9 @@ return remote_url & linefeed & parent_path"#;
                         app.show_reflog(repository.clone(), cx);
                     }
                 }
-                Some("File history…") => GitronimoApp::prompt_file_history(cx),
-                Some("Blame…") => GitronimoApp::prompt_blame(cx),
-                Some("Compare refs…") => GitronimoApp::prompt_compare_refs(cx),
+                Some("File history…") => app.prompt_file_history(cx),
+                Some("Blame…") => app.prompt_blame(cx),
+                Some("Compare refs…") => app.prompt_compare_refs(cx),
                 Some("Browse tree at commit…") => GitronimoApp::prompt_browse_tree(cx),
                 Some("Worktrees…") => {
                     if let ShellState::Repository(repository) = &app.state {
@@ -1098,35 +1100,114 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
-    fn begin_branch_rename(&mut self, current: String, cx: &mut Context<Self>) {
-        self.pending_branch_rename = Some(current);
-        self.branch_rename_value.clear();
+    fn begin_text_prompt(
+        &mut self,
+        kind: TextPromptKind,
+        initial: impl Into<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_text_prompt = Some(kind);
+        self.text_prompt_value = initial.into();
         cx.notify();
     }
 
-    fn cancel_branch_rename(&mut self, cx: &mut Context<Self>) {
-        self.pending_branch_rename = None;
-        self.branch_rename_value.clear();
+    fn cancel_text_prompt(&mut self, cx: &mut Context<Self>) {
+        self.pending_text_prompt = None;
+        self.text_prompt_value.clear();
         cx.notify();
     }
 
-    fn confirm_branch_rename(&mut self, cx: &mut Context<Self>) {
-        let Some(current) = self.pending_branch_rename.clone() else {
+    fn confirm_text_prompt(&mut self, cx: &mut Context<Self>) {
+        let Some(kind) = self.pending_text_prompt.clone() else {
             return;
         };
-        let name = self.branch_rename_value.trim().to_owned();
-        if name.is_empty() || name == current {
-            self.activity = "Enter a new branch name to rename.".into();
-            cx.notify();
-            return;
+        let value = self.text_prompt_value.trim().to_owned();
+        match kind {
+            TextPromptKind::BranchRename { current } => {
+                if value.is_empty() || value == current {
+                    self.activity = "Enter a new branch name to rename.".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.run_branch_command(
+                    format!("Renaming branch to {value}"),
+                    move |git, repository| git.rename_branch(repository, &current, &value),
+                    cx,
+                );
+            }
+            TextPromptKind::CreateBranch { start } => {
+                if value.is_empty() {
+                    self.activity = "Enter a branch name.".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.create_branch_from(value, start, cx);
+            }
+            TextPromptKind::FileHistoryPath => {
+                if value.is_empty() {
+                    self.activity = "Enter a repository path.".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.file_history_path = value;
+                let ShellState::Repository(repository) = &self.state else {
+                    return;
+                };
+                let repository = repository.clone();
+                self.navigate_to(RepositoryView::FileHistory, cx);
+                self.load_file_history(repository, cx);
+            }
+            TextPromptKind::BlamePath => {
+                if value.is_empty() {
+                    self.activity = "Enter a repository path.".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.blame_path = value;
+                let ShellState::Repository(repository) = &self.state else {
+                    return;
+                };
+                let repository = repository.clone();
+                self.navigate_to(RepositoryView::Blame, cx);
+                self.load_blame(repository, cx);
+            }
+            TextPromptKind::CompareFrom => {
+                if value.is_empty() {
+                    self.activity = "Enter a ref to compare from.".into();
+                    cx.notify();
+                    return;
+                }
+                self.text_prompt_value.clear();
+                self.pending_text_prompt = Some(TextPromptKind::CompareTo { left: value });
+                cx.notify();
+            }
+            TextPromptKind::CompareTo { left } => {
+                if value.is_empty() {
+                    self.activity = "Enter a ref to compare to.".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.compare_left = left;
+                self.compare_right = value;
+                let ShellState::Repository(repository) = &self.state else {
+                    return;
+                };
+                let repository = repository.clone();
+                self.navigate_to(RepositoryView::Compare, cx);
+                self.load_compare(repository, cx);
+            }
         }
-        self.pending_branch_rename = None;
-        self.branch_rename_value.clear();
-        self.run_branch_command(
-            format!("Renaming branch to {name}"),
-            move |git, repository| git.rename_branch(repository, &current, &name),
-            cx,
-        );
+        cx.notify();
     }
 
     fn merge_branch_into_current(&mut self, branch: String, cx: &mut Context<Self>) {
@@ -1146,7 +1227,36 @@ return remote_url & linefeed & parent_path"#;
     }
 
     fn prompt_rename_branch(&mut self, current: String, cx: &mut Context<Self>) {
-        self.begin_branch_rename(current, cx);
+        self.begin_text_prompt(TextPromptKind::BranchRename { current }, "", cx);
+    }
+
+    fn prompt_create_branch_from_ref(&mut self, start: String, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::CreateBranch { start: Some(start) }, "", cx);
+    }
+
+    fn prompt_branch_from_selected(&mut self, cx: &mut Context<Self>) {
+        let Some(oid) = self
+            .selected_history
+            .and_then(|index| self.history.get(index))
+            .map(|commit| commit.oid.clone())
+        else {
+            self.activity = "Select a history commit first.".into();
+            cx.notify();
+            return;
+        };
+        self.begin_text_prompt(TextPromptKind::CreateBranch { start: Some(oid) }, "", cx);
+    }
+
+    fn prompt_file_history(&mut self, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::FileHistoryPath, "", cx);
+    }
+
+    fn prompt_blame(&mut self, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::BlamePath, "", cx);
+    }
+
+    fn prompt_compare_refs(&mut self, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::CompareFrom, "HEAD", cx);
     }
 
     fn move_history_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -1412,35 +1522,6 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
-    fn prompt_file_history(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let path = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"File history for path\" default answer \"\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|path| !path.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(path) = path {
-                    app.file_history_path = path;
-                    let ShellState::Repository(repository) = &app.state else {
-                        return;
-                    };
-                    let repository = repository.clone();
-                    app.navigate_to(RepositoryView::FileHistory, cx);
-                    app.load_file_history(repository, cx);
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
     fn load_file_history(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
         let root = repository.worktree_root.clone();
         let load_token = self.file_history_load_token;
@@ -1485,42 +1566,6 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
-    fn prompt_blame(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let path = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args([
-                            "-e",
-                            "text returned of (display dialog \"Blame path\" default answer \"\")",
-                        ])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| {
-                            String::from_utf8_lossy(&output.stdout)
-                                .trim_end()
-                                .to_owned()
-                        })
-                        .filter(|path| !path.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(path) = path {
-                    app.blame_path = path;
-                    let ShellState::Repository(repository) = &app.state else {
-                        return;
-                    };
-                    let repository = repository.clone();
-                    app.navigate_to(RepositoryView::Blame, cx);
-                    app.load_blame(repository, cx);
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
     fn load_blame(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
         let root = repository.worktree_root.clone();
         let load_token = self.blame_load_token;
@@ -1553,48 +1598,6 @@ return remote_url & linefeed & parent_path"#;
                     }
                     Err(error) => app.activity = format!("Blame failed: {error}"),
                 }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn prompt_compare_refs(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let left = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"Compare from ref\" default answer \"HEAD\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|name| !name.is_empty())
-                })
-                .await;
-            let right = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"Compare to ref\" default answer \"\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|name| !name.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                let (Some(left), Some(right)) = (left, right) else {
-                    return;
-                };
-                app.compare_left = left;
-                app.compare_right = right;
-                let ShellState::Repository(repository) = &app.state else {
-                    return;
-                };
-                let repository = repository.clone();
-                app.navigate_to(RepositoryView::Compare, cx);
-                app.load_compare(repository, cx);
                 cx.notify();
             });
         })
@@ -3503,27 +3506,6 @@ return remote_url & linefeed & parent_path"#;
         );
     }
 
-    fn prompt_branch_from_selected(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let name = cx.background_spawn(async {
-                Command::new("osascript")
-                    .args(["-e", "text returned of (display dialog \"New branch from selected commit\" default answer \"\")"])
-                    .output().ok().filter(|output| output.status.success())
-                    .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                    .filter(|name| !name.is_empty())
-            }).await;
-            let _ = this.update(cx, |app, cx| {
-                let Some(name) = name else { return; };
-                let Some(oid) = app.selected_history.and_then(|index| app.history.get(index)).map(|commit| commit.oid.clone()) else {
-                    app.activity = "Select a history commit first.".into();
-                    cx.notify();
-                    return;
-                };
-                app.create_branch_from(name, Some(oid), cx);
-            });
-        }).detach();
-    }
-
     fn default_remote(&self) -> Option<String> {
         self.refs
             .remotes
@@ -3849,28 +3831,6 @@ return remote_url & linefeed & parent_path"#;
     fn select_ref_context(&mut self, context: RefContext, cx: &mut Context<Self>) {
         self.ref_context = Some(context);
         cx.notify();
-    }
-
-    fn prompt_branch_from_ref(start: String, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let name = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"New branch from ref\" default answer \"\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|name| !name.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(name) = name {
-                    app.create_branch_from(name, Some(start), cx);
-                }
-            });
-        })
-        .detach();
     }
 
     fn show_ref_history(&mut self, reference: String, cx: &mut Context<Self>) {

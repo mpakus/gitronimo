@@ -113,7 +113,7 @@ impl GitronimoApp {
                 "Compare refs…",
                 colors,
                 cx,
-                |_, cx| GitronimoApp::prompt_compare_refs(cx),
+                GitronimoApp::prompt_compare_refs,
             ))
             .into_any_element();
         two_pane_view(

@@ -394,7 +394,7 @@ impl GitronimoApp {
                         "New branch from commit…",
                         colors,
                         cx,
-                        |_, cx| GitronimoApp::prompt_branch_from_selected(cx),
+                        GitronimoApp::prompt_branch_from_selected,
                     )),
             )
             .child(

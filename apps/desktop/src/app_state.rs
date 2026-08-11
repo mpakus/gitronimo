@@ -130,6 +130,16 @@ pub(crate) enum RefContext {
     Remote(String),
 }
 
+#[derive(Clone, Debug)]
+pub(crate) enum TextPromptKind {
+    BranchRename { current: String },
+    CreateBranch { start: Option<String> },
+    FileHistoryPath,
+    BlamePath,
+    CompareFrom,
+    CompareTo { left: String },
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum RefKind {
     LocalBranch,
@@ -229,9 +239,10 @@ pub(crate) struct GitronimoApp {
     pub pending_stash_action: Option<StashAction>,
     pub pending_operation_action: Option<OperationAction>,
     pub pending_branch_delete: Option<String>,
-    pub pending_branch_rename: Option<String>,
-    pub branch_rename_value: String,
-    pub selected_branch_review: Option<usize>,
+    pub pending_text_prompt: Option<TextPromptKind>,
+    pub text_prompt_value: String,
+    pub selected_branch_review: Option<String>,
+    pub branches_review_show_all: bool,
     pub force_push_state: ForcePushState,
     pub shortcut_reference_state: ShortcutReferenceState,
     pub commit_subject: String,
@@ -315,7 +326,7 @@ pub(crate) struct GitronimoApp {
     pub commit_subject_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub commit_body_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub repo_description_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
-    pub branch_rename_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
+    pub text_prompt_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub show_quick_open: bool,
     pub commit_options_expanded: bool,
     pub user_repo_description: String,
