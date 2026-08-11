@@ -4,8 +4,10 @@ use gpui::{AnyElement, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use crate::actions::{CommandPalette, NavigateBack, NavigateForward, OpenRepository, Refresh};
-use crate::app_state::{GitronimoApp, RepositoryView, ShellState};
-use crate::views::components::ActionTooltip;
+use crate::app_state::{GitronimoApp, RepositoryView, ShellState, WelcomeShellView};
+use crate::views::components::{
+    ActionTooltip, stacked_toolbar_button, toolbar_divider, toolbar_search_field,
+};
 use git_domain::HeadStatus;
 
 impl GitronimoApp {
@@ -15,11 +17,28 @@ impl GitronimoApp {
         colors: &ThemeColors,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        let (repo_name, branch_info, view_label, changed) = match &self.state {
-            ShellState::Welcome => ("Repositories".into(), String::new(), String::new(), 0usize),
-            ShellState::Loading(_) => {
-                ("Opening repository".into(), String::new(), String::new(), 0)
+        let (repo_name, branch_name, branch_info, view_label, changed) = match &self.state {
+            ShellState::Welcome => {
+                let title = match self.welcome_shell_view {
+                    WelcomeShellView::Repositories => "Repositories",
+                    WelcomeShellView::Services => "Services",
+                    WelcomeShellView::Workflow => "Workflow",
+                };
+                (
+                    title.into(),
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                    0usize,
+                )
             }
+            ShellState::Loading(_) => (
+                "Opening repository".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                0,
+            ),
             ShellState::Repository(repository) => {
                 let name = repository
                     .worktree_root
@@ -36,14 +55,14 @@ impl GitronimoApp {
                     RepositoryView::Remotes => "Remotes",
                     _ => "Git workspace",
                 };
-                let changed = self
-                    .working_copy
-                    .as_ref()
-                    .map_or(0, |status| status.entries.len());
-                let branch_info = self
-                    .working_copy
-                    .as_ref()
-                    .map_or_else(String::new, |status| {
+                let groups = self.status_groups();
+                let changed = groups.staged.len()
+                    + groups.unstaged.len()
+                    + groups.untracked.len()
+                    + groups.conflicts.len();
+                let (branch_name, branch_info) = self.working_copy.as_ref().map_or_else(
+                    || (String::new(), String::new()),
+                    |status| {
                         let branch = match &status.branch.head {
                             HeadStatus::Branch(name) => {
                                 String::from_utf8_lossy(&name.0).into_owned()
@@ -71,12 +90,14 @@ impl GitronimoApp {
                             info.push_str(&parts.join(", "));
                             info.push(')');
                         }
-                        info
-                    });
-                (name, branch_info, view.to_owned(), changed)
+                        (branch, info)
+                    },
+                );
+                (name, branch_name, branch_info, view.to_owned(), changed)
             }
             ShellState::Error(_) => (
                 "Repository needs attention".into(),
+                String::new(),
                 String::new(),
                 String::new(),
                 0,
@@ -84,13 +105,27 @@ impl GitronimoApp {
         };
         let subtitle = if view_label.is_empty() {
             String::new()
+        } else if changed > 0 && !branch_name.is_empty() {
+            format!("{view_label} ({branch_name} - {changed} Changed Files)")
         } else if changed > 0 {
-            format!("{view_label} ({changed} changed files)")
+            format!("{view_label} ({changed} Changed Files)")
+        } else if !branch_name.is_empty() {
+            format!("{view_label} ({branch_name})")
         } else {
             view_label
         };
+        let search_placeholder = match &self.state {
+            ShellState::Welcome => "Search for Repositories",
+            ShellState::Repository(_) => "Search for File",
+            _ => "Search",
+        };
+        let search_value = match &self.state {
+            ShellState::Welcome => self.welcome_repo_search.as_str(),
+            ShellState::Repository(_) => self.worktree_file_search.as_str(),
+            _ => "",
+        };
         div()
-            .h(px(50.0))
+            .h(px(52.0))
             .px_3()
             .flex()
             .items_center()
@@ -104,8 +139,8 @@ impl GitronimoApp {
                     .items_center()
                     .gap_1()
                     .child(icon_toolbar_button(
-                        "Repositories",
-                        "\u{1F4C2}",
+                        "Quick Open",
+                        "\u{2318}",
                         colors,
                         cx,
                         |app, _, cx| {
@@ -161,6 +196,24 @@ impl GitronimoApp {
                     .items_center()
                     .gap_0p5()
                     .children(self.repository_actions(colors, cx))
+                    .children(self.working_copy_toolbar_actions(colors, cx))
+                    .child(toolbar_search_field(
+                        search_placeholder,
+                        search_value,
+                        &self.search_focus_handle,
+                        colors,
+                        cx,
+                        |app, query, cx| match &app.state {
+                            ShellState::Welcome => {
+                                GitronimoApp::set_welcome_repo_search(app, query, cx);
+                            }
+                            ShellState::Repository(_) => {
+                                GitronimoApp::set_worktree_file_search(app, query, cx);
+                            }
+                            _ => {}
+                        },
+                    ))
+                    .child(toolbar_divider(colors))
                     .child(icon_toolbar_button(
                         "Palette",
                         "\u{2318}",
@@ -173,7 +226,7 @@ impl GitronimoApp {
                     ))
                     .child(icon_toolbar_button(
                         "Open",
-                        "\u{1F4C2}",
+                        "+",
                         colors,
                         cx,
                         |_, window, cx| {
@@ -192,8 +245,8 @@ impl GitronimoApp {
         let has_back = !self.navigation_back.is_empty();
         let has_forward = !self.navigation_forward.is_empty();
         vec![
-            icon_toolbar_button(
-                "Back",
+            labeled_toolbar_button(
+                "Prev",
                 "\u{2039}",
                 colors,
                 cx,
@@ -202,8 +255,8 @@ impl GitronimoApp {
                 },
                 !has_back,
             ),
-            icon_toolbar_button(
-                "Forward",
+            labeled_toolbar_button(
+                "Next",
                 "\u{203A}",
                 colors,
                 cx,
@@ -224,7 +277,7 @@ impl GitronimoApp {
             return Vec::new();
         }
         vec![
-            icon_toolbar_button(
+            stacked_toolbar_button(
                 "Fetch",
                 "\u{2193}",
                 colors,
@@ -234,7 +287,7 @@ impl GitronimoApp {
                 },
                 false,
             ),
-            icon_toolbar_button(
+            stacked_toolbar_button(
                 "Pull",
                 "\u{2913}",
                 colors,
@@ -244,7 +297,7 @@ impl GitronimoApp {
                 },
                 false,
             ),
-            icon_toolbar_button(
+            stacked_toolbar_button(
                 "Push",
                 "\u{2B06}",
                 colors,
@@ -254,9 +307,56 @@ impl GitronimoApp {
                 },
                 false,
             ),
-            icon_toolbar_button(
+            stacked_toolbar_button(
                 "Sync",
                 "\u{27F3}",
+                colors,
+                cx,
+                |app, _, cx| {
+                    app.fetch_default_remote(cx);
+                    app.pull_current(cx);
+                    app.push_current(cx);
+                },
+                false,
+            ),
+            toolbar_divider(colors),
+        ]
+    }
+
+    fn working_copy_toolbar_actions(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> Vec<AnyElement> {
+        if !matches!(self.state, ShellState::Repository(_))
+            || self.repository_view != RepositoryView::WorkingCopy
+        {
+            return Vec::new();
+        }
+        vec![
+            stacked_toolbar_button(
+                "Apply",
+                "\u{21A9}",
+                colors,
+                cx,
+                |app, _, cx| {
+                    app.apply_latest_stash(cx);
+                },
+                false,
+            ),
+            stacked_toolbar_button(
+                "Save",
+                "\u{21AA}",
+                colors,
+                cx,
+                |app, _, cx| {
+                    app.create_stash(false, cx);
+                },
+                false,
+            ),
+            stacked_toolbar_button(
+                "Refresh",
+                "\u{21BB}",
                 colors,
                 cx,
                 |_, window, cx| {
@@ -264,8 +364,57 @@ impl GitronimoApp {
                 },
                 false,
             ),
+            toolbar_divider(colors),
         ]
     }
+}
+
+#[allow(clippy::redundant_closure)]
+fn labeled_toolbar_button(
+    tooltip_label: &'static str,
+    icon: &'static str,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Window, &mut gpui::Context<GitronimoApp>) + 'static,
+    disabled: bool,
+) -> AnyElement {
+    let tooltip_colors = *colors;
+    let icon_color = if disabled {
+        colors.text_muted
+    } else {
+        colors.text_primary
+    };
+    div()
+        .id(tooltip_label)
+        .h(px(28.0))
+        .px_1p5()
+        .flex()
+        .items_center()
+        .gap_0p5()
+        .rounded(px(4.0))
+        .text_xs()
+        .when(!disabled, |d| {
+            #[allow(clippy::redundant_closure)]
+            d.cursor_pointer()
+        })
+        .when(!disabled, |d| {
+            d.tooltip(move |_, cx| {
+                cx.new(|_| ActionTooltip {
+                    label: tooltip_label,
+                    colors: tooltip_colors,
+                })
+                .into()
+            })
+        })
+        .when(!disabled, |d| {
+            d.on_click(cx.listener(move |app, _, window, cx| {
+                on_click(app, window, cx);
+            }))
+        })
+        .text_color(icon_color)
+        .child(icon)
+        .child(tooltip_label)
+        .into_any_element()
 }
 
 #[allow(clippy::redundant_closure)]

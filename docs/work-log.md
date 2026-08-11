@@ -1,5 +1,129 @@
 # Implementation work log
 
+## 2026-08-10 — Tower interior views polish (sidebar, WC, history, diff, stashes, remotes)
+
+**Intent:** close visual gaps inside opened-repository views vs Tower reference screenshots (overview-05/06/08, workflow-03/04/05/06) — repo sidebar IA, WC composer layout, file-row selection/badges, toolbar subtitle, history density, diff line backgrounds, stashes/remotes two-pane layouts.
+
+**Design:** drop welcome-only Repositories/Services headers from in-repo sidebar; uppercase section labels + scrollable ref tree with remote branches under Remotes; Tower commit row (subject + count, then Stage All | Commit); accent file-row selection + square status badges; toolbar subtitle `View (branch - N Changed Files)`; structured history rows + segmented Changeset/Tree header; diff added/removed row backgrounds; stashes/remotes list|detail split.
+
+**Files changed:**
+- `apps/desktop/src/views/sidebar.rs` — in-repo IA, section labels, scroll area, remotes grouping
+- `apps/desktop/src/views/commit_composer.rs` — Tower two-row commit area
+- `apps/desktop/src/views/working_copy.rs` — selection, badges, empty diff state
+- `apps/desktop/src/views/toolbar.rs` — Tower subtitle format, Quick Open label
+- `apps/desktop/src/views/history.rs` — row density, detail header toggle
+- `apps/desktop/src/views/diff_viewer.rs` — line row backgrounds
+- `apps/desktop/src/views/commit_detail.rs` — two-pane changeset layout
+- `apps/desktop/src/views/stashes.rs` — list + detail two-pane
+- `apps/desktop/src/views/remotes.rs` — list + detail two-pane
+- `apps/desktop/src/views/components.rs` — shared sidebar label, badge, empty state, segmented toggle
+- `docs/UI-IMPROVE.md` — interior polish status
+
+**Acceptance checks:** in-repo sidebar matches Tower sections (no welcome clutter); WC composer matches Tower row order; file rows 22px with square badges and accent selection; history/detail/stashes/remotes use two-pane Tower density; diff lines show add/remove backgrounds; all workspace gates pass; app launches.
+
+## 2026-08-10 — Tower UI parity pass: welcome rail, inline search, remote progress, polish
+
+**Intent:** close remaining `docs/UI-IMPROVE.md` gaps — welcome vertical Services/Bookmarks/Workflow rail (§1.1), always-visible inline toolbar search (§4), persistent remote progress in sidebar footer (§1.5), visual parity (toolbar density, commit area, file rows, diff tabs, detail headers, activity bar).
+
+**Design:** add `WelcomeShellView::Workflow` and a left icon rail on welcome; replace osascript search prompts with focusable GPUI inline search fields synced to `welcome_repo_search` / `worktree_file_search`; sidebar footer shows indeterminate progress bar during fetch/pull/push plus last result when idle; polish commit composer focus border + right-aligned Commit, diff staged/unstaged segmented tabs, welcome detail REPOSITORY/WORKING COPY/REMOTES headers, HEAD badge and chevrons, activity bar success coloring.
+
+**Files changed:**
+- `apps/desktop/src/app_state.rs` — Workflow shell view, search focus handle, network progress
+- `apps/desktop/src/main.rs` — inline search handlers, progress tick, Workflow routing
+- `apps/desktop/src/views/workspace.rs` — welcome rail slot, activity bar polish
+- `apps/desktop/src/views/welcome.rs` — vertical rail, Workflow placeholder, detail headers
+- `apps/desktop/src/views/toolbar.rs` — inline search, remove horizontal welcome tabs
+- `apps/desktop/src/views/sidebar.rs` — inline sidebar filter, progress footer, HEAD badge
+- `apps/desktop/src/views/components.rs` — inline search field, rail tab, progress bar
+- `apps/desktop/src/views/commit_composer.rs` — focus border, Commit placement
+- `apps/desktop/src/views/diff_viewer.rs` — staged/unstaged tab styling, hunk header
+- `crates/ui_kit/src/theme.rs` — separator token usage (if needed)
+- `docs/UI-IMPROVE.md` — updated remaining gaps
+
+**Acceptance checks:** welcome shows vertical Services/Bookmarks/Workflow rail; toolbar and sidebar search filter live; sidebar footer shows progress during remote ops and last result when idle; WC/diff/welcome/detail match Tower density; all workspace gates pass; app launches.
+
+## 2026-08-10 — Tower UI alignment: toolbar, sidebar, history, welcome search, WC polish
+
+**Intent:** close remaining gaps from `docs/UI-IMPROVE.md` § Remaining gaps — toolbar search/stash/refresh cluster, edge-to-edge sidebar selection, History inline Changeset/Tree toggle, welcome repo filter, Working Copy subject count / Stage All / column headers / softer row selection.
+
+**Design:** stacked labeled toolbar buttons (Fetch/Pull/Push/Sync, Apply/Save stash, Refresh); clickable search fields wired to osascript filter prompts (`welcome_repo_search`, `worktree_file_search`); full-width accent sidebar selection; reuse Commit Detail changeset/tree panels in History inspector; composer subject remaining-char count (50) + inline Stage All; Status|Filename column header parity; raised-background file row selection.
+
+**Files changed:**
+- `apps/desktop/src/app_state.rs` — search filter fields
+- `apps/desktop/src/main.rs` — init/clear search, prompt helpers
+- `apps/desktop/src/views/toolbar.rs` — grouped stacked actions + search
+- `apps/desktop/src/views/sidebar.rs` — edge-to-edge selection, welcome filter field
+- `apps/desktop/src/views/history.rs` — inline Changeset/Tree inspector
+- `apps/desktop/src/views/commit_detail.rs` — pub(crate) shared panels
+- `apps/desktop/src/views/commit_composer.rs` — char count, Stage All
+- `apps/desktop/src/views/working_copy.rs` — file filter, headers, softer selection
+- `apps/desktop/src/views/components.rs` — toolbar search + stacked button helpers
+- `docs/UI-IMPROVE.md` — updated remaining gaps table
+
+**Acceptance checks:** toolbar shows search + labeled remote/stash/refresh clusters; welcome sidebar filters recents; History detail pane toggles Changeset/Tree; sidebar selection is full-width blue; WC composer shows 50-char count and Stage All; file list headers align; all workspace gates pass; app launches.
+
+## 2026-08-10 — Tower UI audit follow-up: welcome tabs, sidebar badges, doc honesty
+
+**Intent:** close the most visible remaining gaps vs Tower after auditing `docs/UI-IMPROVE.md` against current screenshots — welcome lacks Services/Repositories tabs (§1.1), sidebar lacks HEAD badge and Tower-style Working Copy count badge, grouping toggle exists but has no UI (§1.2), remote-activity footer only appears during in-flight ops (§1.5 partial).
+
+**Design:** add `WelcomeShellView` segmented control in the welcome toolbar (Repositories | Services) routing welcome content and sidebar; expose the existing `repositories_grouped` toggle in the welcome sidebar header; show a white pill count badge on selected Working Copy nav row and a HEAD pill on the checked-out branch; show last fetch/pull/push result in sidebar footer when idle; update `UI-IMPROVE.md` implementation status with a Remaining gaps subsection.
+
+**Files changed:**
+- `apps/desktop/src/app_state.rs` — `WelcomeShellView`, `welcome_shell_view`, `last_network_result`
+- `apps/desktop/src/main.rs` — welcome tab setter, network result tracking, remove dead_code on grouping toggle
+- `apps/desktop/src/views/toolbar.rs` — welcome shell tabs, Prev/Next navigation labels
+- `apps/desktop/src/views/sidebar.rs` — grouping toggle, HEAD badge, badge styling, services welcome sidebar, idle remote footer
+- `apps/desktop/src/views/welcome.rs` — route Services tab to hosting view
+- `apps/desktop/src/views/services.rs` — hide repo-only nav on welcome shell
+- `docs/UI-IMPROVE.md` — honest status + remaining gaps
+
+**Acceptance checks:** welcome toolbar shows Repositories/Services tabs; Services tab loads hosting view; welcome sidebar grouping toggle works; current branch shows HEAD badge; Working Copy badge inverts on selection; sidebar footer shows last remote result when idle; all workspace gates pass; app launches.
+
+## 2026-08-10 — Tower UI alignment: Welcome / Repositories view
+
+**Intent:** replace the dashed drop-zone welcome screen with a Tower-style Repositories browser — grouped sidebar list plus a rich detail panel and bottom action bar (UI-IMPROVE §1.2).
+
+**Design:** sidebar shows grouped recent repositories with subtle selection; main content is a detail card (name, Open/Delete, location, last opened, branch, changed-file count, remote URL, committer identity) or an empty “Select a repository” state. Load Git metadata asynchronously when a repo is selected. Bottom toolbar holds Add / Create / Clone. Drag-drop stays on the workspace root, de-emphasized visually.
+
+**Files changed:**
+- `apps/desktop/src/views/welcome.rs` — two-pane detail layout, empty state, action bar
+- `apps/desktop/src/views/sidebar.rs` — grouped welcome repo list, no emoji icons
+- `apps/desktop/src/app_state.rs` — `WelcomeRepoSnapshot` and selection snapshot fields
+- `apps/desktop/src/main.rs` — snapshot load, remove-from-recents with confirmation, Open wiring
+- `crates/app_core/src/lib.rs` — `RecentRepositoryStore::remove`
+
+**Acceptance checks:** welcome shows detail panel for selected repo; empty state when none selected; Open opens repo; Delete removes from recents after confirm; Add/Create/Clone in bottom bar; drag-drop still works; all workspace gates pass; app launches.
+
+## 2026-08-10 — Tower visual polish pass (Working Copy, toolbar, sidebar)
+
+**Intent:** close the visual gap vs Tower based on user screenshots — remove emoji clutter, harsh selection blue, and bulky commit/file-list chrome.
+
+**Design:** use theme `selection` for list rows (dark text on subtle tint), compact commit composer (subject-only until body filled, option chips, disabled Commit state, staged count), segmented Modified/All Files control, text-only status badges, branch breadcrumb with ⎇ glyph, text-only sidebar nav, cleaner toolbar height and icons.
+
+**Files changed:**
+- `crates/ui_kit/src/theme.rs` — softer selection colors
+- `apps/desktop/src/views/components.rs` — theme-aware status badges, disabled primary button, commit option chips
+- `apps/desktop/src/views/commit_composer.rs` — compact Tower-style composer
+- `apps/desktop/src/views/working_copy.rs` — branch breadcrumb, file list rows/tabs, remove file-type emojis
+- `apps/desktop/src/views/sidebar.rs` — text-only nav, muted badges
+- `apps/desktop/src/views/toolbar.rs` — slimmer toolbar, cleaner icons
+- `apps/desktop/src/views/welcome.rs` — updated primary button API, drop zone icon
+
+**Acceptance checks:** no emoji icons in Working Copy rows/branch; selection uses theme tint; commit area compact; Modified/All Files segmented control; all workspace gates pass; app launches.
+
+
+**Intent:** finish UI-IMPROVE §1.6 / §2.3 — expose the existing `worktree_show_all_files` mode with a Tower-style Modified/All Files control and a single flat changed-file list in Modified mode.
+
+**Design:** add a segmented header above the file list (`Modified` / `All Files`) that calls `toggle_worktree_show_all`. In Modified mode, render one flat list of changed entries (staged, unstaged, untracked, conflicts) with per-file stage checkboxes and status badges instead of separate Staged/Unstaged/Untracked/Conflicts sections. Show a meaningful empty state when there are no changes. Keep the All Files mode backed by `tracked_files`.
+
+**Files changed:**
+- `apps/desktop/src/views/working_copy.rs` — file list header toggle, flat modified list, empty state, removed legacy `status_group_view`
+- `apps/desktop/src/main.rs` — expose `toggle_worktree_show_all` to views
+
+**Acceptance checks:** Working Copy shows Modified/All Files toggle; Modified mode lists all changed files in one pane; All Files mode lists tracked + untracked files; toggle loads tracked files asynchronously; empty modified state is visible; all workspace gates pass.
+
+**Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
+
 ## 2026-08-10 — Tower UI polish: sidebar, working copy, branch menu, toolbar
 
 **Intent:** match Tower's UI across all major views based on new screenshots (001-004) and Tower documentation.

@@ -46,6 +46,10 @@ impl Render for GitronimoApp {
                 div()
                     .flex_1()
                     .flex()
+                    .children(
+                        matches!(self.state, ShellState::Welcome)
+                            .then(|| self.welcome_vertical_rail(&colors, cx).into_any_element()),
+                    )
                     .child(self.sidebar_view(sidebar_width, &colors, cx))
                     .child(
                         div()
@@ -57,13 +61,14 @@ impl Render for GitronimoApp {
             )
             .child(
                 div()
-                    .min_h(px(30.0))
+                    .min_h(px(26.0))
                     .px_4()
                     .flex()
                     .items_center()
-                    .bg(colors.raised_background)
+                    .bg(colors.panel_background)
                     .border_t_1()
                     .border_color(colors.border)
+                    .text_xs()
                     .text_color(activity_color(&self.activity, &colors))
                     .child(activity_label(&self.activity)),
             )

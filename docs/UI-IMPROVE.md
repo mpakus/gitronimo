@@ -1,6 +1,6 @@
 # UI/UX Improvement Plan
 
-Status: **implemented** — screenshots below are third-party product captures used to study professional Git-client UI/UX. Gitronimo keeps its own original branding, icons, palette, and typography; none of these assets are copied into shipped code.
+Status: **in progress** — core IA and workflows are largely in place; visual parity with Tower reference screenshots is still being closed section-by-section.
 
 **Sources**
 
@@ -201,13 +201,44 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 ### Implementation status
 
-- [x] Working Copy composer, list mode, per-file staging, navigation, commit reveal, and remote activity.
-- [x] Commit Detail Changeset/Tree modes and double-click navigation.
-- [x] Stashes and Remotes destinations.
-- [x] Git LFS status destination.
-- [x] Repositories view with grouped/flat recents, Add existing, Create new, and local/service clone entry points.
-- [x] Services view with GitHub token validation, Keychain storage, repository listing, rate-limit state, sign-out, and clone handoff.
-- [x] Pull Requests list, detail, comment, merge, create, and checkout workflow.
+**Done (functional):**
+- [x] Working Copy composer above file list, Modified/All Files toggle, per-file stage checkbox, staged/unstaged badges
+- [x] Visible Back/Forward (Prev/Next) toolbar navigation with disabled state
+- [x] Reveal new commit in History after committing
+- [x] Commit Detail view with Changeset/Tree modes (double-click from History)
+- [x] Stashes, Remotes, and Git LFS sidebar destinations
+- [x] Repositories welcome view: grouped/flat recents, detail panel, Add/Create/Clone actions
+- [x] Services view: GitHub token auth, repository listing, clone handoff (Phase 9 baseline)
+- [x] Pull Requests list/detail workflow (Phase 9 baseline)
+- [x] Welcome vertical Services/Bookmarks/Workflow rail (Workflow placeholder)
+- [x] Always-visible inline toolbar/sidebar search filtering repos and files
+- [x] Sidebar remote-activity progress bar during fetch/pull/push + last-result footer when idle
+- [x] Visual polish pass: welcome detail headers, commit focus border, diff tabs/hunk headers, HEAD badge, activity bar
+
+**Partially done (works but visually or structurally short of Tower):**
+- [~] §1.1 Services — hosting view exists; welcome now has vertical Services/Bookmarks/Workflow rail; Workflow tab is placeholder-only
+- [~] §1.4 Back/Forward — Prev/Next labels added; toolbar groups Fetch/Pull/Push/Sync, stash Apply/Save, Refresh, and inline search fields Tower-style
+- [~] §1.5 Remote activity — in-flight progress bar and last-result footer in sidebar; progress is indeterminate (no stderr parsing yet)
+- [~] §1.8 History inline detail — Changeset/Tree segmented toggle in History inspector; commit rows use Tower density (author/date/subject)
+- [~] §4 Visual polish — interior pass: in-repo sidebar IA, WC composer rows, accent file selection, diff line backgrounds, stashes/remotes two-pane; OAuth/enterprise still deferred
+
+**Done (interior views — 2026-08-10 pass):**
+- [x] In-repo sidebar: WORKSPACE/BRANCHES/TAGS/REMOTES sections, nav icons, scrollable ref tree, no welcome clutter
+- [x] Working Copy: Tower commit row order (subject + count, Stage All | Commit), square status badges, accent file-row selection
+- [x] Toolbar subtitle: `View (branch - N Changed Files)`; Quick Open label
+- [x] History: structured commit rows + segmented Changeset/Tree detail header
+- [x] Diff viewer: added/removed line row backgrounds
+- [x] Stashes / Remotes: list + detail two-pane layouts with empty states
+- [x] Commit Detail / History changeset: file list left, diff right
+
+### Remaining gaps (priority order)
+
+| Gap | Section | Notes |
+|-----|---------|-------|
+| Workflow view content | §1.1 | Rail tab exists; full workflow surface still placeholder |
+| OAuth / enterprise GitHub | Delivery notes | Still deferred per `PLAN.md` |
+| Deterministic remote progress | §1.5 | Indeterminate bar during fetch/pull/push; no byte/object counts from Git stderr yet |
+| IME-rich search/composer | §4 | Inline search uses key-down capture; full EntityInputHandler fields deferred |
 
 ### Delivery notes
 

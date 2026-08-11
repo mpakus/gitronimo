@@ -246,6 +246,19 @@ impl RecentRepositoryStore {
         Ok(recents)
     }
 
+    /// Removes one path from recents and persists the updated document.
+    ///
+    /// # Errors
+    ///
+    /// Does not overwrite a newer or malformed document.
+    pub fn remove(&self, path: &Path) -> Result<Vec<PathBuf>, RecentRepositoryStoreError> {
+        let mut document = self.load_document()?;
+        document.recent_repositories.retain(|recent| recent != path);
+        let recents = document.recent_repositories.clone();
+        self.save(&document)?;
+        Ok(recents)
+    }
+
     /// Returns the last saved window geometry, if any.
     ///
     /// # Errors
@@ -529,6 +542,24 @@ mod tests {
         let _ = fs::remove_dir_all(&directory);
         let path = directory.join("recents.json");
         (directory, RecentRepositoryStore::new(path))
+    }
+
+    #[test]
+    fn remove_drops_one_recent_and_persists() {
+        let (directory, store) = temporary_store();
+        let first = directory.join("first");
+        let second = directory.join("second");
+        store
+            .record(first.clone())
+            .expect("first record should save");
+        store
+            .record(second.clone())
+            .expect("second record should save");
+
+        let recents = store.remove(&first).expect("remove should save");
+        assert_eq!(recents, vec![second.clone()]);
+        assert_eq!(store.load().expect("store should reload"), recents);
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]

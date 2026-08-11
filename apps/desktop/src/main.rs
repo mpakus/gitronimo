@@ -48,9 +48,9 @@ use crate::actions::{
 use crate::app_state::{
     ForcePushState, GitronimoApp, HistoryDetailMode, LastAction, Mutation, NetworkOperation,
     OpenedRepository, OperationAction, RefContext, RepositoryView, ShellState,
-    ShortcutReferenceState, StashAction, ThemeMode, appearance_from_window, discard_selected,
-    git_failure_message, network_failure_message, repository_is_available,
-    repository_unavailable_message, resize_width,
+    ShortcutReferenceState, StashAction, ThemeMode, WelcomeRepoSnapshot, WelcomeShellView,
+    appearance_from_window, discard_selected, git_failure_message, network_failure_message,
+    repository_is_available, repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
 
@@ -131,6 +131,47 @@ fn discover_and_record(
         repository,
         recents,
     })
+}
+
+fn load_welcome_snapshot(path: &Path) -> WelcomeRepoSnapshot {
+    let mut snapshot = WelcomeRepoSnapshot {
+        last_modified: fs::metadata(path)
+            .ok()
+            .and_then(|meta| meta.modified().ok()),
+        ..WelcomeRepoSnapshot::default()
+    };
+    if !path.is_dir() {
+        return snapshot;
+    }
+    let Ok(git) = GitExecutable::discover() else {
+        return snapshot;
+    };
+    let Ok(repository) = open_repository(&git, path) else {
+        return snapshot;
+    };
+    snapshot.available = true;
+    if let Ok(status) = git.worktree_status(&repository, false) {
+        snapshot.branch = match status.branch.head {
+            HeadStatus::Branch(name) => Some(String::from_utf8_lossy(&name.0).into_owned()),
+            HeadStatus::Detached => Some("Detached HEAD".into()),
+            HeadStatus::Unborn => Some("Unborn branch".into()),
+            HeadStatus::Unknown => None,
+        };
+        snapshot.changed_files = Some(status.entries.len());
+    }
+    if let Ok(refs) = git.ref_snapshot(&repository) {
+        snapshot.remote_url = refs
+            .remotes
+            .iter()
+            .find(|remote| remote.name.0 == b"origin")
+            .or_else(|| refs.remotes.first())
+            .map(|remote| String::from_utf8_lossy(&remote.fetch_url).into_owned());
+    }
+    if let Ok(Some(identity)) = git.author_identity(&repository) {
+        snapshot.author_name = Some(identity.name);
+        snapshot.author_email = Some(identity.email);
+    }
+    snapshot
 }
 
 fn preferences_path() -> PathBuf {
@@ -249,7 +290,17 @@ impl GitronimoApp {
             state: ShellState::Welcome,
             recents,
             selected_recent,
+            welcome_snapshot: None,
+            welcome_snapshot_path: None,
+            welcome_snapshot_token: 0,
+            welcome_shell_view: WelcomeShellView::Repositories,
             repositories_grouped: true,
+            welcome_repo_search: String::new(),
+            worktree_file_search: String::new(),
+            search_focus_handle: cx.focus_handle(),
+            commit_subject_focused: false,
+            network_progress: 0.0,
+            last_network_result: None,
             activity: "Choose a repository to begin.".into(),
             working_copy: None,
             worktree_show_all_files: false,
@@ -351,6 +402,9 @@ impl GitronimoApp {
         app.observe_system_appearance(window, cx);
         app.observe_window_geometry(window, cx);
         Self::load_diagnostics(cx);
+        if app.selected_recent.is_some() {
+            app.refresh_welcome_snapshot(cx);
+        }
         app
     }
 
@@ -402,7 +456,17 @@ impl GitronimoApp {
             state,
             recents,
             selected_recent: None,
+            welcome_snapshot: None,
+            welcome_snapshot_path: None,
+            welcome_snapshot_token: 0,
+            welcome_shell_view: WelcomeShellView::Repositories,
             repositories_grouped: true,
+            welcome_repo_search: String::new(),
+            worktree_file_search: String::new(),
+            search_focus_handle: cx.focus_handle(),
+            commit_subject_focused: false,
+            network_progress: 0.0,
+            last_network_result: None,
             activity,
             working_copy: None,
             worktree_show_all_files: false,
@@ -598,6 +662,7 @@ impl GitronimoApp {
                 self.history_decorations.clear();
                 self.selected_history = None;
                 self.history_search.clear();
+                self.worktree_file_search.clear();
                 self.history_list_state.reset(0);
                 self.history_paths.clear();
                 self.history_diff = None;
@@ -649,9 +714,29 @@ impl GitronimoApp {
         cx.notify();
     }
 
-    #[allow(dead_code)]
     fn toggle_repositories_grouped(&mut self, cx: &mut Context<Self>) {
         self.repositories_grouped = !self.repositories_grouped;
+        cx.notify();
+    }
+
+    fn set_welcome_shell_view(&mut self, view: WelcomeShellView, cx: &mut Context<Self>) {
+        if self.welcome_shell_view == view {
+            return;
+        }
+        self.welcome_shell_view = view;
+        if view == WelcomeShellView::Services {
+            self.load_services(cx);
+        }
+        cx.notify();
+    }
+
+    fn set_welcome_repo_search(&mut self, query: String, cx: &mut Context<Self>) {
+        self.welcome_repo_search = query;
+        cx.notify();
+    }
+
+    fn set_worktree_file_search(&mut self, query: String, cx: &mut Context<Self>) {
+        self.worktree_file_search = query;
         cx.notify();
     }
 
@@ -922,6 +1007,12 @@ return remote_url & linefeed & parent_path"#;
         self.working_copy = None;
         self.refs = RefSnapshot::default();
         self.repository_view = RepositoryView::WorkingCopy;
+        self.selected_recent = (!self.recents.is_empty()).then_some(0);
+        self.welcome_snapshot = None;
+        self.welcome_snapshot_path = None;
+        if self.selected_recent.is_some() {
+            self.refresh_welcome_snapshot(cx);
+        }
         cx.notify();
     }
 
@@ -2886,11 +2977,44 @@ return remote_url & linefeed & parent_path"#;
     fn select_recent(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.recents.len() {
             self.selected_recent = Some(index);
+            self.refresh_welcome_snapshot(cx);
             cx.notify();
         }
     }
 
-    #[allow(dead_code)]
+    fn refresh_welcome_snapshot(&mut self, cx: &mut Context<Self>) {
+        let Some(index) = self.selected_recent else {
+            self.welcome_snapshot = None;
+            self.welcome_snapshot_path = None;
+            return;
+        };
+        let Some(path) = self.recents.get(index).cloned() else {
+            self.welcome_snapshot = None;
+            self.welcome_snapshot_path = None;
+            return;
+        };
+        if self.welcome_snapshot_path.as_ref() == Some(&path) {
+            return;
+        }
+        self.welcome_snapshot = None;
+        self.welcome_snapshot_path = Some(path.clone());
+        self.welcome_snapshot_token = self.welcome_snapshot_token.wrapping_add(1);
+        let token = self.welcome_snapshot_token;
+        cx.spawn(async move |this, cx| {
+            let snapshot = cx
+                .background_spawn(async move { load_welcome_snapshot(&path) })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if app.welcome_snapshot_token != token {
+                    return;
+                }
+                app.welcome_snapshot = Some(snapshot);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn open_selected_recent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(index) = self.selected_recent else {
             return;
@@ -2899,6 +3023,63 @@ return remote_url & linefeed & parent_path"#;
             return;
         };
         self.open_recent(path, window, cx);
+    }
+
+    fn confirm_remove_selected_recent(&mut self, cx: &mut Context<Self>) {
+        let Some(index) = self.selected_recent else {
+            return;
+        };
+        let Some(path) = self.recents.get(index).cloned() else {
+            return;
+        };
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("this repository")
+            .to_owned();
+        let dialog_name = name.clone();
+        self.activity = format!("Remove {name} from recents?");
+        let store = self.store.clone();
+        cx.spawn(async move |this, cx| {
+            let confirmed = cx
+                .background_spawn(async move {
+                    Command::new("osascript")
+                        .args(["-e", &format!(
+                            "button returned of (display dialog \"Remove {dialog_name} from Gitronimo's repository list?\" with title \"Gitronimo\" buttons {{\"Cancel\", \"Remove\"}} default button \"Cancel\" cancel button \"Cancel\" with icon caution)"
+                        )])
+                        .output()
+                        .ok()
+                        .is_some_and(|output| {
+                            output.status.success()
+                                && String::from_utf8_lossy(&output.stdout).trim() == "Remove"
+                        })
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !confirmed {
+                    app.activity = "Kept the repository in recents.".into();
+                    cx.notify();
+                    return;
+                }
+                app.recents = store.remove(&path).unwrap_or_else(|_| {
+                    app.recents.retain(|recent| recent != &path);
+                    app.recents.clone()
+                });
+                app.selected_recent = if app.recents.is_empty() {
+                    None
+                } else {
+                    Some(index.min(app.recents.len().saturating_sub(1)))
+                };
+                app.welcome_snapshot = None;
+                app.welcome_snapshot_path = None;
+                app.activity = format!("Removed {name} from recents.");
+                if app.selected_recent.is_some() {
+                    app.refresh_welcome_snapshot(cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn open_path(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -3352,6 +3533,7 @@ return remote_url & linefeed & parent_path"#;
         let worker_repository = repository.clone();
         self.mutation_in_flight = true;
         self.network_operation = Some(operation.clone());
+        self.network_progress = 0.45;
         self.activity = format!("{label} in progress. You can cancel it.");
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -3403,16 +3585,23 @@ return remote_url & linefeed & parent_path"#;
                 }
                 app.network_operation = None;
                 app.mutation_in_flight = false;
+                app.network_progress = 0.0;
                 match result {
                     Ok(()) => {
-                        app.activity = format!("{label} complete.");
+                        app.last_network_result = Some(format!("{label} complete."));
+                        app.activity = app.last_network_result.clone().unwrap_or_default();
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_refs(repository, cx);
                     }
                     Err(error) if error == "cancelled" => {
-                        app.activity = format!("{label} cancelled.");
+                        app.last_network_result = Some(format!("{label} cancelled."));
+                        app.activity = app.last_network_result.clone().unwrap_or_default();
                     }
-                    Err(error) => app.activity = network_failure_message(&label, &error),
+                    Err(error) => {
+                        let message = network_failure_message(&label, &error);
+                        app.last_network_result = Some(message.clone());
+                        app.activity = message;
+                    }
                 }
                 cx.notify();
             });
@@ -3734,23 +3923,20 @@ return remote_url & linefeed & parent_path"#;
                 if let Some(current_index) = all_paths.iter().position(|p| p == &path) {
                     let start = last_index.min(current_index);
                     let end = last_index.max(current_index);
-                    for i in start..=end {
-                        let p = all_paths[i].clone();
-                        if !self.selected_paths.contains(&p) {
-                            self.selected_paths.push(p);
+                    for p in all_paths.iter().skip(start).take(end + 1 - start) {
+                        if !self.selected_paths.contains(p) {
+                            self.selected_paths.push(p.clone());
                         }
                     }
                 }
+            } else if let Some(index) = self
+                .selected_paths
+                .iter()
+                .position(|selected| selected == &path)
+            {
+                self.selected_paths.remove(index);
             } else {
-                if let Some(index) = self
-                    .selected_paths
-                    .iter()
-                    .position(|selected| selected == &path)
-                {
-                    self.selected_paths.remove(index);
-                } else {
-                    self.selected_paths.push(path.clone());
-                }
+                self.selected_paths.push(path.clone());
             }
         } else if additive {
             if let Some(index) = self
@@ -3778,7 +3964,10 @@ return remote_url & linefeed & parent_path"#;
                 cx,
             );
         }
-        self.last_selected_path_index = self.all_status_paths().iter().position(|p| p == &path_for_index);
+        self.last_selected_path_index = self
+            .all_status_paths()
+            .iter()
+            .position(|p| p == &path_for_index);
         cx.notify();
     }
 
@@ -3845,8 +4034,7 @@ return remote_url & linefeed & parent_path"#;
         self.mutate(operation, cx);
     }
 
-    #[allow(dead_code)]
-    fn toggle_worktree_show_all(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_worktree_show_all(&mut self, cx: &mut Context<Self>) {
         self.worktree_show_all_files = !self.worktree_show_all_files;
         if self.worktree_show_all_files {
             let ShellState::Repository(repository) = &self.state else {
@@ -4628,7 +4816,6 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
-    #[allow(dead_code)]
     fn apply_latest_stash(&mut self, cx: &mut Context<Self>) {
         if self.mutation_in_flight {
             return;

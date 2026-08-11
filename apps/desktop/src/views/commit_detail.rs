@@ -102,7 +102,7 @@ impl GitronimoApp {
             .into_any_element()
     }
 
-    fn detail_mode_button(
+    pub(crate) fn detail_mode_button(
         &self,
         mode: HistoryDetailMode,
         label: &'static str,
@@ -131,37 +131,56 @@ impl GitronimoApp {
             .into_any_element()
     }
 
-    fn changeset_panel(&self, colors: &ThemeColors) -> AnyElement {
-        let changed = self
+    pub(crate) fn changeset_panel(&self, colors: &ThemeColors) -> AnyElement {
+        let changed: Vec<String> = self
             .history_paths
             .iter()
             .map(|path| String::from_utf8_lossy(&path.0).to_string())
-            .collect::<Vec<_>>();
-        div()
+            .collect();
+        let file_list = div()
+            .w(px(240.0))
+            .h_full()
+            .border_r_1()
+            .border_color(colors.border)
             .flex()
             .flex_col()
-            .gap_2()
             .child(
                 div()
-                    .text_sm()
-                    .text_color(colors.text_secondary)
-                    .child(format!("Changed files ({}):", changed.len())),
-            )
-            .children(changed.iter().map(|path| {
-                div()
+                    .h(px(28.0))
                     .px_2()
-                    .py_0p5()
-                    .font_family("Monaco")
+                    .flex()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(colors.separator)
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child(format!("{} changed file(s)", changed.len())),
+            )
+            .children(changed.iter().enumerate().map(|(index, path)| {
+                div()
+                    .id(SharedString::from(format!("changeset-file-{index}")))
+                    .h(px(22.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(colors.separator)
+                    .text_xs()
+                    .text_color(colors.text_secondary)
                     .child(path.clone())
                     .into_any_element()
-            }))
+            }));
+        div()
+            .flex()
+            .h_full()
+            .overflow_hidden()
+            .child(file_list)
             .child(
                 div()
-                    .text_sm()
-                    .text_color(colors.text_secondary)
-                    .child("Diff"),
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(self.readonly_diff(colors)),
             )
-            .child(self.readonly_diff(colors))
             .into_any_element()
     }
 
@@ -230,7 +249,7 @@ impl GitronimoApp {
             .into_any_element()
     }
 
-    fn tree_panel(
+    pub(crate) fn tree_panel(
         &self,
         repository: &WorktreeRepository,
         colors: &ThemeColors,

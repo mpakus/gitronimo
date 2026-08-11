@@ -167,7 +167,9 @@ impl GitronimoApp {
     fn staged_unstaged_tabs(staged_diff: bool, colors: &ThemeColors) -> AnyElement {
         div()
             .flex()
-            .gap_1()
+            .p_0p5()
+            .bg(colors.raised_background)
+            .rounded(px(4.0))
             .child(
                 div()
                     .px_2()
@@ -243,6 +245,9 @@ impl GitronimoApp {
                         .flex()
                         .items_center()
                         .justify_between()
+                        .bg(colors.raised_background)
+                        .border_b_1()
+                        .border_color(colors.border)
                         .font_family("Monaco")
                         .text_xs()
                         .text_color(colors.text_secondary)
@@ -317,10 +322,10 @@ impl GitronimoApp {
     ) -> AnyElement {
         let is_change = matches!(line.kind, DiffLineKind::Addition | DiffLineKind::Removal);
         let is_selected = is_change && self.selected_diff_lines.contains(&(hunk_index, line_index));
-        let (sign, content_color) = match line.kind {
-            DiffLineKind::Addition => ("+", colors.added_line),
-            DiffLineKind::Removal => ("-", colors.removed_line),
-            DiffLineKind::Context => (" ", colors.text_primary),
+        let (sign, line_bg, content_color) = match line.kind {
+            DiffLineKind::Addition => ("+", colors.added_line, colors.text_primary),
+            DiffLineKind::Removal => ("-", colors.removed_line, colors.text_primary),
+            DiffLineKind::Context => (" ", colors.panel_background, colors.text_primary),
         };
         let old_gutter = line.old_line.map(|n| n.to_string()).unwrap_or_default();
         let new_gutter = line.new_line.map(|n| n.to_string()).unwrap_or_default();
@@ -364,7 +369,11 @@ impl GitronimoApp {
                 .flex()
                 .items_center()
                 .gap_2()
-                .when(is_selected, |row| row.bg(colors.selection))
+                .bg(if is_selected {
+                    colors.selection
+                } else {
+                    line_bg
+                })
         };
         if clickable {
             styled(div())

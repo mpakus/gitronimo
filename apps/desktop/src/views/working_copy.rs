@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use gpui::{AnyElement, ClickEvent, div, prelude::*, px};
+use gpui::{AnyElement, ClickEvent, MouseButton, Window, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use git_domain::{GitPath, HeadStatus, InProgressOperation, StatusEntry, WorktreeRepository};
@@ -12,7 +12,8 @@ use crate::app_state::{
     StashAction,
 };
 use crate::views::components::{
-    file_action_button, mutation_button, state_panel, status_badge_info, status_label, status_path,
+    centered_empty_state, file_action_button, mutation_button, state_panel, status_badge_info,
+    status_badge_square, status_label, status_path,
 };
 
 #[derive(Clone)]
@@ -145,21 +146,39 @@ impl GitronimoApp {
             },
         );
         div()
+            .h(px(32.0))
             .px_3()
-            .py_2()
             .flex()
             .items_center()
-            .gap_2()
-            .text_sm()
+            .gap_1()
+            .border_b_1()
+            .border_color(colors.border)
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.accent)
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child("\u{2387}"),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(colors.text_primary)
+                    .child(branch),
+            )
             .child(
                 div()
                     .text_xs()
                     .text_color(colors.text_muted)
-                    .child("\u{1F418}"),
+                    .child("\u{203A}"),
             )
-            .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child(branch))
-            .child(div().text_color(colors.text_muted).child("\u{203A}"))
-            .child(div().text_color(colors.text_secondary).child(tracking))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.text_secondary)
+                    .child(tracking),
+            )
             .into_any_element()
     }
 
@@ -169,29 +188,19 @@ impl GitronimoApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let groups = self.status_groups();
+        let modified_count = groups.staged.len()
+            + groups.unstaged.len()
+            + groups.untracked.len()
+            + groups.conflicts.len();
         let file_groups = div()
             .flex()
             .flex_col()
+            .child(self.file_list_header(modified_count, colors, cx))
             .when(self.worktree_show_all_files, |this| {
                 this.child(self.all_files_group_view(colors, cx))
             })
             .when(!self.worktree_show_all_files, |this| {
-                this.child(self.status_group_view("Staged", &groups.staged, true, colors, cx))
-                    .child(self.status_group_view("Unstaged", &groups.unstaged, false, colors, cx))
-                    .child(self.status_group_view(
-                        "Untracked",
-                        &groups.untracked,
-                        false,
-                        colors,
-                        cx,
-                    ))
-                    .child(self.status_group_view(
-                        "Conflicts",
-                        &groups.conflicts,
-                        false,
-                        colors,
-                        cx,
-                    ))
+                this.child(self.modified_files_list_view(colors, cx))
             });
         let file_list = div().flex_1().overflow_hidden().child(file_groups);
         let diff = self.diff_view(colors, cx).unwrap_or_else(|| {
@@ -206,7 +215,7 @@ impl GitronimoApp {
                     "Choose a changed file to inspect its diff.",
                 )
             };
-            state_panel(title, detail, colors.text_muted, colors)
+            centered_empty_state(title, detail, colors)
         });
         let diff_pane = div().flex_1().overflow_hidden().child(diff);
         let col_w = px(self.column_width);
@@ -234,7 +243,6 @@ impl GitronimoApp {
                     .flex_col()
                     .child(self.branch_context_view(false, colors, cx))
                     .child(self.commit_composer_view(colors, cx))
-                    .child(self.mutation_controls(colors, cx))
                     .child(file_list),
             )
             .child(self.column_resize_handle(colors, cx))
@@ -290,6 +298,144 @@ impl GitronimoApp {
             }
         }
         groups
+    }
+
+    fn modified_entries(&self) -> Vec<&StatusEntry> {
+        let Some(status) = &self.working_copy else {
+            return Vec::new();
+        };
+        let search = self.worktree_file_search.to_lowercase();
+        status
+            .entries
+            .iter()
+            .filter(|entry| match entry {
+                StatusEntry::Untracked(_) | StatusEntry::Unmerged { .. } => true,
+                StatusEntry::Ordinary { status, .. } | StatusEntry::Renamed { status, .. } => {
+                    status.0[0] != b'.' || status.0[1] != b'.'
+                }
+                StatusEntry::Ignored(_) => false,
+            })
+            .filter(|entry| {
+                search.is_empty()
+                    || String::from_utf8_lossy(&status_path(entry).0)
+                        .to_lowercase()
+                        .contains(&search)
+            })
+            .collect()
+    }
+
+    fn file_list_column_header(colors: &ThemeColors) -> impl IntoElement {
+        div()
+            .h(px(22.0))
+            .px_2()
+            .flex()
+            .items_center()
+            .text_xs()
+            .text_color(colors.text_muted)
+            .border_b_1()
+            .border_color(colors.border)
+            .child(div().w(px(44.0)).child("Status"))
+            .child(div().flex_1().child("Filename"))
+    }
+
+    fn file_list_header(
+        &self,
+        modified_count: usize,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
+        let show_all = self.worktree_show_all_files;
+        div()
+            .h(px(28.0))
+            .px_2()
+            .flex()
+            .items_center()
+            .justify_between()
+            .border_b_1()
+            .border_color(colors.border)
+            .child(
+                div()
+                    .flex()
+                    .p_0p5()
+                    .bg(colors.raised_background)
+                    .rounded(px(4.0))
+                    .child(file_list_mode_tab(
+                        "Modified",
+                        !show_all,
+                        colors,
+                        cx,
+                        |app, cx| {
+                            if app.worktree_show_all_files {
+                                app.toggle_worktree_show_all(cx);
+                            }
+                        },
+                    ))
+                    .child(file_list_mode_tab(
+                        "All Files",
+                        show_all,
+                        colors,
+                        cx,
+                        |app, cx| {
+                            if !app.worktree_show_all_files {
+                                app.toggle_worktree_show_all(cx);
+                            }
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child(if show_all {
+                        format!("{} tracked", self.tracked_files.len())
+                    } else if modified_count == 0 {
+                        "No changes".into()
+                    } else {
+                        format!("{modified_count} changed")
+                    }),
+            )
+    }
+
+    fn modified_files_list_view(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let entries = self.modified_entries();
+        if entries.is_empty() {
+            return div()
+                .flex_1()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p_4()
+                .text_sm()
+                .text_color(colors.text_muted)
+                .child("Working tree clean — edit files in your editor and changes appear here.")
+                .into_any_element();
+        }
+        let rows: Vec<AnyElement> = entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                let path = status_path(entry).clone();
+                let staged = entry_is_staged(entry);
+                self.status_row(
+                    ("modified-file", index).into(),
+                    path,
+                    status_label(entry),
+                    staged,
+                    colors,
+                    cx,
+                )
+            })
+            .collect();
+        div()
+            .flex()
+            .flex_col()
+            .child(Self::file_list_column_header(colors))
+            .children(rows)
+            .into_any_element()
     }
 
     #[allow(clippy::too_many_lines)]
@@ -461,6 +607,7 @@ impl GitronimoApp {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn mutation_controls(
         &self,
         colors: &ThemeColors,
@@ -833,107 +980,6 @@ impl GitronimoApp {
         })
     }
 
-    pub(crate) fn status_group_view(
-        &self,
-        title: &'static str,
-        entries: &[&StatusEntry],
-        staged: bool,
-        colors: &ThemeColors,
-        cx: &mut gpui::Context<Self>,
-    ) -> impl IntoElement {
-        let rows: Vec<AnyElement> = if entries.is_empty() {
-            vec![]
-        } else {
-            entries
-                .iter()
-                .enumerate()
-                .map(|(index, entry)| {
-                    self.status_row(
-                        (title, index).into(),
-                        status_path(entry).clone(),
-                        status_label(entry),
-                        staged,
-                        colors,
-                        cx,
-                    )
-                })
-                .collect()
-        };
-        div()
-            .flex()
-            .flex_col()
-            .when(entries.is_empty(), |this| this)
-            .when(!entries.is_empty(), |this| {
-                let all_selected = entries
-                    .iter()
-                    .all(|entry| self.selected_paths.contains(&status_path(entry)));
-                this.child(
-                    div()
-                        .h(px(22.0))
-                        .px_2()
-                        .flex()
-                        .items_center()
-                        .text_xs()
-                        .text_color(colors.text_muted)
-                        .border_b_1()
-                        .border_color(colors.border)
-                        .child(
-                            div()
-                                .w(px(44.0))
-                                .flex()
-                                .items_center()
-                                .child("Status")
-                                .child(
-                                    div()
-                                        .w(px(14.0))
-                                        .h(px(14.0))
-                                        .ml_2()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded(px(3.0))
-                                        .bg(if all_selected {
-                                            colors.accent
-                                        } else {
-                                            colors.panel_background
-                                        })
-                                        .border_1()
-                                        .border_color(if all_selected {
-                                            colors.accent
-                                        } else {
-                                            colors.border
-                                        })
-                                        .text_color(if all_selected {
-                                            colors.panel_background
-                                        } else {
-                                            colors.text_muted
-                                        })
-                                        .cursor_pointer()
-                                        .on_click(cx.listener(move |app, _, _, cx| {
-                                            if all_selected {
-                                                app.selected_paths.retain(|p| {
-                                                    !entries.iter().any(|e| status_path(e) == p)
-                                                });
-                                            } else {
-                                                for entry in entries {
-                                                    let path = status_path(entry);
-                                                    if !app.selected_paths.contains(&path) {
-                                                        app.selected_paths.push(path.clone());
-                                                    }
-                                                }
-                                            }
-                                            app.last_selected_path_index = None;
-                                            cx.notify();
-                                        }))
-                                        .child(if all_selected { "\u{2713}" } else { "" }),
-                                ),
-                        )
-                        .child(div().flex_1().child("Filename")),
-                )
-            })
-            .children(rows)
-    }
-
     pub(crate) fn all_files_group_view(
         &self,
         colors: &ThemeColors,
@@ -955,9 +1001,13 @@ impl GitronimoApp {
             .iter()
             .map(|entry| status_path(entry).clone())
             .collect();
+        let search = self.worktree_file_search.to_lowercase();
         let mut rows: Vec<AnyElement> = Vec::new();
         for (index, path) in self.tracked_files.iter().enumerate() {
             let display = String::from_utf8_lossy(&path.0);
+            if !search.is_empty() && !display.to_lowercase().contains(&search) {
+                continue;
+            }
             let (label, staged) = if conflicts.contains(path) {
                 (format!("UU  {display}"), false)
             } else if staged.contains(path) {
@@ -978,6 +1028,10 @@ impl GitronimoApp {
         }
         for (index, entry) in groups.untracked.iter().enumerate() {
             let path = status_path(entry).clone();
+            let display = String::from_utf8_lossy(&path.0);
+            if !search.is_empty() && !display.to_lowercase().contains(&search) {
+                continue;
+            }
             rows.push(self.status_row(
                 ("all-untracked", index).into(),
                 path.clone(),
@@ -998,19 +1052,7 @@ impl GitronimoApp {
         div()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .h(px(22.0))
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .text_xs()
-                    .text_color(colors.text_muted)
-                    .border_b_1()
-                    .border_color(colors.border)
-                    .child(div().w(px(36.0)).child("Status"))
-                    .child(div().flex_1().child("Filename")),
-            )
+            .child(Self::file_list_column_header(colors))
             .child(body)
     }
 
@@ -1032,30 +1074,67 @@ impl GitronimoApp {
         let checkbox_path = path.clone();
         let checkbox_id = id.clone();
         let selected = self.selected_paths.contains(&path);
-        let (badge_char, badge_bg, badge_fg) = status_badge_info(&label);
+        let (badge_char, badge_bg, _) = status_badge_info(&label, colors);
         let badge_char = badge_char.to_owned();
         let display_path = label
             .trim_start_matches(|c: char| c.is_alphabetic() || c == ' ')
             .trim_start();
-        let file_icon = file_type_icon(display_path);
-        div()
+
+        // Create the checkbox first
+        let checkbox = {
+            let mut checkbox = div()
+                .id(gpui::ElementId::from((checkbox_id, label.clone())))
+                .w(px(14.0))
+                .h(px(14.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(3.0))
+                .bg(if staged {
+                    colors.accent
+                } else {
+                    colors.panel_background
+                })
+                .border_1()
+                .border_color(if staged { colors.accent } else { colors.border })
+                .text_color(if staged {
+                    colors.panel_background
+                } else {
+                    colors.text_muted
+                })
+                .cursor_pointer();
+            checkbox
+                .interactivity()
+                .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+                    cx.stop_propagation();
+                    app.toggle_path_staged(checkbox_path.clone(), staged, cx);
+                }));
+            checkbox
+                .child(if staged { "\u{2713}" } else { "" })
+                .into_any_element()
+        };
+
+        let mut row = div()
             .id(id)
             .h(px(22.0))
             .px_2()
             .flex()
             .items_center()
             .gap_2()
+            .border_b_1()
+            .border_color(colors.separator)
             .bg(if selected {
-                gpui::rgb(0x00_60_a8)
+                colors.accent
             } else {
                 colors.panel_background
             })
             .text_color(if selected {
-                gpui::rgb(0xff_ff_ff)
+                colors.panel_background
             } else {
                 colors.text_primary
             })
-            .cursor_pointer()
+            .cursor_pointer();
+        row.interactivity()
             .on_click(cx.listener(move |app, event: &ClickEvent, _, cx| {
                 app.select_status_path(
                     path.clone(),
@@ -1064,72 +1143,30 @@ impl GitronimoApp {
                     staged,
                     cx,
                 );
-            }))
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |app, _, _, cx| {
-                    app.show_status_context_menu(context_path.clone(), cx);
-                }),
-            )
-            .child(
-                div()
-                    .id(gpui::ElementId::from((checkbox_id, label.clone())))
-                    .w(px(14.0))
-                    .h(px(14.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(3.0))
-                    .bg(if staged {
-                        colors.success
-                    } else {
-                        colors.panel_background
-                    })
-                    .border_1()
-                    .border_color(if staged {
-                        colors.success
-                    } else if selected {
-                        gpui::rgb(0x80_b0_d0)
-                    } else {
-                        colors.border
-                    })
-                    .text_color(if staged {
-                        colors.panel_background
-                    } else {
-                        colors.text_muted
-                    })
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
-                        cx.stop_propagation();
-                        app.toggle_path_staged(checkbox_path.clone(), staged, cx);
-                    }))
-                    .child(if staged { "\u{2713}" } else { "" }),
-            )
-            .child(
-                div()
-                    .w(px(16.0))
-                    .h(px(16.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(3.0))
-                    .bg(badge_bg)
-                    .text_color(badge_fg)
-                    .text_xs()
-                    .font_weight(gpui::FontWeight::BOLD)
-                    .child(badge_char),
-            )
-            .child(div().text_xs().child(file_icon))
-            .child(
-                div()
-                    .flex_1()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_xs()
-                    .child(display_path.to_owned()),
-            )
-            .into_any_element()
+            }));
+        row.on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |app, _, _, cx| {
+                app.show_status_context_menu(context_path.clone(), cx);
+            }),
+        )
+        .child(checkbox)
+        .child(status_badge_square(&badge_char, badge_bg, colors))
+        .child(
+            div()
+                .flex_1()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_xs()
+                .text_color(if selected {
+                    colors.panel_background
+                } else {
+                    colors.text_secondary
+                })
+                .child(display_path.to_owned()),
+        )
+        .into_any_element()
     }
 }
 
@@ -1175,29 +1212,50 @@ fn operation_description(operation: &InProgressOperation) -> (String, String) {
     }
 }
 
-fn file_type_icon(display_path: &str) -> &'static str {
-    let file_ext = std::path::Path::new(display_path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    match file_ext {
-        "rs" => "\u{1F4DC}",
-        "toml" | "json" | "yaml" | "yml" => "\u{2699}",
-        "md" | "txt" => "\u{1F4DD}",
-        "py" | "js" | "ts" | "tsx" | "jsx" | "go" | "rb" | "java" | "c" | "cpp" | "h" => {
-            "\u{1F4BB}"
-        }
-        "png" | "jpg" | "jpeg" | "gif" | "svg" | "ico" => "\u{1F5BC}",
-        "lock" => "\u{1F512}",
-        _ => "\u{1F4C4}",
-    }
-}
-
 fn short_oid(oid: Option<&[u8]>) -> String {
     oid.and_then(|oid| std::str::from_utf8(oid).ok())
         .map(|oid| oid.chars().take(7).collect::<String>())
         .filter(|short| !short.is_empty())
         .unwrap_or_else(|| "an unknown commit".into())
+}
+
+fn entry_is_staged(entry: &StatusEntry) -> bool {
+    match entry {
+        StatusEntry::Ordinary { status, .. } | StatusEntry::Renamed { status, .. } => {
+            status.0[0] != b'.'
+        }
+        _ => false,
+    }
+}
+
+fn file_list_mode_tab(
+    label: &'static str,
+    active: bool,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> gpui::AnyElement {
+    let mut tab = div()
+        .id(label)
+        .px_2()
+        .py_0p5()
+        .rounded(px(3.0))
+        .text_xs()
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .bg(if active {
+            colors.panel_background
+        } else {
+            colors.raised_background
+        })
+        .text_color(if active {
+            colors.text_primary
+        } else {
+            colors.text_muted
+        })
+        .cursor_pointer();
+    tab.interactivity()
+        .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)));
+    tab.child(label).into_any_element()
 }
 
 fn menu_item(
@@ -1206,7 +1264,7 @@ fn menu_item(
     cx: &mut gpui::Context<GitronimoApp>,
     on_click: impl Fn(&mut GitronimoApp, &ClickEvent, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> gpui::AnyElement {
-    div()
+    let mut item = div()
         .id(label)
         .h(px(24.0))
         .px_2()
@@ -1215,10 +1273,10 @@ fn menu_item(
         .text_sm()
         .rounded(px(3.0))
         .cursor_pointer()
-        .hover(|style| style.bg(colors.selection))
-        .on_click(cx.listener(move |app, event, _, cx| on_click(app, event, cx)))
-        .child(label)
-        .into_any_element()
+        .hover(|style| style.bg(colors.selection));
+    item.interactivity()
+        .on_click(cx.listener(move |app, event, _, cx| on_click(app, event, cx)));
+    item.child(label).into_any_element()
 }
 
 fn menu_separator(colors: &ThemeColors) -> gpui::AnyElement {

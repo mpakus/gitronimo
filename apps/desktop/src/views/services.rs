@@ -5,7 +5,7 @@ use ui_kit::ThemeColors;
 
 use git_domain::ServiceAuthState;
 
-use crate::app_state::{GitronimoApp, RepositoryView};
+use crate::app_state::{GitronimoApp, RepositoryView, ShellState};
 use crate::views::components::file_action_button;
 
 impl GitronimoApp {
@@ -117,9 +117,11 @@ impl GitronimoApp {
             .child(div().text_xl().child("Services"))
             .child(div().text_color(colors.text_secondary).child(state_message))
             .child(actions)
-            .child(file_action_button("Working Copy", colors, cx, |app, cx| {
-                app.navigate_to(RepositoryView::WorkingCopy, cx);
-            }))
+            .when(!matches!(self.state, ShellState::Welcome), |panel| {
+                panel.child(file_action_button("Working Copy", colors, cx, |app, cx| {
+                    app.navigate_to(RepositoryView::WorkingCopy, cx);
+                }))
+            })
             .children(
                 if rows.is_empty() && self.service_auth_state == ServiceAuthState::Connected {
                     Some(

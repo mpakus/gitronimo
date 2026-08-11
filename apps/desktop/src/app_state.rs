@@ -35,6 +35,27 @@ pub(crate) struct OpenedRepository {
     pub recents: Vec<PathBuf>,
 }
 
+/// Which welcome-screen surface is active before a repository is opened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WelcomeShellView {
+    /// Bookmarks tab — saved/local repositories.
+    Repositories,
+    Services,
+    Workflow,
+}
+
+/// Lightweight Git metadata shown on the welcome detail panel.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct WelcomeRepoSnapshot {
+    pub branch: Option<String>,
+    pub changed_files: Option<usize>,
+    pub remote_url: Option<String>,
+    pub author_name: Option<String>,
+    pub author_email: Option<String>,
+    pub last_modified: Option<std::time::SystemTime>,
+    pub available: bool,
+}
+
 pub(crate) enum ShellState {
     Welcome,
     Loading(PathBuf),
@@ -169,8 +190,17 @@ pub(crate) struct GitronimoApp {
     pub state: ShellState,
     pub recents: Vec<PathBuf>,
     pub selected_recent: Option<usize>,
-    #[allow(dead_code)]
+    pub welcome_snapshot: Option<WelcomeRepoSnapshot>,
+    pub welcome_snapshot_path: Option<PathBuf>,
+    pub welcome_snapshot_token: u64,
+    pub welcome_shell_view: WelcomeShellView,
     pub repositories_grouped: bool,
+    pub welcome_repo_search: String,
+    pub worktree_file_search: String,
+    pub search_focus_handle: FocusHandle,
+    pub commit_subject_focused: bool,
+    pub network_progress: f32,
+    pub last_network_result: Option<String>,
     pub activity: String,
     pub working_copy: Option<git_domain::WorktreeStatus>,
     pub worktree_show_all_files: bool,
@@ -273,6 +303,14 @@ pub(crate) struct GitronimoApp {
 impl GitronimoApp {
     pub(crate) fn has_commit_draft(&self) -> bool {
         !self.commit_subject.trim().is_empty() || !self.commit_body.trim().is_empty()
+    }
+
+    pub(crate) fn active_search_query(&self) -> &str {
+        match &self.state {
+            ShellState::Welcome => self.welcome_repo_search.as_str(),
+            ShellState::Repository(_) => self.worktree_file_search.as_str(),
+            _ => "",
+        }
     }
 }
 

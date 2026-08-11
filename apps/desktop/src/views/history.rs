@@ -5,8 +5,8 @@ use ui_kit::ThemeColors;
 
 use git_domain::{HistoryReference, WorktreeRepository};
 
-use crate::app_state::GitronimoApp;
-use crate::views::components::{file_action_button, state_panel};
+use crate::app_state::{GitronimoApp, HistoryDetailMode};
+use crate::views::components::{file_action_button, segmented_detail_toggle, state_panel};
 
 impl GitronimoApp {
     pub(crate) fn history_row_count(&self) -> usize {
@@ -52,25 +52,17 @@ impl GitronimoApp {
                 let graph_row = self.history_rows.get(history_index);
                 let lane = graph_row.map_or(0, |row| row.lane);
                 let parent_lanes = graph_row.map_or_else(Vec::new, |row| row.parent_lanes.clone());
-                let decorations = self
-                    .history_decorations
-                    .iter()
-                    .filter(|decoration| decoration.target == commit.oid)
-                    .map(|decoration| String::from_utf8_lossy(&decoration.name).to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let author = String::from_utf8_lossy(&commit.author.name).into_owned();
+                let subject = String::from_utf8_lossy(&commit.subject).into_owned();
+                let short_oid = commit.oid.chars().take(7).collect::<String>();
                 (
                     history_index,
                     lane,
                     parent_lanes,
-                    format!(
-                        "{} ● {} · {} — {} {}",
-                        "│ ".repeat(lane),
-                        String::from_utf8_lossy(&commit.author.name),
-                        commit.author.timestamp,
-                        String::from_utf8_lossy(&commit.subject),
-                        decorations
-                    ),
+                    author,
+                    commit.author.timestamp,
+                    short_oid,
+                    subject,
                 )
             })
             .collect::<Vec<_>>();
@@ -80,21 +72,23 @@ impl GitronimoApp {
         let commit_list = list(
             self.history_list_state.clone(),
             cx.processor(move |_app, visible_index: usize, _, cx| {
-                let (history_index, lane, parent_lanes, label) = rows[visible_index].clone();
+                let (history_index, lane, parent_lanes, author, timestamp, short_oid, subject) =
+                    rows[visible_index].clone();
                 let repository = list_repository.clone();
                 div()
                     .id(visible_index)
-                    .h(px(28.0))
+                    .h(px(44.0))
                     .px_2()
                     .flex()
                     .items_center()
+                    .gap_1()
                     .bg(if selected == Some(history_index) {
-                        list_colors.selection
+                        list_colors.accent
                     } else {
                         list_colors.panel_background
                     })
                     .border_b_1()
-                    .border_color(list_colors.border)
+                    .border_color(list_colors.separator)
                     .child(
                         canvas(
                             move |bounds, _, _| {
@@ -133,6 +127,70 @@ impl GitronimoApp {
                         .w(px(28.0))
                         .h_full(),
                     )
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap_0p5()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .text_color(if selected == Some(history_index) {
+                                                list_colors.panel_background
+                                            } else {
+                                                list_colors.text_primary
+                                            })
+                                            .child(author),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(if selected == Some(history_index) {
+                                                list_colors.panel_background
+                                            } else {
+                                                list_colors.text_muted
+                                            })
+                                            .child(timestamp.to_string()),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(if selected == Some(history_index) {
+                                                list_colors.panel_background
+                                            } else {
+                                                list_colors.text_muted
+                                            })
+                                            .child(short_oid),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .text_ellipsis()
+                                            .text_xs()
+                                            .text_color(if selected == Some(history_index) {
+                                                list_colors.panel_background
+                                            } else {
+                                                list_colors.text_secondary
+                                            })
+                                            .child(subject),
+                                    ),
+                            ),
+                    )
                     .cursor_pointer()
                     .on_click(cx.listener(move |app, event: &ClickEvent, _, cx| {
                         app.select_history_commit(history_index, repository.clone(), cx);
@@ -140,7 +198,6 @@ impl GitronimoApp {
                             app.show_commit_detail(&repository, history_index, cx);
                         }
                     }))
-                    .child(label)
                     .into_any_element()
             }),
         )
@@ -159,59 +216,116 @@ impl GitronimoApp {
                     .into_any_element()
                 },
                 |commit| {
+                    let repository_for_toggle = repository.clone();
+                    let changeset_repo = repository.clone();
+                    let tree_repo = repository.clone();
                     div()
-                        .p_3()
                         .flex()
                         .flex_col()
-                        .gap_2()
-                        .child(div().text_sm().text_color(colors.text_muted).child(format!(
-                            "Author: {}",
-                            String::from_utf8_lossy(&commit.author.name)
-                        )))
+                        .h_full()
+                        .overflow_hidden()
                         .child(
                             div()
-                                .text_sm()
-                                .text_color(colors.text_muted)
-                                .child(format!("Date: {}", commit.author.timestamp)),
+                                .px_3()
+                                .py_2()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .border_b_1()
+                                .border_color(colors.border)
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .text_color(colors.text_primary)
+                                        .child(commit.oid.chars().take(7).collect::<String>()),
+                                )
+                                .child(segmented_detail_toggle(
+                                    "Changeset",
+                                    "Tree",
+                                    self.history_detail_mode
+                                        == crate::app_state::HistoryDetailMode::Changeset,
+                                    colors,
+                                    cx,
+                                    move |app, cx| {
+                                        app.toggle_history_detail_mode(
+                                            HistoryDetailMode::Changeset,
+                                            changeset_repo.clone(),
+                                            cx,
+                                        );
+                                    },
+                                    move |app, cx| {
+                                        app.toggle_history_detail_mode(
+                                            HistoryDetailMode::Tree,
+                                            tree_repo.clone(),
+                                            cx,
+                                        );
+                                    },
+                                )),
                         )
                         .child(
                             div()
-                                .text_sm()
-                                .child(String::from_utf8_lossy(&commit.subject).to_string()),
+                                .px_3()
+                                .py_2()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .border_b_1()
+                                .border_color(colors.separator)
+                                .child(
+                                    div()
+                                        .flex()
+                                        .justify_between()
+                                        .text_xs()
+                                        .child(div().text_color(colors.text_muted).child("Author"))
+                                        .child(
+                                            div().text_color(colors.text_primary).child(
+                                                String::from_utf8_lossy(&commit.author.name)
+                                                    .to_string(),
+                                            ),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .justify_between()
+                                        .text_xs()
+                                        .child(div().text_color(colors.text_muted).child("Date"))
+                                        .child(
+                                            div()
+                                                .text_color(colors.text_primary)
+                                                .child(commit.author.timestamp.to_string()),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .pt_1()
+                                        .text_sm()
+                                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                                        .child(
+                                            String::from_utf8_lossy(&commit.subject).to_string(),
+                                        ),
+                                ),
                         )
                         .child(
                             div()
-                                .text_sm()
-                                .text_color(colors.text_secondary)
-                                .child(String::from_utf8_lossy(&commit.body).to_string()),
+                                .flex_1()
+                                .overflow_hidden()
+                                .when(
+                                    self.history_detail_mode == HistoryDetailMode::Changeset,
+                                    |this| this.child(self.changeset_panel(colors)),
+                                )
+                                .when(
+                                    self.history_detail_mode == HistoryDetailMode::Tree,
+                                    |this| {
+                                        this.child(self.tree_panel(
+                                            &repository_for_toggle,
+                                            colors,
+                                            cx,
+                                        ))
+                                    },
+                                ),
                         )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(colors.text_muted)
-                                .child(format!("SHA: {}", commit.oid)),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(colors.text_muted)
-                                .child(format!("Parents: {}", commit.parents.join(" "))),
-                        )
-                        .child(div().text_xs().text_color(colors.text_muted).child(format!(
-                            "Changed: {}",
-                            self.history_paths
-                                .iter()
-                                .map(|path| String::from_utf8_lossy(&path.0))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )))
-                        .children(self.history_diff.as_ref().map(|diff| {
-                            div().text_xs().text_color(colors.text_muted).child(format!(
-                                "Selected diff: {} file(s){}",
-                                diff.diff.files.len(),
-                                if diff.truncated { " (truncated)" } else { "" }
-                            ))
-                        }))
                         .into_any_element()
                 },
             );
