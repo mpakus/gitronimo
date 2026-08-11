@@ -791,7 +791,7 @@ impl GitronimoApp {
             SingleLineInput::new(
                 TextFieldBinding::WelcomeSearch,
                 app.clone(),
-                "Search repositories",
+                "Search for Repositories",
                 cx,
             )
         });

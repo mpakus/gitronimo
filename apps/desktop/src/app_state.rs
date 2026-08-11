@@ -152,6 +152,8 @@ pub(crate) enum TextPromptKind {
     RewordSubject,
     RewordBody { subject: String },
     MergeToolPath,
+    CreateBookmarkFolder,
+    RenameBookmarkFolder { id: String },
 }
 
 #[derive(Clone, Debug)]
@@ -163,6 +165,10 @@ pub(crate) enum ChoicePromptKind {
     ConfirmMergePullRequest {
         number: u64,
         method: git_domain::MergeMethod,
+    },
+    WelcomeSidebarPlus,
+    BookmarkFolderActions {
+        id: String,
     },
 }
 
@@ -189,6 +195,8 @@ impl ChoicePromptKind {
                 };
                 format!("Merge pull request #{number} using {label}?")
             }
+            Self::WelcomeSidebarPlus => "Bookmarks".into(),
+            Self::BookmarkFolderActions { .. } => "Folder".into(),
         }
     }
 
@@ -200,6 +208,8 @@ impl ChoicePromptKind {
                 .map(|(label, _)| *label)
                 .collect(),
             Self::ConfirmMergePullRequest { .. } => Vec::new(),
+            Self::WelcomeSidebarPlus => vec!["Add Repository…", "New Folder…"],
+            Self::BookmarkFolderActions { .. } => vec!["Rename…", "Delete Folder"],
         }
     }
 
@@ -367,7 +377,8 @@ pub(crate) struct GitronimoApp {
     pub welcome_list_snapshots: std::collections::HashMap<PathBuf, WelcomeRepoSnapshot>,
     pub welcome_list_snapshot_token: u64,
     pub welcome_shell_view: WelcomeShellView,
-    pub repositories_grouped: bool,
+    pub bookmark_folders: Vec<app_core::BookmarkFolder>,
+    pub repository_folders: std::collections::HashMap<PathBuf, String>,
     pub welcome_repo_search: String,
     pub worktree_file_search: String,
     #[allow(dead_code)]

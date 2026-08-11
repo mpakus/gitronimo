@@ -7,3 +7,6 @@ docs/screens/*
 !docs/screens/gitronimo-welcome.png
 /crates/app_core/.DS_Store
 /crates/git_domain/.DS_Store
+
+# XERJ local index/data
+.xerj/

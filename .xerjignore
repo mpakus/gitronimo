@@ -1,0 +1,9 @@
+target/
+.xerj/
+docs/screens/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+Cargo.lock

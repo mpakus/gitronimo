@@ -137,6 +137,8 @@ impl GitronimoApp {
                     .gap_3()
                     .min_w(px(0.0))
                     .overflow_hidden()
+                    .child(self.shell_tabs(colors, cx))
+                    .child(toolbar_divider(colors))
                     .child(
                         div()
                             .flex()
@@ -246,6 +248,40 @@ impl GitronimoApp {
                         false,
                     )),
             )
+    }
+
+    fn shell_tabs(&self, colors: &ThemeColors, cx: &mut gpui::Context<Self>) -> AnyElement {
+        let on_welcome = matches!(self.state, ShellState::Welcome);
+        div()
+            .flex()
+            .items_center()
+            .gap_1()
+            .flex_shrink_0()
+            .child(shell_tab_button(
+                "Services",
+                "\u{2601}",
+                on_welcome && self.welcome_shell_view == WelcomeShellView::Services,
+                colors,
+                cx,
+                |app, cx| app.set_welcome_shell_view(WelcomeShellView::Services, cx),
+            ))
+            .child(shell_tab_button(
+                "Bookmarks",
+                "\u{2605}",
+                on_welcome && self.welcome_shell_view == WelcomeShellView::Repositories,
+                colors,
+                cx,
+                |app, cx| app.set_welcome_shell_view(WelcomeShellView::Repositories, cx),
+            ))
+            .child(shell_tab_button(
+                "Workflow",
+                "\u{21BB}",
+                on_welcome && self.welcome_shell_view == WelcomeShellView::Workflow,
+                colors,
+                cx,
+                |app, cx| app.set_welcome_shell_view(WelcomeShellView::Workflow, cx),
+            ))
+            .into_any_element()
     }
 
     fn navigation_buttons(
@@ -425,6 +461,52 @@ fn labeled_toolbar_button(
         .text_color(icon_color)
         .child(icon)
         .child(tooltip_label)
+        .into_any_element()
+}
+
+fn shell_tab_button(
+    label: &'static str,
+    icon: &'static str,
+    active: bool,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> AnyElement {
+    div()
+        .id(label)
+        .w(px(56.0))
+        .px_1()
+        .py_1()
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap_0p5()
+        .rounded(px(4.0))
+        .cursor_pointer()
+        .bg(if active {
+            colors.raised_background
+        } else {
+            colors.toolbar_background
+        })
+        .hover(|style| style.bg(colors.selection))
+        .text_color(if active {
+            colors.text_primary
+        } else {
+            colors.text_muted
+        })
+        .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)))
+        .child(div().text_sm().child(icon))
+        .child(
+            div()
+                .text_xs()
+                .whitespace_nowrap()
+                .font_weight(if active {
+                    gpui::FontWeight::MEDIUM
+                } else {
+                    gpui::FontWeight::NORMAL
+                })
+                .child(label),
+        )
         .into_any_element()
 }
 

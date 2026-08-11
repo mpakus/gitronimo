@@ -1,6 +1,7 @@
 # Agent Rules
 
 - Read `PLAN.md` and this file before editing code.
+- Before non-trivial implementation, use XERJ reference coding: search `gitronimo-*` indices on `http://127.0.0.1:9200` (see `.cursor/rules/xerj-reference-coding.mdc`); GitComet is AGPL — approach-only.
 - Work on one unchecked `PLAN.md` checkbox group at a time.
 - Record the intended files and acceptance checks in `docs/work-log.md` before coding.
 - Never build Git commands with shell strings; use typed `std::process::Command` arguments.

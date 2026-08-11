@@ -2,17 +2,30 @@
 
 use std::path::PathBuf;
 
-use gpui::{AnyElement, ClickEvent, div, prelude::*, px};
+use gpui::{AnyElement, ClickEvent, MouseButton, Render, Window, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use git_domain::HeadStatus;
 use git_domain::NamedRef;
 
-use crate::app_state::{GitronimoApp, RefContext, RefKind, WelcomeRepoSnapshot, WelcomeShellView};
+use crate::app_state::{
+    ChoicePromptKind, GitronimoApp, RefContext, RefKind, WelcomeRepoSnapshot, WelcomeShellView,
+};
 use crate::views::components::{
     NAV_ROW_HEIGHT, count_badge, head_badge, remote_progress_footer, sidebar_section_label,
 };
-use crate::views::single_line_input::single_line_input_shell;
+
+/// Distinct drag type for bookmark repository rows (does not cross-fire with pane dividers).
+#[derive(Clone)]
+struct BookmarkRepoDrag {
+    path: PathBuf,
+}
+
+impl Render for BookmarkRepoDrag {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div().w(px(0.0)).h(px(0.0))
+    }
+}
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -40,6 +53,8 @@ impl GitronimoApp {
         div()
             .w(px(width))
             .h_full()
+            .flex_shrink_0()
+            .overflow_hidden()
             .flex()
             .flex_col()
             .bg(colors.sidebar_background)
@@ -492,109 +507,187 @@ fn welcome_sidebar_view(
         return welcome_workflow_sidebar(width, colors);
     }
 
-    let grouped_label = if app.repositories_grouped {
-        "Grouped"
-    } else {
-        "Flat"
-    };
     let search = app.welcome_repo_search.to_lowercase();
+    let searching = !search.is_empty();
     let mut rows = Vec::new();
-    if app.repositories_grouped {
-        let mut groups: std::collections::BTreeMap<String, Vec<(usize, PathBuf)>> =
-            std::collections::BTreeMap::new();
-        for (index, path) in app.recents.iter().cloned().enumerate() {
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            if !search.is_empty() && !name.contains(&search) {
-                continue;
-            }
-            let group = path
-                .parent()
-                .and_then(|parent| parent.file_name())
-                .and_then(|name| name.to_str())
-                .unwrap_or("Other")
-                .to_owned();
-            groups.entry(group).or_default().push((index, path));
+
+    let valid_folder_ids: std::collections::HashSet<&str> = app
+        .bookmark_folders
+        .iter()
+        .map(|folder| folder.id.as_str())
+        .collect();
+
+    let repo_matches = |path: &std::path::Path| -> bool {
+        if !searching {
+            return true;
         }
-        for (group, entries) in groups {
-            rows.push(
-                div()
-                    .px_3()
-                    .pt_2()
-                    .pb_1()
-                    .text_xs()
-                    .text_color(colors.text_muted)
-                    .child(group)
-                    .into_any_element(),
-            );
-            for (index, path) in entries {
-                rows.push(welcome_repo_row(app, index, &path, colors, cx));
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.to_lowercase().contains(&search))
+    };
+
+    let folder_id_for = |path: &std::path::Path| -> Option<&str> {
+        app.repository_folders
+            .get(path)
+            .map(String::as_str)
+            .filter(|id| valid_folder_ids.contains(id))
+    };
+
+    for (folder_index, folder) in app.bookmark_folders.iter().enumerate() {
+        let children: Vec<(usize, PathBuf)> = app
+            .recents
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter(|(_, path)| folder_id_for(path) == Some(folder.id.as_str()))
+            .filter(|(_, path)| repo_matches(path))
+            .collect();
+
+        if searching && children.is_empty() {
+            continue;
+        }
+
+        let folder_id = folder.id.clone();
+        let expanded = folder.expanded || searching;
+        let chevron = if expanded { "\u{25BC}" } else { "\u{25B6}" };
+        let toggle_id = folder_id.clone();
+        let menu_id = folder_id.clone();
+        let drop_id = folder_id.clone();
+
+        rows.push(
+            div()
+                .id(("welcome-folder", folder_index))
+                .h(px(NAV_ROW_HEIGHT))
+                .px_3()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_sm()
+                .text_color(colors.text_primary)
+                .cursor_pointer()
+                .hover(|style| style.bg(colors.selection))
+                .on_click(cx.listener(move |app, _, _, cx| {
+                    app.toggle_bookmark_folder(&toggle_id, cx);
+                }))
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |app, _, _, cx| {
+                        app.begin_choice_prompt(
+                            ChoicePromptKind::BookmarkFolderActions {
+                                id: menu_id.clone(),
+                            },
+                            cx,
+                        );
+                    }),
+                )
+                .on_drop(cx.listener(move |app, drag: &BookmarkRepoDrag, _, cx| {
+                    app.move_repository_to_folder(drag.path.clone(), Some(drop_id.clone()), cx);
+                }))
+                .child(
+                    div()
+                        .w(px(14.0))
+                        .flex_shrink_0()
+                        .text_xs()
+                        .text_color(colors.text_muted)
+                        .child(chevron),
+                )
+                .child(
+                    div()
+                        .w(px(14.0))
+                        .flex_shrink_0()
+                        .text_xs()
+                        .text_color(colors.text_muted)
+                        .child("\u{25A3}"),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .child(folder.name.clone()),
+                )
+                .into_any_element(),
+        );
+
+        if expanded {
+            for (index, path) in children {
+                rows.push(welcome_repo_row(app, index, &path, true, colors, cx));
             }
         }
-    } else {
-        for (index, path) in app.recents.iter().cloned().enumerate() {
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("")
-                .to_lowercase();
-            if !search.is_empty() && !name.contains(&search) {
-                continue;
-            }
-            rows.push(welcome_repo_row(app, index, &path, colors, cx));
-        }
+    }
+
+    let root_repos: Vec<(usize, PathBuf)> = app
+        .recents
+        .iter()
+        .cloned()
+        .enumerate()
+        .filter(|(_, path)| folder_id_for(path).is_none())
+        .filter(|(_, path)| repo_matches(path))
+        .collect();
+
+    for (index, path) in root_repos {
+        rows.push(welcome_repo_row(app, index, &path, false, colors, cx));
     }
 
     div()
         .w(px(width))
         .h_full()
+        .flex_shrink_0()
+        .overflow_hidden()
         .flex()
         .flex_col()
         .bg(colors.sidebar_background)
+        .border_r_1()
+        .border_color(colors.border)
         .child(
-            div()
-                .px_3()
-                .pt_3()
-                .pb_2()
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(colors.text_muted)
-                        .child("Repositories"),
-                )
-                .child(
-                    div()
-                        .id("welcome-grouping-toggle")
-                        .px_1p5()
-                        .py_0p5()
-                        .rounded(px(3.0))
-                        .text_xs()
-                        .text_color(colors.text_secondary)
-                        .cursor_pointer()
-                        .on_click(cx.listener(|app, _, _, cx| {
-                            app.toggle_repositories_grouped(cx);
-                        }))
-                        .child(grouped_label),
-                ),
+            div().px_3().pt_3().pb_2().flex().items_center().child(
+                div()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child("Repositories"),
+            ),
         )
-        .child(div().px_3().pb_2().child(single_line_input_shell(
-            app.welcome_search_input.clone(),
-            colors,
-            false,
-        )))
         .child(
             div()
+                .id("welcome-bookmark-list")
                 .flex_1()
+                .min_h(px(0.0))
                 .overflow_hidden()
                 .flex()
                 .flex_col()
+                .on_drop(cx.listener(|app, drag: &BookmarkRepoDrag, _, cx| {
+                    app.move_repository_to_folder(drag.path.clone(), None, cx);
+                }))
                 .children(rows),
+        )
+        .child(
+            div()
+                .px_2()
+                .py_2()
+                .border_t_1()
+                .border_color(colors.border)
+                .on_drop(cx.listener(|app, drag: &BookmarkRepoDrag, _, cx| {
+                    app.move_repository_to_folder(drag.path.clone(), None, cx);
+                }))
+                .child(
+                    div()
+                        .id("welcome-sidebar-add")
+                        .w(px(28.0))
+                        .h(px(28.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(4.0))
+                        .text_sm()
+                        .text_color(colors.text_secondary)
+                        .cursor_pointer()
+                        .hover(|style| style.bg(colors.raised_background))
+                        .on_click(cx.listener(|app, _, _, cx| {
+                            app.begin_choice_prompt(ChoicePromptKind::WelcomeSidebarPlus, cx);
+                        }))
+                        .child("+"),
+                ),
         )
         .into_any_element()
 }
@@ -603,9 +696,13 @@ fn welcome_workflow_sidebar(width: f32, colors: &ThemeColors) -> AnyElement {
     div()
         .w(px(width))
         .h_full()
+        .flex_shrink_0()
+        .overflow_hidden()
         .flex()
         .flex_col()
         .bg(colors.sidebar_background)
+        .border_r_1()
+        .border_color(colors.border)
         .child(
             div()
                 .px_3()
@@ -634,9 +731,13 @@ fn welcome_services_sidebar(app: &GitronimoApp, width: f32, colors: &ThemeColors
     div()
         .w(px(width))
         .h_full()
+        .flex_shrink_0()
+        .overflow_hidden()
         .flex()
         .flex_col()
         .bg(colors.sidebar_background)
+        .border_r_1()
+        .border_color(colors.border)
         .child(
             div()
                 .px_3()
@@ -661,10 +762,12 @@ fn welcome_repo_row(
     app: &GitronimoApp,
     index: usize,
     path: &std::path::Path,
+    nested: bool,
     colors: &ThemeColors,
     cx: &mut gpui::Context<GitronimoApp>,
 ) -> AnyElement {
     let path = path.to_path_buf();
+    let drag_path = path.clone();
     let name = path
         .file_name()
         .and_then(|name| name.to_str())
@@ -674,7 +777,7 @@ fn welcome_repo_row(
     let snapshot = app.welcome_list_snapshots.get(&path);
     let branch_hint = snapshot.and_then(|data| data.branch.as_deref());
     let upstream_badge = snapshot.and_then(welcome_upstream_badge);
-    let secondary = upstream_badge.or_else(|| branch_hint.map(str::to_owned));
+    let trailing = upstream_badge.or_else(|| branch_hint.map(str::to_owned));
     let text_primary = if selected {
         colors.panel_background
     } else {
@@ -685,15 +788,15 @@ fn welcome_repo_row(
     } else {
         colors.text_muted
     };
+    let left_pad = if nested { px(28.0) } else { px(12.0) };
     div()
         .id(("welcome-repository", index))
-        .min_h(px(36.0))
-        .px_3()
-        .py_1()
+        .h(px(NAV_ROW_HEIGHT))
+        .pl(left_pad)
+        .pr_3()
         .flex()
-        .flex_col()
-        .justify_center()
-        .gap_0p5()
+        .items_center()
+        .gap_2()
         .text_sm()
         .bg(if selected {
             colors.accent
@@ -702,26 +805,46 @@ fn welcome_repo_row(
         })
         .text_color(text_primary)
         .cursor_pointer()
+        .when(!selected, |row| {
+            row.hover(|style| style.bg(colors.selection))
+        })
         .on_click(cx.listener(move |app, event: &ClickEvent, window, cx| {
             app.select_recent(index, cx);
             if event.click_count() >= 2 {
                 app.open_recent(path.clone(), window, cx);
             }
         }))
+        .on_drag(
+            BookmarkRepoDrag { path: drag_path },
+            |drag, _offset, _, cx| cx.new(|_| drag.clone()),
+        )
         .child(
             div()
-                .w_full()
-                .whitespace_nowrap()
+                .w(px(14.0))
+                .flex_shrink_0()
+                .text_xs()
+                .text_color(if selected {
+                    colors.panel_background
+                } else {
+                    colors.text_muted
+                })
+                .child("\u{25A3}"),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
                 .overflow_hidden()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .whitespace_nowrap()
                 .child(name),
         )
-        .children(secondary.map(|text| {
+        .children(trailing.map(|text| {
             div()
-                .w_full()
-                .text_xs()
-                .whitespace_nowrap()
+                .flex_shrink_0()
+                .max_w(px(100.0))
                 .overflow_hidden()
+                .whitespace_nowrap()
+                .text_xs()
                 .text_color(text_secondary)
                 .child(text)
                 .into_any_element()

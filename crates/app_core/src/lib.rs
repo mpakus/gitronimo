@@ -254,6 +254,9 @@ impl RecentRepositoryStore {
     pub fn remove(&self, path: &Path) -> Result<Vec<PathBuf>, RecentRepositoryStoreError> {
         let mut document = self.load_document()?;
         document.recent_repositories.retain(|recent| recent != path);
+        document
+            .repository_folders
+            .remove(&path.to_string_lossy().into_owned());
         let recents = document.recent_repositories.clone();
         self.save(&document)?;
         Ok(recents)
@@ -338,6 +341,36 @@ impl RecentRepositoryStore {
     pub fn save_list_pane_width(&self, width: f32) -> Result<(), RecentRepositoryStoreError> {
         let mut document = self.load_document()?;
         document.list_pane_width = Some(width);
+        self.save(&document)
+    }
+
+    /// Loads bookmark folders and repository→folder membership.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_bookmark_organization(
+        &self,
+    ) -> Result<BookmarkOrganization, RecentRepositoryStoreError> {
+        let document = self.load_document()?;
+        Ok(BookmarkOrganization {
+            folders: document.bookmark_folders,
+            repository_folders: document.repository_folders,
+        })
+    }
+
+    /// Persists bookmark folders and membership while retaining other preferences.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_bookmark_organization(
+        &self,
+        organization: &BookmarkOrganization,
+    ) -> Result<(), RecentRepositoryStoreError> {
+        let mut document = self.load_document()?;
+        document.bookmark_folders.clone_from(&organization.folders);
+        document
+            .repository_folders
+            .clone_from(&organization.repository_folders);
         self.save(&document)
     }
 
@@ -518,6 +551,25 @@ impl fmt::Display for RecoveryJournalStoreError {
 
 impl std::error::Error for RecoveryJournalStoreError {}
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct BookmarkFolder {
+    pub id: String,
+    pub name: String,
+    #[serde(default = "default_folder_expanded")]
+    pub expanded: bool,
+}
+
+fn default_folder_expanded() -> bool {
+    true
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+pub struct BookmarkOrganization {
+    pub folders: Vec<BookmarkFolder>,
+    /// Absolute repository path → folder id. Missing key means root.
+    pub repository_folders: std::collections::BTreeMap<String, String>,
+}
+
 #[derive(Deserialize, Serialize)]
 struct RecentRepositoryDocument {
     schema_version: u32,
@@ -530,6 +582,10 @@ struct RecentRepositoryDocument {
     sidebar_width: Option<f32>,
     #[serde(default)]
     list_pane_width: Option<f32>,
+    #[serde(default)]
+    bookmark_folders: Vec<BookmarkFolder>,
+    #[serde(default)]
+    repository_folders: std::collections::BTreeMap<String, String>,
 }
 
 impl Default for RecentRepositoryDocument {
@@ -541,6 +597,8 @@ impl Default for RecentRepositoryDocument {
             expanded_ref_groups: Vec::new(),
             sidebar_width: None,
             list_pane_width: None,
+            bookmark_folders: Vec::new(),
+            repository_folders: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -662,6 +720,37 @@ mod tests {
                 .expect("list pane width should reload"),
             Some(360.0)
         );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn bookmark_folders_survive_restart() {
+        use super::{BookmarkFolder, BookmarkOrganization};
+
+        let (directory, store) = temporary_store();
+        let repo = directory.join("repo");
+        store.record(repo.clone()).expect("record repo");
+        let organization = BookmarkOrganization {
+            folders: vec![BookmarkFolder {
+                id: "folder-1".into(),
+                name: "work".into(),
+                expanded: true,
+            }],
+            repository_folders: std::collections::BTreeMap::from([(
+                repo.to_string_lossy().into_owned(),
+                "folder-1".into(),
+            )]),
+        };
+        store
+            .save_bookmark_organization(&organization)
+            .expect("organization should save");
+        assert_eq!(
+            store
+                .load_bookmark_organization()
+                .expect("organization should reload"),
+            organization
+        );
+        assert_eq!(store.load().expect("recents remain"), vec![repo]);
         let _ = fs::remove_dir_all(directory);
     }
 

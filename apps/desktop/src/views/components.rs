@@ -784,58 +784,6 @@ impl Render for ActionTooltip {
     }
 }
 
-pub(crate) fn welcome_rail_tab(
-    label: &'static str,
-    icon: &'static str,
-    active: bool,
-    colors: &ThemeColors,
-    cx: &mut gpui::Context<GitronimoApp>,
-    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
-) -> gpui::AnyElement {
-    div()
-        .id(label)
-        .w_full()
-        .py_2()
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap_0p5()
-        .cursor_pointer()
-        .bg(if active {
-            colors.panel_background
-        } else {
-            colors.sidebar_background
-        })
-        .border_r_1()
-        .border_color(if active {
-            colors.accent
-        } else {
-            colors.sidebar_background
-        })
-        .text_color(if active {
-            colors.text_primary
-        } else {
-            colors.text_muted
-        })
-        .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)))
-        .child(div().text_sm().child(icon))
-        .child(
-            div()
-                .px_0p5()
-                .text_xs()
-                .whitespace_nowrap()
-                .overflow_hidden()
-                .text_center()
-                .font_weight(if active {
-                    gpui::FontWeight::MEDIUM
-                } else {
-                    gpui::FontWeight::NORMAL
-                })
-                .child(label),
-        )
-        .into_any_element()
-}
-
 pub(crate) fn remote_progress_footer(
     label: &str,
     progress: f32,

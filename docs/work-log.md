@@ -1,5 +1,27 @@
 # Implementation work log
 
+## 2026-08-11 — Bookmark folder tree + toolbar shell tabs
+
+**Intent:** Tower-like bookmarks: explicit folders (create/rename/delete, expand/collapse, drag repos between folders; delete folder unwraps repos to root). Move Services/Bookmarks/Workflow from left rail into the top toolbar and keep them visible when a repository is open.
+
+**Design:**
+- Persist `bookmark_folders` + `repository_folder` map in `RecentRepositoryDocument` (serde defaults, same schema version).
+- Replace path-parent auto-grouping with explicit folder membership; root = repos with no folder id.
+- Toolbar always shows Services / Bookmarks / Workflow; activating them returns to welcome with that shell view.
+- Welcome sidebar: chevron toggle, folder/repo rows, DnD via distinct drag types, + opens Add Repo / New Folder choice; text prompts for create/rename.
+
+**Files:** `crates/app_core`, `app_state.rs`, `main.rs`, `toolbar.rs`, `sidebar.rs`, `welcome.rs`, `workspace.rs`, `components.rs`, work-log.
+
+**Acceptance:** folders CRUD + toggle + DnD; delete folder leaves repos at root; shell tabs in toolbar on welcome and in-repo; no left welcome rail.
+
+## 2026-08-11 — Welcome bookmarks layout (Tower-like)
+
+**Intent:** fix welcome Repositories pane mess (overflow onto rail, branch lines looking like extra repos) and align closer to Tower: contained sidebar column, single-line folder rows, toolbar search only, dashed drop-zone empty state.
+
+**Files:** `sidebar.rs` (welcome sidebar/rows), `welcome.rs` (empty state / actions), work-log.
+
+**Acceptance:** sidebar does not overlap the icon rail; repo rows are one line; empty state reads as a drop zone; search lives in the toolbar.
+
 ## 2026-08-11 — Full-height draggable panes + left toolbar title
 
 **Intent:** make sidebar|content and list|diff dividers full-height and draggable with persisted widths; left-align toolbar title (repo › branch).

@@ -25,8 +25,8 @@ use std::{
 };
 
 use app_core::{
-    HostingError, HostingService, RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError,
-    SecretStore, WindowGeometry, open_repository,
+    BookmarkFolder, BookmarkOrganization, HostingError, HostingService, RecentRepositoryStore,
+    RecoveryJournalStore, RepositoryOpenError, SecretStore, WindowGeometry, open_repository,
 };
 use git_cli::{CommitRequest, GitExecutable, GitStatusError, parse_git_progress_line};
 use git_domain::{
@@ -304,6 +304,13 @@ impl GitronimoApp {
             .unwrap_or_default()
             .into_iter()
             .collect();
+        let organization = store.load_bookmark_organization().unwrap_or_default();
+        let bookmark_folders = organization.folders;
+        let repository_folders = organization
+            .repository_folders
+            .into_iter()
+            .map(|(path, folder)| (PathBuf::from(path), folder))
+            .collect();
         let sidebar_width = store
             .load_sidebar_width()
             .ok()
@@ -340,7 +347,8 @@ impl GitronimoApp {
             welcome_list_snapshots: std::collections::HashMap::new(),
             welcome_list_snapshot_token: 0,
             welcome_shell_view: WelcomeShellView::Repositories,
-            repositories_grouped: true,
+            bookmark_folders,
+            repository_folders,
             welcome_repo_search: String::new(),
             worktree_file_search: String::new(),
             search_focus_handle: cx.focus_handle(),
@@ -518,6 +526,13 @@ impl GitronimoApp {
             .unwrap_or_default()
             .into_iter()
             .collect();
+        let organization = store.load_bookmark_organization().unwrap_or_default();
+        let bookmark_folders = organization.folders;
+        let repository_folders = organization
+            .repository_folders
+            .into_iter()
+            .map(|(path, folder)| (PathBuf::from(path), folder))
+            .collect();
         let sidebar_width = store
             .load_sidebar_width()
             .ok()
@@ -553,7 +568,8 @@ impl GitronimoApp {
             welcome_list_snapshots: std::collections::HashMap::new(),
             welcome_list_snapshot_token: 0,
             welcome_shell_view: WelcomeShellView::Repositories,
-            repositories_grouped: true,
+            bookmark_folders,
+            repository_folders,
             welcome_repo_search: String::new(),
             worktree_file_search: String::new(),
             search_focus_handle: cx.focus_handle(),
@@ -831,19 +847,122 @@ impl GitronimoApp {
         cx.notify();
     }
 
-    fn toggle_repositories_grouped(&mut self, cx: &mut Context<Self>) {
-        self.repositories_grouped = !self.repositories_grouped;
-        cx.notify();
-    }
-
-    fn set_welcome_shell_view(&mut self, view: WelcomeShellView, cx: &mut Context<Self>) {
+    pub(crate) fn set_welcome_shell_view(
+        &mut self,
+        view: WelcomeShellView,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(self.state, ShellState::Repository(_)) {
+            self.return_to_welcome(cx);
+        }
         if self.welcome_shell_view == view {
+            cx.notify();
             return;
         }
         self.welcome_shell_view = view;
         if view == WelcomeShellView::Services {
             self.load_services(cx);
         }
+        cx.notify();
+    }
+
+    fn persist_bookmark_organization(&self) {
+        let organization = BookmarkOrganization {
+            folders: self.bookmark_folders.clone(),
+            repository_folders: self
+                .repository_folders
+                .iter()
+                .map(|(path, folder)| (path.to_string_lossy().into_owned(), folder.clone()))
+                .collect(),
+        };
+        let _ = self.store.save_bookmark_organization(&organization);
+    }
+
+    fn create_bookmark_folder(&mut self, name: &str, cx: &mut Context<Self>) {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            self.activity = "Enter a folder name.".into();
+            cx.notify();
+            return;
+        }
+        let id = format!(
+            "folder-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis())
+        );
+        self.bookmark_folders.push(BookmarkFolder {
+            id,
+            name,
+            expanded: true,
+        });
+        self.persist_bookmark_organization();
+        self.activity = "Folder created.".into();
+        cx.notify();
+    }
+
+    fn rename_bookmark_folder(&mut self, id: &str, name: &str, cx: &mut Context<Self>) {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            self.activity = "Enter a folder name.".into();
+            cx.notify();
+            return;
+        }
+        let Some(folder) = self
+            .bookmark_folders
+            .iter_mut()
+            .find(|folder| folder.id == id)
+        else {
+            return;
+        };
+        folder.name = name;
+        self.persist_bookmark_organization();
+        self.activity = "Folder renamed.".into();
+        cx.notify();
+    }
+
+    fn delete_bookmark_folder(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.bookmark_folders.retain(|folder| folder.id != id);
+        self.repository_folders
+            .retain(|_, folder_id| folder_id.as_str() != id);
+        self.persist_bookmark_organization();
+        self.activity = "Folder deleted. Repositories are now at the root.".into();
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_bookmark_folder(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(folder) = self
+            .bookmark_folders
+            .iter_mut()
+            .find(|folder| folder.id == id)
+        else {
+            return;
+        };
+        folder.expanded = !folder.expanded;
+        self.persist_bookmark_organization();
+        cx.notify();
+    }
+
+    pub(crate) fn move_repository_to_folder(
+        &mut self,
+        path: PathBuf,
+        folder_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        match folder_id {
+            Some(folder_id)
+                if self
+                    .bookmark_folders
+                    .iter()
+                    .any(|folder| folder.id == folder_id) =>
+            {
+                self.repository_folders.insert(path, folder_id);
+            }
+            _ => {
+                self.repository_folders.remove(&path);
+            }
+        }
+        self.persist_bookmark_organization();
         cx.notify();
     }
 
@@ -1437,11 +1556,21 @@ return remote_url & linefeed & parent_path"#;
                 self.text_prompt_value.clear();
                 self.run_merge_tool_for_path(if value.is_empty() { None } else { Some(value) }, cx);
             }
+            TextPromptKind::CreateBookmarkFolder => {
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.create_bookmark_folder(&value, cx);
+            }
+            TextPromptKind::RenameBookmarkFolder { id } => {
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.rename_bookmark_folder(&id, &value, cx);
+            }
         }
         cx.notify();
     }
 
-    fn begin_choice_prompt(&mut self, kind: ChoicePromptKind, cx: &mut Context<Self>) {
+    pub(crate) fn begin_choice_prompt(&mut self, kind: ChoicePromptKind, cx: &mut Context<Self>) {
         self.show_command_palette = false;
         self.show_quick_open = false;
         self.pending_text_prompt = None;
@@ -1491,7 +1620,10 @@ return remote_url & linefeed & parent_path"#;
                 self.choice_prompt_selected = 0;
                 self.execute_merge_pull_request(number, method, cx);
             }
-            ChoicePromptKind::SetMergeTool | ChoicePromptKind::MergePullRequest { .. } => {
+            ChoicePromptKind::SetMergeTool
+            | ChoicePromptKind::MergePullRequest { .. }
+            | ChoicePromptKind::WelcomeSidebarPlus
+            | ChoicePromptKind::BookmarkFolderActions { .. } => {
                 let options = kind.filtered_options(&self.choice_prompt_query);
                 let Some((_, label)) = options
                     .get(
@@ -1546,6 +1678,65 @@ return remote_url & linefeed & parent_path"#;
                 self.choice_prompt_query.clear();
                 self.choice_prompt_selected = 0;
                 self.execute_merge_pull_request(*number, *method, cx);
+            }
+            ChoicePromptKind::WelcomeSidebarPlus => {
+                self.pending_choice_prompt = None;
+                self.choice_prompt_query.clear();
+                self.choice_prompt_selected = 0;
+                match label {
+                    "Add Repository…" => {
+                        let receiver = cx.prompt_for_paths(PathPromptOptions {
+                            files: false,
+                            directories: true,
+                            multiple: false,
+                            prompt: Some("Choose a Git repository".into()),
+                        });
+                        let store = self.store.clone();
+                        cx.spawn(async move |this, cx| {
+                            let Ok(Ok(Some(paths))) = receiver.await else {
+                                return;
+                            };
+                            let Some(path) = paths.into_iter().next() else {
+                                return;
+                            };
+                            let outcome = cx
+                                .background_spawn(async move { discover_and_record(&path, &store) })
+                                .await;
+                            let _ = this.update(cx, |app, cx| app.apply_open_outcome(outcome, cx));
+                        })
+                        .detach();
+                    }
+                    "New Folder…" => {
+                        self.begin_text_prompt(TextPromptKind::CreateBookmarkFolder, "", cx);
+                    }
+                    _ => {}
+                }
+                cx.notify();
+            }
+            ChoicePromptKind::BookmarkFolderActions { id } => {
+                self.pending_choice_prompt = None;
+                self.choice_prompt_query.clear();
+                self.choice_prompt_selected = 0;
+                match label {
+                    "Rename…" => {
+                        let current = self
+                            .bookmark_folders
+                            .iter()
+                            .find(|folder| folder.id == *id)
+                            .map(|folder| folder.name.clone())
+                            .unwrap_or_default();
+                        self.begin_text_prompt(
+                            TextPromptKind::RenameBookmarkFolder { id: id.clone() },
+                            current,
+                            cx,
+                        );
+                    }
+                    "Delete Folder" => {
+                        self.delete_bookmark_folder(id, cx);
+                    }
+                    _ => {}
+                }
+                cx.notify();
             }
         }
     }

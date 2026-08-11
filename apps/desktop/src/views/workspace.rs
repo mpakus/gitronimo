@@ -83,10 +83,6 @@ impl Render for GitronimoApp {
                     .flex_1()
                     .flex()
                     .h_full()
-                    .children(
-                        matches!(self.state, ShellState::Welcome)
-                            .then(|| self.welcome_vertical_rail(&colors, cx).into_any_element()),
-                    )
                     .child(self.sidebar_view(sidebar_width, &colors, cx))
                     .child(sidebar_resize_handle(sidebar_width, &colors, cx))
                     .child(
@@ -358,6 +354,8 @@ impl GitronimoApp {
             TextPromptKind::MergeToolPath => {
                 ("Conflicted path (leave empty for all)".into(), "Open tool")
             }
+            TextPromptKind::CreateBookmarkFolder => ("New folder".into(), "Create"),
+            TextPromptKind::RenameBookmarkFolder { .. } => ("Rename folder".into(), "Rename"),
         };
         div()
             .absolute()

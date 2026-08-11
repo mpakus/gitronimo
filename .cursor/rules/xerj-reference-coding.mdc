@@ -1,0 +1,61 @@
+---
+description: Use XERJ reference coding — search peer indices before writing non-trivial code
+alwaysApply: true
+---
+
+# XERJ reference coding
+
+Before writing non-trivial Gitronimo code (especially GPUI layout, Git UX, staging/history/diff, command palette, sidebars), search how closest open-source peers already solved it — then adapt or re-implement.
+
+## Local node
+
+- Binary: `~/.local/bin/xerj` (`xerj v1.0.0-rc.14+`)
+- ES-compat API: `http://127.0.0.1:9200` (quote globs in zsh: `'gitronimo-*/_search'`)
+- Indices for this setup use prefix `gitronimo-` (main corpus: `gitronimo-docs`)
+- Helper: `.xerj/search.sh "your mechanism question"`
+- Do not commit `.xerj/` (gitignored). Ignore helpers: `.xerjignore`, `docs/.xerjignore`
+
+## Reference corpora
+
+| Corpus | Clone path | License | Use |
+|--------|------------|---------|-----|
+| This project (`apps/`, `crates/`, `docs/`) | in-repo | project | primary |
+| rgitui | `/Users/mpak/www/rust/xerj-refs/rgitui` | MIT | adapt with attribution |
+| GitComet | `/Users/mpak/www/rust/xerj-refs/GitComet` | AGPL-3.0 | **approach-only** — read design, write original code |
+| gitui | `/Users/mpak/www/rust/xerj-refs/gitui` | MIT | adapt with attribution |
+
+License map: `/Users/mpak/www/rust/xerj-refs/LICENSES.md`
+
+## Workflow
+
+1. Ensure the node answers: `curl -sf http://127.0.0.1:9200/`.
+2. Search by mechanism (not just API names), e.g. sidebar tree DnD, bookmark folders, toolbar shell tabs, GPUI overlays.
+3. Prefer:
+
+```bash
+.xerj/search.sh "command palette overlay gpui"
+# or
+curl -s 'http://127.0.0.1:9200/gitronimo-docs/_search' -H 'content-type: application/json' \
+  --data-binary '{"size":8,"query":{"match":{"body":"sidebar drag drop folder"}},"highlight":{"fields":{"body":{}}},"_source":["title","ax_path","language"]}'
+```
+
+4. Catalog: `xerj autoindex map --url http://127.0.0.1:9200`
+5. If retrieval returns nothing relevant, say so and implement normally.
+6. Cite project + file (`ax_path`) in the commit message when you drew on a peer; state adapted vs approach-only.
+7. Strongest trigger to retrieve: the same error has already been looped twice.
+
+## Re-index (after large source changes)
+
+Index roots separately — do **not** autoindex the monorepo root (`target/` is still walked despite ignore files on this xerj build).
+
+```bash
+URL=http://127.0.0.1:9200
+P=gitronimo
+B=/Users/mpak/www/rust/gitronimo/.xerj
+xerj autoindex apps --url "$URL" --prefix "$P" --state-dir "$B/ai-apps" --no-semantic --no-graph
+xerj autoindex crates --url "$URL" --prefix "$P" --state-dir "$B/ai-crates" --no-semantic --no-graph
+xerj autoindex docs --url "$URL" --prefix "$P" --state-dir "$B/ai-docs" --no-semantic --no-graph
+xerj autoindex /Users/mpak/www/rust/xerj-refs/rgitui --url "$URL" --prefix "$P" --state-dir "$B/ai-rgitui" --no-semantic --no-graph
+xerj autoindex /Users/mpak/www/rust/xerj-refs/GitComet --url "$URL" --prefix "$P" --state-dir "$B/ai-GitComet" --no-semantic --no-graph
+xerj autoindex /Users/mpak/www/rust/xerj-refs/gitui --url "$URL" --prefix "$P" --state-dir "$B/ai-gitui" --no-semantic --no-graph
+```

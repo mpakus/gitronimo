@@ -9,51 +9,11 @@ use ui_kit::ThemeColors;
 use crate::actions::OpenRepository;
 use crate::app_state::{GitronimoApp, WelcomeRepoSnapshot, WelcomeShellView};
 use crate::views::components::{
-    centered_empty_state, detail_row, detail_section, file_action_button,
-    primary_window_action_button, welcome_rail_tab,
+    detail_row, detail_section, file_action_button, primary_window_action_button,
 };
 use crate::views::single_line_input::single_line_input_shell;
 
 impl GitronimoApp {
-    pub(crate) fn welcome_vertical_rail(
-        &self,
-        colors: &ThemeColors,
-        cx: &mut gpui::Context<Self>,
-    ) -> impl IntoElement {
-        div()
-            .w(px(72.0))
-            .h_full()
-            .flex()
-            .flex_col()
-            .bg(colors.sidebar_background)
-            .border_r_1()
-            .border_color(colors.border)
-            .child(welcome_rail_tab(
-                "Services",
-                "\u{2699}",
-                self.welcome_shell_view == WelcomeShellView::Services,
-                colors,
-                cx,
-                |app, cx| app.set_welcome_shell_view(WelcomeShellView::Services, cx),
-            ))
-            .child(welcome_rail_tab(
-                "Bookmarks",
-                "\u{2605}",
-                self.welcome_shell_view == WelcomeShellView::Repositories,
-                colors,
-                cx,
-                |app, cx| app.set_welcome_shell_view(WelcomeShellView::Repositories, cx),
-            ))
-            .child(welcome_rail_tab(
-                "Workflow",
-                "\u{21BB}",
-                self.welcome_shell_view == WelcomeShellView::Workflow,
-                colors,
-                cx,
-                |app, cx| app.set_welcome_shell_view(WelcomeShellView::Workflow, cx),
-            ))
-    }
-
     #[allow(clippy::unused_self)]
     pub(crate) fn welcome_view(
         &self,
@@ -76,6 +36,8 @@ impl GitronimoApp {
             .flex_1()
             .flex()
             .flex_col()
+            .h_full()
+            .overflow_hidden()
             .bg(colors.window_background)
             .child(
                 div()
@@ -83,7 +45,6 @@ impl GitronimoApp {
                     .overflow_hidden()
                     .child(welcome_detail_content(self, colors, cx)),
             )
-            .child(welcome_action_bar(colors, cx))
             .into_any_element()
     }
 }
@@ -94,20 +55,88 @@ fn welcome_detail_content(
     cx: &mut gpui::Context<GitronimoApp>,
 ) -> AnyElement {
     let Some(index) = app.selected_recent else {
-        return welcome_empty_state(colors);
+        return welcome_empty_state(colors, cx);
     };
     let Some(path) = app.recents.get(index) else {
-        return welcome_empty_state(colors);
+        return welcome_empty_state(colors, cx);
     };
     welcome_repo_detail(path, index, app.welcome_snapshot.as_ref(), app, colors, cx)
 }
 
-fn welcome_empty_state(colors: &ThemeColors) -> AnyElement {
-    centered_empty_state(
-        "Select a repository",
-        "Choose a repository from the sidebar, or add one below. You can also drop a folder anywhere on the window.",
-        colors,
-    )
+fn welcome_empty_state(colors: &ThemeColors, cx: &mut gpui::Context<GitronimoApp>) -> AnyElement {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap_6()
+        .p_8()
+        .bg(colors.window_background)
+        .child(
+            div()
+                .w(px(420.0))
+                .h(px(220.0))
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap_3()
+                .rounded(px(12.0))
+                .border_2()
+                .border_color(colors.border)
+                .border_dashed()
+                .bg(colors.panel_background)
+                .child(
+                    div()
+                        .text_3xl()
+                        .text_color(colors.text_muted)
+                        .child("\u{25A3}"),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(colors.text_secondary)
+                        .child("Drop Folder or URL to Add Git Repository"),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_4()
+                .child(welcome_text_action("Add", colors, cx, |_, window, cx| {
+                    window.dispatch_action(Box::new(OpenRepository), cx);
+                }))
+                .child(welcome_text_action("Create", colors, cx, |app, _, cx| {
+                    app.prompt_create_repository(cx);
+                }))
+                .child(welcome_text_action("Clone", colors, cx, |app, _, cx| {
+                    app.prompt_clone_repository(cx);
+                })),
+        )
+        .into_any_element()
+}
+
+fn welcome_text_action(
+    label: &'static str,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Window, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> AnyElement {
+    div()
+        .id(label)
+        .px_2()
+        .py_1()
+        .rounded(px(4.0))
+        .text_sm()
+        .text_color(colors.accent)
+        .cursor_pointer()
+        .hover(|style| style.bg(colors.raised_background))
+        .on_click(cx.listener(move |app, _, window, cx| on_click(app, window, cx)))
+        .child(label)
+        .into_any_element()
 }
 
 #[allow(clippy::too_many_lines)]
@@ -303,34 +332,6 @@ fn welcome_repo_detail(
                     colors,
                 )))
         })
-        .into_any_element()
-}
-
-fn welcome_action_bar(colors: &ThemeColors, cx: &mut gpui::Context<GitronimoApp>) -> AnyElement {
-    div()
-        .px_4()
-        .py_2()
-        .flex()
-        .items_center()
-        .gap_2()
-        .bg(colors.panel_background)
-        .border_t_1()
-        .border_color(colors.border)
-        .child(primary_window_action_button(
-            "Add",
-            true,
-            colors,
-            cx,
-            |_, window, cx| {
-                window.dispatch_action(Box::new(OpenRepository), cx);
-            },
-        ))
-        .child(file_action_button("Create", colors, cx, |app, cx| {
-            app.prompt_create_repository(cx);
-        }))
-        .child(file_action_button("Clone", colors, cx, |app, cx| {
-            app.prompt_clone_repository(cx);
-        }))
         .into_any_element()
 }
 
