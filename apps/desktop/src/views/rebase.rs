@@ -31,7 +31,7 @@ impl GitronimoApp {
                 "Start rebase…",
                 colors,
                 cx,
-                |_, cx| GitronimoApp::prompt_start_rebase(cx),
+                GitronimoApp::prompt_start_rebase,
             ))
             .child(file_action_button("Save plan", colors, cx, |_, cx| {
                 GitronimoApp::save_rebase_plan(cx);

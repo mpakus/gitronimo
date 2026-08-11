@@ -1,5 +1,27 @@
 # Implementation work log
 
+## 2026-08-11 — GPUI command palette + Enter-to-confirm
+
+**Intent:** replace the largest remaining osascript cluster (`choose from list` command palette) with a searchable in-app GPUI overlay, and add Enter-to-confirm (Escape-to-cancel) on the existing text prompt overlay.
+
+**Design:** typed `PaletteCommand` + label table; `command_palette_overlay` reuses `overlay_scrim` / `single_line_input` (new `TextFieldBinding::CommandPalette`); filter is case-insensitive substring; click or Enter runs the selected/first match; Escape closes. Text prompt overlay gains Enter/Escape via SingleLineInput actions. Optionally migrate single-field osascript prompts (drop commit, browse tree, history search/reference, rebase onto) onto `TextPromptKind` if low-risk.
+
+**Files (planned):**
+- `apps/desktop/src/app_state.rs` — palette state, `PaletteCommand`, extra TextPromptKinds
+- `apps/desktop/src/views/single_line_input.rs` — CommandPalette binding, Enter/Escape actions
+- `apps/desktop/src/views/workspace.rs` — command palette overlay; focus pending
+- `apps/desktop/src/main.rs` — open/close/dispatch palette; remove osascript choose-from-list; migrate prompts
+- `docs/work-log.md` — this entry
+
+**Acceptance checks:**
+- Command-Shift-P opens searchable GPUI palette (no osascript list).
+- Typing filters commands; Enter runs highlighted/first match; Escape/scrim closes.
+- Text prompts confirm on Enter and cancel on Escape when the field is focused.
+- Command dispatch remains typed (no shell-string Git).
+- Full workspace gates: fmt, clippy `-D warnings`, test, deny.
+
+**Verification:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` all pass. Command palette is in-app; drop/browse/history/rebase/autosquash prompts use GPUI overlays with Enter/Escape.
+
 ## 2026-08-11 — GPUI text prompts + Branches Review filter
 
 **Intent:** replace frequent osascript text dialogs with in-app GPUI overlays (same pattern as branch rename) and default Branches Review to diverged/unpublished branches with a Show all toggle.

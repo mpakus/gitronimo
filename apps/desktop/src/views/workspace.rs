@@ -1,10 +1,13 @@
 //! The root window layout: toolbar, sidebar, content, activity bar.
 
-use gpui::{AnyElement, MouseButton, MouseDownEvent, Render, Window, div, prelude::*, px};
+use gpui::{
+    AnyElement, Focusable, MouseButton, MouseDownEvent, Render, Window, div, prelude::*, px,
+};
 use ui_kit::Theme;
 
 use crate::app_state::{
-    GitronimoApp, ShellState, ShortcutReferenceState, TextPromptKind, window_title,
+    GitronimoApp, OverlayFocus, PaletteCommand, ShellState, ShortcutReferenceState, TextPromptKind,
+    window_title,
 };
 
 use super::components::{
@@ -14,6 +17,15 @@ use super::components::{
 impl Render for GitronimoApp {
     fn render(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         window.set_window_title(&window_title(&self.state, self.has_commit_draft()));
+        if let Some(focus) = self.pending_overlay_focus.take() {
+            let handle = match focus {
+                OverlayFocus::CommandPalette => {
+                    self.command_palette_input.read(cx).focus_handle(cx)
+                }
+                OverlayFocus::TextPrompt => self.text_prompt_input.read(cx).focus_handle(cx),
+            };
+            window.focus(&handle);
+        }
         let colors = Theme::for_appearance(self.appearance).colors;
         let sidebar_width = self.sidebar_width;
         let content = match &self.state {
@@ -48,6 +60,10 @@ impl Render for GitronimoApp {
             .children(
                 self.show_quick_open
                     .then(|| self.quick_open_overlay(&colors, cx).into_any_element()),
+            )
+            .children(
+                self.show_command_palette
+                    .then(|| self.command_palette_overlay(&colors, cx).into_any_element()),
             )
             .children(
                 self.pending_text_prompt
@@ -202,6 +218,97 @@ impl GitronimoApp {
             .into_any_element()
     }
 
+    pub(crate) fn command_palette_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let commands = PaletteCommand::filtered(&self.command_palette_query);
+        let selected = self
+            .command_palette_selected
+            .min(commands.len().saturating_sub(1));
+        div()
+            .absolute()
+            .top(px(52.0))
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(colors.overlay_scrim)
+            .flex()
+            .justify_center()
+            .pt_8()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.close_command_palette(cx);
+                }),
+            )
+            .child(
+                div()
+                    .w(px(480.0))
+                    .max_h(px(420.0))
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(8.0))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(colors.border)
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child("Commands"),
+                    )
+                    .child(div().px_3().py_2().child(
+                        crate::views::single_line_input::single_line_input_shell(
+                            self.command_palette_input.clone(),
+                            colors,
+                            false,
+                        ),
+                    ))
+                    .child(
+                        div().flex_1().overflow_hidden().children(
+                            commands
+                                .into_iter()
+                                .enumerate()
+                                .map(|(row, (_, label, command))| {
+                                    let selected_row = row == selected;
+                                    div()
+                                        .id(row)
+                                        .px_3()
+                                        .py_2()
+                                        .text_sm()
+                                        .cursor_pointer()
+                                        .bg(if selected_row {
+                                            colors.selection
+                                        } else {
+                                            colors.panel_background
+                                        })
+                                        .hover(|row| row.bg(colors.selection))
+                                        .on_click(cx.listener(move |app, _, _, cx| {
+                                            app.run_palette_command(command, cx);
+                                        }))
+                                        .child(label)
+                                        .into_any_element()
+                                }),
+                        ),
+                    ),
+            )
+            .into_any_element()
+    }
+
     pub(crate) fn text_prompt_overlay(
         &self,
         colors: &ui_kit::ThemeColors,
@@ -221,6 +328,20 @@ impl GitronimoApp {
             TextPromptKind::CompareTo { left } => {
                 (format!("Compare to ref (from {left})"), "Compare")
             }
+            TextPromptKind::DropCommit => ("Drop commit".into(), "Drop"),
+            TextPromptKind::BrowseTree => ("Browse tree at commit".into(), "Browse"),
+            TextPromptKind::HistorySearch => ("Search loaded history".into(), "Search"),
+            TextPromptKind::HistoryReference => ("Branch or tag history".into(), "Show"),
+            TextPromptKind::RebaseOnto => ("Rebase onto".into(), "Rebase"),
+            TextPromptKind::AutosquashTarget { squash } => (
+                if *squash {
+                    "Squash into commit".into()
+                } else {
+                    "Fixup into commit".into()
+                },
+                if *squash { "Next" } else { "Fixup" },
+            ),
+            TextPromptKind::AutosquashMessage { .. } => ("Squash message".into(), "Squash"),
         };
         div()
             .absolute()

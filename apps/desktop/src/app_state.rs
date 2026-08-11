@@ -138,6 +138,94 @@ pub(crate) enum TextPromptKind {
     BlamePath,
     CompareFrom,
     CompareTo { left: String },
+    DropCommit,
+    BrowseTree,
+    HistorySearch,
+    HistoryReference,
+    RebaseOnto,
+    AutosquashTarget { squash: bool },
+    AutosquashMessage { target: String },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PaletteCommand {
+    RefreshWorkingCopy,
+    ShowHistory,
+    CommitDetail,
+    ShowStashes,
+    ShowRemotes,
+    GitLfsStatus,
+    Services,
+    ShowReflog,
+    FileHistory,
+    Blame,
+    CompareRefs,
+    BrowseTree,
+    Worktrees,
+    Submodules,
+    RebasePlan,
+    SquashStaged,
+    FixupStaged,
+    DropCommit,
+    RewordLastCommit,
+    Conflicts,
+    SetMergeTool,
+    OpenInMergeTool,
+    CheckCommitSignature,
+    ShowWorkingCopy,
+    ShowKeyboardShortcuts,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OverlayFocus {
+    CommandPalette,
+    TextPrompt,
+}
+
+pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
+    ("Refresh working copy", PaletteCommand::RefreshWorkingCopy),
+    ("Show history", PaletteCommand::ShowHistory),
+    ("Commit detail…", PaletteCommand::CommitDetail),
+    ("Show stashes", PaletteCommand::ShowStashes),
+    ("Show remotes", PaletteCommand::ShowRemotes),
+    ("Git LFS status", PaletteCommand::GitLfsStatus),
+    ("Services", PaletteCommand::Services),
+    ("Show reflog", PaletteCommand::ShowReflog),
+    ("File history…", PaletteCommand::FileHistory),
+    ("Blame…", PaletteCommand::Blame),
+    ("Compare refs…", PaletteCommand::CompareRefs),
+    ("Browse tree at commit…", PaletteCommand::BrowseTree),
+    ("Worktrees…", PaletteCommand::Worktrees),
+    ("Submodules…", PaletteCommand::Submodules),
+    ("Rebase plan…", PaletteCommand::RebasePlan),
+    ("Squash staged changes…", PaletteCommand::SquashStaged),
+    ("Fixup staged changes…", PaletteCommand::FixupStaged),
+    ("Drop commit…", PaletteCommand::DropCommit),
+    ("Reword last commit…", PaletteCommand::RewordLastCommit),
+    ("Conflicts…", PaletteCommand::Conflicts),
+    ("Set merge tool…", PaletteCommand::SetMergeTool),
+    ("Open in merge tool…", PaletteCommand::OpenInMergeTool),
+    (
+        "Check commit signature…",
+        PaletteCommand::CheckCommitSignature,
+    ),
+    ("Show working copy", PaletteCommand::ShowWorkingCopy),
+    (
+        "Show keyboard shortcuts",
+        PaletteCommand::ShowKeyboardShortcuts,
+    ),
+];
+
+impl PaletteCommand {
+    pub(crate) fn filtered(query: &str) -> Vec<(usize, &'static str, PaletteCommand)> {
+        let needle = query.trim().to_lowercase();
+        PALETTE_COMMANDS
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _))| needle.is_empty() || label.to_lowercase().contains(&needle))
+            .map(|(index, (label, command))| (index, *label, *command))
+            .collect()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -241,6 +329,10 @@ pub(crate) struct GitronimoApp {
     pub pending_branch_delete: Option<String>,
     pub pending_text_prompt: Option<TextPromptKind>,
     pub text_prompt_value: String,
+    pub show_command_palette: bool,
+    pub command_palette_query: String,
+    pub command_palette_selected: usize,
+    pub pending_overlay_focus: Option<OverlayFocus>,
     pub selected_branch_review: Option<String>,
     pub branches_review_show_all: bool,
     pub force_push_state: ForcePushState,
@@ -327,6 +419,7 @@ pub(crate) struct GitronimoApp {
     pub commit_body_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub repo_description_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub text_prompt_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
+    pub command_palette_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub show_quick_open: bool,
     pub commit_options_expanded: bool,
     pub user_repo_description: String,

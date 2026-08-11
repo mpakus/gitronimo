@@ -28,6 +28,10 @@ actions!(
         Paste,
         Cut,
         Copy,
+        Confirm,
+        Cancel,
+        MoveUp,
+        MoveDown,
     ]
 );
 
@@ -40,6 +44,7 @@ pub(crate) enum TextFieldBinding {
     CommitBody,
     RepoDescription,
     TextPrompt,
+    CommandPalette,
 }
 
 pub(crate) struct SingleLineInput {
@@ -202,6 +207,46 @@ impl SingleLineInput {
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         self.copy_selection(&Copy, window, cx);
         self.replace_text_in_range(None, "", window, cx);
+    }
+
+    fn confirm(&mut self, _: &Confirm, _: &mut Window, cx: &mut Context<Self>) {
+        match self.binding {
+            TextFieldBinding::TextPrompt => {
+                self.app.update(cx, GitronimoApp::confirm_text_prompt);
+            }
+            TextFieldBinding::CommandPalette => {
+                self.app.update(cx, GitronimoApp::confirm_command_palette);
+            }
+            _ => {}
+        }
+    }
+
+    fn cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
+        match self.binding {
+            TextFieldBinding::TextPrompt => {
+                self.app.update(cx, GitronimoApp::cancel_text_prompt);
+            }
+            TextFieldBinding::CommandPalette => {
+                self.app.update(cx, GitronimoApp::close_command_palette);
+            }
+            _ => {}
+        }
+    }
+
+    fn move_up(&mut self, _: &MoveUp, _: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.binding, TextFieldBinding::CommandPalette) {
+            self.app.update(cx, |app, cx| {
+                app.move_command_palette_selection(-1, cx);
+            });
+        }
+    }
+
+    fn move_down(&mut self, _: &MoveDown, _: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.binding, TextFieldBinding::CommandPalette) {
+            self.app.update(cx, |app, cx| {
+                app.move_command_palette_selection(1, cx);
+            });
+        }
     }
 
     fn on_mouse_down(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -624,6 +669,10 @@ impl Render for SingleLineInput {
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::copy_selection))
+            .on_action(cx.listener(Self::confirm))
+            .on_action(cx.listener(Self::cancel))
+            .on_action(cx.listener(Self::move_up))
+            .on_action(cx.listener(Self::move_down))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
@@ -673,6 +722,7 @@ pub(crate) type TextInputBundle = (
     Entity<SingleLineInput>,
     Entity<SingleLineInput>,
     Entity<SingleLineInput>,
+    Entity<SingleLineInput>,
 );
 
 impl GitronimoApp {
@@ -684,6 +734,7 @@ impl GitronimoApp {
             TextFieldBinding::CommitBody => self.commit_body.as_str(),
             TextFieldBinding::RepoDescription => self.user_repo_description.as_str(),
             TextFieldBinding::TextPrompt => self.text_prompt_value.as_str(),
+            TextFieldBinding::CommandPalette => self.command_palette_query.as_str(),
         }
     }
 
@@ -698,6 +749,10 @@ impl GitronimoApp {
             TextFieldBinding::CommitBody => self.commit_body = value,
             TextFieldBinding::RepoDescription => self.user_repo_description = value,
             TextFieldBinding::TextPrompt => self.text_prompt_value = value,
+            TextFieldBinding::CommandPalette => {
+                self.command_palette_query = value;
+                self.command_palette_selected = 0;
+            }
         }
     }
 
@@ -738,9 +793,21 @@ impl GitronimoApp {
                 cx,
             )
         });
-        let text_prompt =
-            cx.new(|cx| SingleLineInput::new(TextFieldBinding::TextPrompt, app, "Enter value", cx));
-        (welcome, worktree, subject, body, description, text_prompt)
+        let text_prompt = cx.new(|cx| {
+            SingleLineInput::new(TextFieldBinding::TextPrompt, app.clone(), "Enter value", cx)
+        });
+        let command_palette = cx.new(|cx| {
+            SingleLineInput::new(TextFieldBinding::CommandPalette, app, "Filter commands", cx)
+        });
+        (
+            welcome,
+            worktree,
+            subject,
+            body,
+            description,
+            text_prompt,
+            command_palette,
+        )
     }
 }
 
@@ -758,5 +825,9 @@ pub(crate) fn register_input_bindings(cx: &mut App) {
         KeyBinding::new("cmd-v", Paste, Some("SingleLineInput")),
         KeyBinding::new("cmd-c", Copy, Some("SingleLineInput")),
         KeyBinding::new("cmd-x", Cut, Some("SingleLineInput")),
+        KeyBinding::new("enter", Confirm, Some("SingleLineInput")),
+        KeyBinding::new("escape", Cancel, Some("SingleLineInput")),
+        KeyBinding::new("up", MoveUp, Some("SingleLineInput")),
+        KeyBinding::new("down", MoveDown, Some("SingleLineInput")),
     ]);
 }

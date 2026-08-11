@@ -141,6 +141,7 @@ impl GitronimoApp {
                         colors,
                         cx,
                         |app, _, cx| {
+                            app.show_command_palette = false;
                             app.show_quick_open = !app.show_quick_open;
                             cx.notify();
                         },

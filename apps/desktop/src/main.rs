@@ -49,10 +49,11 @@ use crate::actions::{
 };
 use crate::app_state::{
     ForcePushState, GitronimoApp, HistoryDetailMode, LastAction, Mutation, NetworkOperation,
-    OpenedRepository, OperationAction, RefContext, RepositoryView, ShellState,
-    ShortcutReferenceState, StashAction, TextPromptKind, ThemeMode, WelcomeRepoSnapshot,
-    WelcomeShellView, appearance_from_window, discard_selected, git_failure_message,
-    network_failure_message, repository_is_available, repository_unavailable_message, resize_width,
+    OpenedRepository, OperationAction, OverlayFocus, PaletteCommand, RefContext, RepositoryView,
+    ShellState, ShortcutReferenceState, StashAction, TextPromptKind, ThemeMode,
+    WelcomeRepoSnapshot, WelcomeShellView, appearance_from_window, discard_selected,
+    git_failure_message, network_failure_message, repository_is_available,
+    repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
 use crate::views::single_line_input::register_input_bindings;
@@ -310,6 +311,7 @@ impl GitronimoApp {
             commit_body_input,
             repo_description_input,
             text_prompt_input,
+            command_palette_input,
         ) = Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
@@ -354,6 +356,10 @@ impl GitronimoApp {
             pending_branch_delete: None,
             pending_text_prompt: None,
             text_prompt_value: String::new(),
+            show_command_palette: false,
+            command_palette_query: String::new(),
+            command_palette_selected: 0,
+            pending_overlay_focus: None,
             selected_branch_review: None,
             branches_review_show_all: false,
             force_push_state: ForcePushState::Idle,
@@ -440,6 +446,7 @@ impl GitronimoApp {
             commit_body_input,
             repo_description_input,
             text_prompt_input,
+            command_palette_input,
             show_quick_open: false,
             commit_options_expanded: false,
             user_repo_description: String::new(),
@@ -502,6 +509,7 @@ impl GitronimoApp {
             commit_body_input,
             repo_description_input,
             text_prompt_input,
+            command_palette_input,
         ) = Self::create_text_inputs(cx);
         let mut app = Self {
             focus_handle: cx.focus_handle(),
@@ -546,6 +554,10 @@ impl GitronimoApp {
             pending_branch_delete: None,
             pending_text_prompt: None,
             text_prompt_value: String::new(),
+            show_command_palette: false,
+            command_palette_query: String::new(),
+            command_palette_selected: 0,
+            pending_overlay_focus: None,
             selected_branch_review: None,
             branches_review_show_all: false,
             force_push_state: ForcePushState::Idle,
@@ -632,6 +644,7 @@ impl GitronimoApp {
             commit_body_input,
             repo_description_input,
             text_prompt_input,
+            command_palette_input,
             show_quick_open: false,
             commit_options_expanded: false,
             user_repo_description: String::new(),
@@ -895,9 +908,146 @@ return remote_url & linefeed & parent_path"#;
     }
 
     fn show_command_palette(&mut self, _: &CommandPalette, _: &mut Window, cx: &mut Context<Self>) {
+        self.open_command_palette(cx);
+    }
+
+    fn open_command_palette(&mut self, cx: &mut Context<Self>) {
+        self.show_quick_open = false;
+        self.pending_text_prompt = None;
+        self.text_prompt_value.clear();
+        self.show_command_palette = true;
+        self.command_palette_query.clear();
+        self.command_palette_selected = 0;
+        self.pending_overlay_focus = Some(OverlayFocus::CommandPalette);
         self.activity = "Choose a command from the palette.".into();
-        Self::prompt_command_palette(cx);
         cx.notify();
+    }
+
+    fn close_command_palette(&mut self, cx: &mut Context<Self>) {
+        self.show_command_palette = false;
+        self.command_palette_query.clear();
+        self.command_palette_selected = 0;
+        cx.notify();
+    }
+
+    fn move_command_palette_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let count = PaletteCommand::filtered(&self.command_palette_query).len();
+        if count == 0 {
+            self.command_palette_selected = 0;
+            cx.notify();
+            return;
+        }
+        let current = self.command_palette_selected.min(count - 1);
+        let next = match delta.cmp(&0) {
+            std::cmp::Ordering::Less => current.saturating_sub(delta.unsigned_abs()),
+            std::cmp::Ordering::Greater => (current + delta.unsigned_abs()).min(count - 1),
+            std::cmp::Ordering::Equal => current,
+        };
+        self.command_palette_selected = next;
+        cx.notify();
+    }
+
+    fn confirm_command_palette(&mut self, cx: &mut Context<Self>) {
+        let commands = PaletteCommand::filtered(&self.command_palette_query);
+        let Some((_, _, command)) = commands
+            .get(
+                self.command_palette_selected
+                    .min(commands.len().saturating_sub(1)),
+            )
+            .copied()
+        else {
+            return;
+        };
+        self.run_palette_command(command, cx);
+    }
+
+    fn run_palette_command(&mut self, command: PaletteCommand, cx: &mut Context<Self>) {
+        self.close_command_palette(cx);
+        match command {
+            PaletteCommand::RefreshWorkingCopy => {
+                if let ShellState::Repository(repository) = &self.state {
+                    self.load_working_copy(repository.clone(), cx);
+                } else {
+                    self.activity = "Open a repository before refreshing its working copy.".into();
+                }
+                cx.notify();
+            }
+            PaletteCommand::ShowHistory => {
+                if let ShellState::Repository(repository) = &self.state {
+                    self.show_history(repository.clone(), cx);
+                }
+            }
+            PaletteCommand::CommitDetail => {
+                if let ShellState::Repository(repository) = &self.state {
+                    if let Some(index) = self.selected_history {
+                        let repository = repository.clone();
+                        self.show_commit_detail(&repository, index, cx);
+                    } else {
+                        self.activity = "Select a history commit first.".into();
+                        cx.notify();
+                    }
+                }
+            }
+            PaletteCommand::ShowStashes => {
+                if let ShellState::Repository(repository) = &self.state {
+                    self.show_stashes(repository.clone(), cx);
+                }
+            }
+            PaletteCommand::ShowRemotes => {
+                self.show_remotes(cx);
+            }
+            PaletteCommand::GitLfsStatus => {
+                if let ShellState::Repository(repository) = &self.state {
+                    self.show_lfs(repository.clone(), cx);
+                }
+            }
+            PaletteCommand::Services => {
+                self.show_services(cx);
+            }
+            PaletteCommand::ShowReflog => {
+                if let ShellState::Repository(repository) = &self.state {
+                    self.show_reflog(repository.clone(), cx);
+                }
+            }
+            PaletteCommand::FileHistory => self.prompt_file_history(cx),
+            PaletteCommand::Blame => self.prompt_blame(cx),
+            PaletteCommand::CompareRefs => self.prompt_compare_refs(cx),
+            PaletteCommand::BrowseTree => self.prompt_browse_tree(cx),
+            PaletteCommand::Worktrees => {
+                if let ShellState::Repository(repository) = &self.state {
+                    self.show_worktrees(repository.clone(), cx);
+                }
+            }
+            PaletteCommand::Submodules => {
+                if let ShellState::Repository(repository) = &self.state {
+                    self.show_submodules(repository.clone(), cx);
+                }
+            }
+            PaletteCommand::RebasePlan => {
+                if let ShellState::Repository(repository) = &self.state {
+                    self.show_rebase(repository.clone(), cx);
+                }
+            }
+            PaletteCommand::SquashStaged => self.prompt_autosquash(true, cx),
+            PaletteCommand::FixupStaged => self.prompt_autosquash(false, cx),
+            PaletteCommand::DropCommit => self.prompt_drop_commit(cx),
+            PaletteCommand::RewordLastCommit => Self::prompt_reword_last_commit(cx),
+            PaletteCommand::Conflicts => {
+                if let ShellState::Repository(repository) = &self.state {
+                    self.show_conflicts(repository.clone(), cx);
+                }
+            }
+            PaletteCommand::SetMergeTool => Self::prompt_set_merge_tool(cx),
+            PaletteCommand::OpenInMergeTool => Self::prompt_run_merge_tool(cx),
+            PaletteCommand::CheckCommitSignature => Self::prompt_check_commit_signature(cx),
+            PaletteCommand::ShowWorkingCopy => {
+                self.navigate_to(RepositoryView::WorkingCopy, cx);
+            }
+            PaletteCommand::ShowKeyboardShortcuts => {
+                self.shortcut_reference_state = ShortcutReferenceState::Visible;
+                cx.notify();
+            }
+        }
     }
 
     fn toggle_shortcut_reference(
@@ -911,108 +1061,6 @@ return remote_url & linefeed & parent_path"#;
             ShortcutReferenceState::Visible => ShortcutReferenceState::Hidden,
         };
         cx.notify();
-    }
-
-    fn prompt_command_palette(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let command = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "choose from list {\"Refresh working copy\", \"Show history\", \"Commit detail…\", \"Show stashes\", \"Show remotes\", \"Git LFS status\", \"Services\", \"Show reflog\", \"File history…\", \"Blame…\", \"Compare refs…\", \"Browse tree at commit…\", \"Worktrees…\", \"Submodules…\", \"Rebase plan…\", \"Squash staged changes…\", \"Fixup staged changes…\", \"Drop commit…\", \"Reword last commit…\", \"Conflicts…\", \"Set merge tool…\", \"Open in merge tool…\", \"Check commit signature…\", \"Show working copy\", \"Show keyboard shortcuts\"} with title \"Gitronimo commands\" with prompt \"Choose an action\""])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
-                        .filter(|command| command != "false")
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| match command.as_deref() {
-                Some("Refresh working copy") => {
-                    if let ShellState::Repository(repository) = &app.state {
-                        app.load_working_copy(repository.clone(), cx);
-                    } else {
-                        app.activity = "Open a repository before refreshing its working copy.".into();
-                    }
-                    cx.notify();
-                }
-                Some("Show history") => {
-                    if let ShellState::Repository(repository) = &app.state {
-                        app.show_history(repository.clone(), cx);
-                    }
-                }
-                Some("Commit detail…") => {
-                    if let ShellState::Repository(repository) = &app.state {
-                        if let Some(index) = app.selected_history {
-                            let repository = repository.clone();
-                            app.show_commit_detail(&repository, index, cx);
-                        } else {
-                            app.activity = "Select a history commit first.".into();
-                        }
-                    }
-                }
-                Some("Show stashes") => {
-                    if let ShellState::Repository(repository) = &app.state {
-                        app.show_stashes(repository.clone(), cx);
-                    }
-                }
-                Some("Show remotes") => {
-                    app.show_remotes(cx);
-                }
-                Some("Git LFS status") => {
-                    if let ShellState::Repository(repository) = &app.state {
-                        app.show_lfs(repository.clone(), cx);
-                    }
-                }
-                Some("Services") => {
-                    app.show_services(cx);
-                }
-                Some("Show reflog") => {
-                    if let ShellState::Repository(repository) = &app.state {
-                        app.show_reflog(repository.clone(), cx);
-                    }
-                }
-                Some("File history…") => app.prompt_file_history(cx),
-                Some("Blame…") => app.prompt_blame(cx),
-                Some("Compare refs…") => app.prompt_compare_refs(cx),
-                Some("Browse tree at commit…") => GitronimoApp::prompt_browse_tree(cx),
-                Some("Worktrees…") => {
-                    if let ShellState::Repository(repository) = &app.state {
-                        app.show_worktrees(repository.clone(), cx);
-                    }
-                }
-                Some("Submodules…") => {
-                    if let ShellState::Repository(repository) = &app.state {
-                        app.show_submodules(repository.clone(), cx);
-                    }
-                }
-                Some("Rebase plan…") => {
-                    if let ShellState::Repository(repository) = &app.state {
-                        app.show_rebase(repository.clone(), cx);
-                    }
-                }
-                Some("Squash staged changes…") => GitronimoApp::prompt_autosquash(true, cx),
-                Some("Fixup staged changes…") => GitronimoApp::prompt_autosquash(false, cx),
-                Some("Drop commit…") => GitronimoApp::prompt_drop_commit(cx),
-                Some("Reword last commit…") => GitronimoApp::prompt_reword_last_commit(cx),
-                Some("Conflicts…") => {
-                    if let ShellState::Repository(repository) = &app.state {
-                        app.show_conflicts(repository.clone(), cx);
-                    }
-                }
-                Some("Set merge tool…") => GitronimoApp::prompt_set_merge_tool(cx),
-                Some("Open in merge tool…") => GitronimoApp::prompt_run_merge_tool(cx),
-                Some("Check commit signature…") => GitronimoApp::prompt_check_commit_signature(cx),
-                Some("Show working copy") => {
-                    app.navigate_to(RepositoryView::WorkingCopy, cx);
-                }
-                Some("Show keyboard shortcuts") => {
-                    app.shortcut_reference_state = ShortcutReferenceState::Visible;
-                    cx.notify();
-                }
-                _ => {}
-            });
-        })
-        .detach();
     }
 
     fn history_previous(&mut self, _: &HistoryPrevious, _: &mut Window, cx: &mut Context<Self>) {
@@ -1106,8 +1154,11 @@ return remote_url & linefeed & parent_path"#;
         initial: impl Into<String>,
         cx: &mut Context<Self>,
     ) {
+        self.show_command_palette = false;
+        self.show_quick_open = false;
         self.pending_text_prompt = Some(kind);
         self.text_prompt_value = initial.into();
+        self.pending_overlay_focus = Some(OverlayFocus::TextPrompt);
         cx.notify();
     }
 
@@ -1117,6 +1168,7 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
+    #[allow(clippy::too_many_lines)]
     fn confirm_text_prompt(&mut self, cx: &mut Context<Self>) {
         let Some(kind) = self.pending_text_prompt.clone() else {
             return;
@@ -1187,6 +1239,7 @@ return remote_url & linefeed & parent_path"#;
                 }
                 self.text_prompt_value.clear();
                 self.pending_text_prompt = Some(TextPromptKind::CompareTo { left: value });
+                self.pending_overlay_focus = Some(OverlayFocus::TextPrompt);
                 cx.notify();
             }
             TextPromptKind::CompareTo { left } => {
@@ -1205,6 +1258,112 @@ return remote_url & linefeed & parent_path"#;
                 let repository = repository.clone();
                 self.navigate_to(RepositoryView::Compare, cx);
                 self.load_compare(repository, cx);
+            }
+            TextPromptKind::DropCommit => {
+                if value.is_empty() {
+                    self.activity = "Enter a commit to drop (e.g. HEAD~1).".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.run_worktree_mutation(
+                    format!("Drop {value}"),
+                    move |git, repository| git.drop_commit(repository, &value),
+                    cx,
+                );
+            }
+            TextPromptKind::BrowseTree => {
+                if value.is_empty() {
+                    self.activity = "Enter a commit or ref to browse.".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.tree_oid = value;
+                let ShellState::Repository(repository) = &self.state else {
+                    return;
+                };
+                let repository = repository.clone();
+                self.navigate_to(RepositoryView::Tree, cx);
+                self.tree_path.clear();
+                self.tree_blob = None;
+                self.load_tree(repository, cx);
+            }
+            TextPromptKind::HistorySearch => {
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.history_search = value;
+                self.history_list_state.reset(self.history_row_count());
+                cx.notify();
+            }
+            TextPromptKind::HistoryReference => {
+                if value.is_empty() {
+                    self.activity = "Enter a branch or tag name.".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                let ShellState::Repository(repository) = &self.state else {
+                    return;
+                };
+                self.change_history_reference(
+                    HistoryReference::Named(value),
+                    repository.clone(),
+                    cx,
+                );
+            }
+            TextPromptKind::RebaseOnto => {
+                if value.is_empty() {
+                    self.activity = "Enter a rebase base (e.g. main).".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.run_worktree_mutation(
+                    format!("Rebase onto {value}"),
+                    move |git, repository| git.start_rebase(repository, &value),
+                    cx,
+                );
+            }
+            TextPromptKind::AutosquashTarget { squash } => {
+                if value.is_empty() {
+                    self.activity = "Enter a commit to fold into (e.g. HEAD).".into();
+                    cx.notify();
+                    return;
+                }
+                if squash {
+                    self.text_prompt_value.clear();
+                    self.pending_text_prompt =
+                        Some(TextPromptKind::AutosquashMessage { target: value });
+                    self.pending_overlay_focus = Some(OverlayFocus::TextPrompt);
+                    cx.notify();
+                } else {
+                    self.pending_text_prompt = None;
+                    self.text_prompt_value.clear();
+                    self.run_worktree_mutation(
+                        format!("Fixup into {value}"),
+                        move |git, repository| git.autosquash(repository, &value, None),
+                        cx,
+                    );
+                }
+            }
+            TextPromptKind::AutosquashMessage { target } => {
+                if value.is_empty() {
+                    self.activity = "Enter a squash message.".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.run_worktree_mutation(
+                    format!("Squash into {target}"),
+                    move |git, repository| git.autosquash(repository, &target, Some(&value)),
+                    cx,
+                );
             }
         }
         cx.notify();
@@ -1646,35 +1805,8 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
-    fn prompt_browse_tree(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let oid = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"Browse tree at commit\" default answer \"HEAD\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|name| !name.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(oid) = oid {
-                    app.tree_oid = oid;
-                    let ShellState::Repository(repository) = &app.state else {
-                        return;
-                    };
-                    let repository = repository.clone();
-                    app.navigate_to(RepositoryView::Tree, cx);
-                    app.tree_path.clear();
-                    app.tree_blob = None;
-                    app.load_tree(repository, cx);
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+    fn prompt_browse_tree(&mut self, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::BrowseTree, "HEAD", cx);
     }
 
     fn load_tree(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
@@ -2667,98 +2799,16 @@ return remote_url & linefeed & parent_path"#;
         .detach();
     }
 
-    fn prompt_start_rebase(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let base = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"Rebase current branch onto\" default answer \"main\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|base| !base.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(base) = base {
-                    app.run_worktree_mutation(
-                        format!("Rebase onto {base}"),
-                        move |git, repository| git.start_rebase(repository, &base),
-                        cx,
-                    );
-                }
-            });
-        })
-        .detach();
+    fn prompt_start_rebase(&mut self, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::RebaseOnto, "main", cx);
     }
 
-    fn prompt_autosquash(squash: bool, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let target = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"Fold staged changes into commit\" default answer \"HEAD\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|target| !target.is_empty())
-                })
-                .await;
-            let message = if squash {
-                cx.background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"Squash message\" default answer \"\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|message| !message.is_empty())
-                })
-                .await
-            } else {
-                None
-            };
-            let _ = this.update(cx, |app, cx| {
-                let Some(target) = target else {
-                    return;
-                };
-                let label = if squash { "Squash into" } else { "Fixup into" };
-                app.run_worktree_mutation(
-                    format!("{label} {target}"),
-                    move |git, repository| git.autosquash(repository, &target, message.as_deref()),
-                    cx,
-                );
-            });
-        })
-        .detach();
+    fn prompt_autosquash(&mut self, squash: bool, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::AutosquashTarget { squash }, "HEAD", cx);
     }
 
-    fn prompt_drop_commit(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let target = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"Drop commit from history (e.g. HEAD~2 or an oid)\" default answer \"HEAD~1\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|target| !target.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(target) = target {
-                    app.run_worktree_mutation(
-                        format!("Drop {target}"),
-                        move |git, repository| git.drop_commit(repository, &target),
-                        cx,
-                    );
-                }
-            });
-        })
-        .detach();
+    fn prompt_drop_commit(&mut self, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::DropCommit, "HEAD~1", cx);
     }
 
     fn prompt_reword_last_commit(cx: &mut Context<Self>) {
@@ -3842,39 +3892,16 @@ return remote_url & linefeed & parent_path"#;
         self.change_history_reference(HistoryReference::Named(reference), repository, cx);
     }
 
-    fn prompt_history_search(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let search = cx.background_spawn(async {
-                Command::new("osascript")
-                    .args(["-e", "text returned of (display dialog \"Search loaded history\" default answer \"\")"])
-                    .output().ok().filter(|output| output.status.success())
-                    .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-            }).await;
-            let _ = this.update(cx, |app, cx| {
-                if let Some(search) = search {
-                    app.history_search = search;
-                    app.history_list_state.reset(app.history_row_count());
-                    cx.notify();
-                }
-            });
-        }).detach();
+    fn prompt_history_search(&mut self, cx: &mut Context<Self>) {
+        self.begin_text_prompt(
+            TextPromptKind::HistorySearch,
+            self.history_search.clone(),
+            cx,
+        );
     }
 
-    fn prompt_history_reference(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let reference = cx.background_spawn(async {
-                Command::new("osascript")
-                    .args(["-e", "text returned of (display dialog \"Branch or tag history\" default answer \"\")"])
-                    .output().ok().filter(|output| output.status.success())
-                    .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                    .filter(|reference| !reference.is_empty())
-            }).await;
-            let _ = this.update(cx, |app, cx| {
-                let Some(reference) = reference else { return; };
-                let ShellState::Repository(repository) = &app.state else { return; };
-                app.change_history_reference(HistoryReference::Named(reference), repository.clone(), cx);
-            });
-        }).detach();
+    fn prompt_history_reference(&mut self, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::HistoryReference, "", cx);
     }
 
     fn copy_selected_history_oid(&mut self, cx: &mut Context<Self>) {

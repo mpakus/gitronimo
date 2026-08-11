@@ -376,11 +376,14 @@ impl GitronimoApp {
                         "Branch or tag…",
                         colors,
                         cx,
-                        |_, cx| GitronimoApp::prompt_history_reference(cx),
+                        GitronimoApp::prompt_history_reference,
                     ))
-                    .child(file_action_button("Search history", colors, cx, |_, cx| {
-                        GitronimoApp::prompt_history_search(cx);
-                    }))
+                    .child(file_action_button(
+                        "Search history",
+                        colors,
+                        cx,
+                        GitronimoApp::prompt_history_search,
+                    ))
                     .child(file_action_button("Reveal HEAD", colors, cx, |app, cx| {
                         app.reveal_history_head(cx);
                     }))

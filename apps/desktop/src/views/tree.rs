@@ -95,9 +95,7 @@ impl GitronimoApp {
                 "Browse commit…",
                 colors,
                 cx,
-                |_, cx| {
-                    GitronimoApp::prompt_browse_tree(cx);
-                },
+                GitronimoApp::prompt_browse_tree,
             ))
             .children((!self.tree_path.is_empty()).then(|| {
                 let repository = current.clone();
