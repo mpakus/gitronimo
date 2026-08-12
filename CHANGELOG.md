@@ -13,6 +13,7 @@
 - Welcome/Repositories: bookmarks, grouped recents, add/create/clone, Services rail.
 - Branch/ref context menu on sidebar right-click; trimmed workspace sidebar (Working Copy, History, Stashes, Settings).
 - Fetch, pull, publish, and push with cancellation for network work.
+- Pull and Push HEAD dialogs: remote branch/destination pickers, rebase option, push all tags, force-with-lease, recurse submodules, skip hooks.
 - Recover safely from missing repositories, stale index locks, malformed preferences, and application panics.
 
 ### Safety and reliability

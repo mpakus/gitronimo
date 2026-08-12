@@ -362,9 +362,7 @@ impl GitronimoApp {
                 colors,
                 cx,
                 |app, _, cx| {
-                    app.fetch_default_remote(cx);
-                    app.pull_current(cx);
-                    app.push_current(cx);
+                    app.sync_current(cx);
                 },
                 false,
             ),

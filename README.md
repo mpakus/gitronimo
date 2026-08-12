@@ -2,35 +2,7 @@
 
 Gitronimo is a native macOS Git client written in Rust with [GPUI](https://gpui.rs). It keeps Git as the source of truth and uses your installed Git executable for repository operations, credential helpers, SSH, hooks, signing, and filters.
 
-![Gitronimo welcome screen](docs/screens/gitronimo-welcome.png)
-
-## Screenshots
-
-### Repositories
-
-Bookmark folders, recents, and a drop zone for opening or adding repositories.
-
-![Gitronimo repositories view](docs/screens/gitronimo-repositories.png)
-
-### Working Copy
-
-Commit composer, Modified/All Files list, per-file staging checkboxes, and a side-by-side diff with hunk and line staging.
-
-![Gitronimo working copy](docs/screens/gitronimo-working-copy.png)
-
-### History
-
-Commit graph, month groups, scope filter, and a Changeset/Tree inspector pane.
-
-![Gitronimo history view](docs/screens/gitronimo-history.png)
-
-### Branch actions
-
-Right-click branches, remotes, and tags in the sidebar for checkout, merge, rebase, and related actions.
-
-![Gitronimo branch context menu](docs/screens/gitronimo-branch-menu.png)
-
-More reference material lives under [`docs/screens/`](docs/screens/README.md). Tower comparison captures there are for internal study only and are not shipped with the app.
+![Gitronimo working copy with a staged diff](docs/screenshot.png)
 
 ## Beta scope
 
@@ -58,6 +30,7 @@ See [PLAN.md](PLAN.md) for the full implementation contract and [CHANGELOG.md](C
 | Command-Shift-P | Command palette |
 | Command-/ | Shortcut reference overlay |
 | Command-[ / Command-] | Back / Forward |
+| Command-Q | Quit Gitronimo |
 
 Working Copy selection and batch checkbox staging: [`docs/keyboard-shortcuts.md`](docs/keyboard-shortcuts.md).
 

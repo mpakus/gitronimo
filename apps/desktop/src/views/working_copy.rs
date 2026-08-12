@@ -401,12 +401,16 @@ impl GitronimoApp {
                 let rename_branch = branch.clone();
                 let merge_branch = branch.clone();
                 let rebase_branch = branch.clone();
+                let push_branch = branch.clone();
                 menu = menu
                     .child(menu_item("Checkout", colors, cx, move |app, _, cx| {
                         app.checkout_branch(checkout.clone(), cx);
                     }))
                     .child(menu_item("View History", colors, cx, move |app, _, cx| {
                         app.show_ref_history(history.clone(), cx);
+                    }))
+                    .child(menu_item("Push…", colors, cx, move |app, _, cx| {
+                        app.push_branch(&push_branch, cx);
                     }))
                     .child(menu_separator(colors))
                     .child(menu_item(
@@ -451,7 +455,7 @@ impl GitronimoApp {
                         app.show_ref_history(history.clone(), cx);
                     }))
                     .child(menu_separator(colors))
-                    .child(menu_item("Pull", colors, cx, move |app, _, cx| {
+                    .child(menu_item("Pull…", colors, cx, move |app, _, cx| {
                         app.pull_branch(pull_branch.clone(), cx);
                     }))
                     .child(menu_separator(colors))
@@ -998,41 +1002,54 @@ impl GitronimoApp {
         let selected = self.selected_paths.contains(&path);
         let (badge_char, badge_bg, _) = status_badge_info(&label, colors);
         let badge_char = badge_char.to_owned();
+        // `status_label` separates the porcelain status code from the path with two spaces.
+        // Splitting there keeps rename arrows intact and never eats characters of the path.
         let display_path = label
-            .trim_start_matches(|c: char| c.is_alphabetic() || c == ' ')
-            .trim_start();
+            .split_once("  ")
+            .map_or(label.as_str(), |(_, rest)| rest);
 
-        // Create the checkbox first
+        // The visible box stays 14px, but the click target fills the row height so a slightly
+        // off-centre click stages the file instead of falling through to row selection.
         let checkbox = {
-            let mut checkbox = div()
+            let mut hit_area = div()
                 .id(gpui::ElementId::from((checkbox_id, label.clone())))
-                .w(px(14.0))
-                .h(px(14.0))
+                .debug_selector(|| format!("checkbox:{display_path}"))
+                .w(px(22.0))
+                .h(px(22.0))
+                .flex_none()
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(3.0))
-                .bg(if staged {
-                    colors.accent
-                } else {
-                    colors.panel_background
-                })
-                .border_1()
-                .border_color(if staged { colors.accent } else { colors.border })
-                .text_color(if staged {
-                    colors.panel_background
-                } else {
-                    colors.text_muted
-                })
                 .cursor_pointer();
-            checkbox
+            hit_area
                 .interactivity()
                 .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
                     cx.stop_propagation();
                     app.toggle_path_staged(&checkbox_path, staged, cx);
                 }));
-            checkbox
-                .child(if staged { "\u{2713}" } else { "" })
+            hit_area
+                .child(
+                    div()
+                        .w(px(14.0))
+                        .h(px(14.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(3.0))
+                        .bg(if staged {
+                            colors.accent
+                        } else {
+                            colors.panel_background
+                        })
+                        .border_1()
+                        .border_color(if staged { colors.accent } else { colors.border })
+                        .text_color(if staged {
+                            colors.panel_background
+                        } else {
+                            colors.text_muted
+                        })
+                        .child(if staged { "\u{2713}" } else { "" }),
+                )
                 .into_any_element()
         };
 
@@ -1169,7 +1186,7 @@ fn short_oid(oid: Option<&[u8]>) -> String {
         .unwrap_or_else(|| "an unknown commit".into())
 }
 
-fn entry_is_staged(entry: &StatusEntry) -> bool {
+pub(crate) fn entry_is_staged(entry: &StatusEntry) -> bool {
     match entry {
         StatusEntry::Ordinary { status, .. } | StatusEntry::Renamed { status, .. } => {
             status.0[0] != b'.'

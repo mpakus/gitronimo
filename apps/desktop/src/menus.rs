@@ -1,12 +1,16 @@
 use gpui::{Menu, MenuItem};
 
 use crate::actions::{
-    CommandPalette, NavigateBack, NavigateForward, OpenRepository, Refresh, ShortcutReference,
-    ToggleAppearance,
+    CommandPalette, NavigateBack, NavigateForward, OpenRepository, Quit, Refresh,
+    ShortcutReference, ToggleAppearance,
 };
 
 pub fn application_menus() -> Vec<Menu> {
     vec![
+        Menu {
+            name: "Gitronimo".into(),
+            items: vec![MenuItem::action("Quit Gitronimo", Quit)],
+        },
         Menu {
             name: "File".into(),
             items: vec![MenuItem::action("Open Repository…", OpenRepository)],

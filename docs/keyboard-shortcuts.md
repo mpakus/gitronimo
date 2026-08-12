@@ -6,6 +6,7 @@ Press **Command-/** in the app to toggle the in-app shortcut reference overlay. 
 
 | Shortcut | Action |
 |----------|--------|
+| Command-Q | Quit Gitronimo |
 | Command-O | Open repository |
 | Command-R | Refresh working copy |
 | Command-Shift-C | Focus commit subject |
@@ -36,14 +37,38 @@ When the commit subject or description field is focused, **Command-A** selects t
 When every visible file is already selected:
 
 1. **Click any selected row** — clear the selection.
-2. **Click any row again** — select all visible files again.
+2. **Click that same row again** — select all visible files again.
+3. **Click a different row** — select just that file, as usual.
+
+The all/none toggle is therefore limited to repeated clicks on one row; single selection always stays reachable.
 
 ### Stage checkboxes
 
 - **Single file selected** — checkbox toggles stage/unstage for that file.
-- **Multiple files selected** (via Command-A, Shift range, or Command-click) — checkbox on any selected row stages or unstages **all selected files** based on that row's current staged state. File list selection is kept after the operation.
+- **Multiple files selected** (via Command-A, Shift range, or Command-click) — a checkbox click on any selected row applies to **all selected files**: the first click checks every box (stages the selection), and clicking again clears them (unstages). A selection that is only partly staged always stages first, whichever row you click. File list selection is kept after the operation.
 
 Partial line/hunk staging remains in the diff viewer (Stage Chunk / Discard Chunk).
+
+## Toolbar network actions
+
+| Control | Behavior |
+|---------|----------|
+| **Pull** | Opens the Pull dialog (Remote Branch dropdown + Use Rebase Instead of Merge) |
+| **Push** | Opens the Push HEAD dialog (Destination dropdown + Options) |
+| **Sync** | Fetch + pull + push using the configured upstream (no dialog) |
+| Sidebar **Pull…** | Same Pull dialog, prefilled when possible |
+| Sidebar **Push…** | Same Push dialog, destination prefilled from the branch |
+
+### Push dialog options
+
+| Option | Git flag |
+|--------|----------|
+| Push All Tags | `--tags` |
+| Force Push | `--force-with-lease` (never a bare `--force`) |
+| Recurse Submodules | `--recurse-submodules=check` or `=on-demand` |
+| Skip Hooks | `--no-verify` |
+
+The destination is pushed as `<remote> HEAD:<branch>`; picking a remote branch that does not exist yet adds `--set-upstream`.
 
 ## Welcome window
 

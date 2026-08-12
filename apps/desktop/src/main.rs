@@ -46,19 +46,22 @@ use ui_kit::Appearance;
 
 use crate::actions::{
     CommandPalette, FocusComposer, HistoryNext, HistoryPrevious, NavigateBack, NavigateForward,
-    OpenRepository, Refresh, SelectAllStatusFiles, ShortcutReference, ToggleAppearance,
+    OpenRepository, Quit, Refresh, SelectAllStatusFiles, ShortcutReference, ToggleAppearance,
     WidenSidebar,
 };
 use crate::app_state::{
     ChoicePromptKind, DEFAULT_LIST_PANE_WIDTH, DEFAULT_SIDEBAR_WIDTH, ForcePushState, GitronimoApp,
     HistoryDetailMode, LastAction, Mutation, NetworkOperation, OpenedRepository, OperationAction,
-    OverlayFocus, PR_MERGE_METHOD_CHOICES, PaletteCommand, RefContext, RepositoryView, ShellState,
-    ShortcutReferenceState, StashAction, TextPromptKind, ThemeMode, WelcomeRepoSnapshot,
-    WelcomeShellView, appearance_from_window, clamp_list_pane_width, clamp_sidebar_width,
-    discard_selected, git_failure_message, network_failure_message, repository_is_available,
+    OverlayFocus, PR_MERGE_METHOD_CHOICES, PaletteCommand, PullDialogState, PushDialogState,
+    PushOption, RefContext, RepositoryView, ShellState, ShortcutReferenceState, StashAction,
+    SubmodulePushMode, TextPromptKind, ThemeMode, WelcomeRepoSnapshot, WelcomeShellView,
+    appearance_from_window, clamp_list_pane_width, clamp_sidebar_width, discard_selected,
+    git_failure_message, network_failure_message, repository_is_available,
     repository_unavailable_message, resize_width,
 };
+use crate::views::components::status_path;
 use crate::views::single_line_input::register_input_bindings;
+use crate::views::working_copy::entry_is_staged;
 
 const INITIAL_WINDOW_SIZE: (f32, f32) = (1200.0, 800.0);
 const MINIMUM_WINDOW_SIZE: (f32, f32) = (800.0, 560.0);
@@ -74,6 +77,7 @@ fn main() {
         .run(|cx: &mut App| {
             cx.bind_keys(keymap::bindings());
             cx.set_menus(menus::application_menus());
+            cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
             register_input_bindings(cx);
 
             let store = RecentRepositoryStore::new(preferences_path());
@@ -368,7 +372,7 @@ impl GitronimoApp {
             ref_context: None,
             selected_paths: Vec::new(),
             last_selected_path_index: None,
-            file_list_select_all_armed: false,
+            file_list_select_all_toggle: None,
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
@@ -384,6 +388,8 @@ impl GitronimoApp {
             pending_choice_prompt: None,
             choice_prompt_query: String::new(),
             choice_prompt_selected: 0,
+            pull_dialog: None,
+            push_dialog: None,
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_selected: 0,
@@ -592,7 +598,7 @@ impl GitronimoApp {
             ref_context: None,
             selected_paths: Vec::new(),
             last_selected_path_index: None,
-            file_list_select_all_armed: false,
+            file_list_select_all_toggle: None,
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
@@ -608,6 +614,8 @@ impl GitronimoApp {
             pending_choice_prompt: None,
             choice_prompt_query: String::new(),
             choice_prompt_selected: 0,
+            pull_dialog: None,
+            push_dialog: None,
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_selected: 0,
@@ -819,8 +827,10 @@ impl GitronimoApp {
                 self.working_copy = None;
                 self.refs = RefSnapshot::default();
                 self.ref_context = None;
+                self.pull_dialog = None;
+                self.push_dialog = None;
                 self.selected_paths.clear();
-                self.file_list_select_all_armed = false;
+                self.file_list_select_all_toggle = None;
                 self.context_path = None;
                 self.loaded_diff = None;
                 self.selected_diff = None;
@@ -1133,7 +1143,7 @@ return remote_url & linefeed & parent_path"#;
             return;
         }
         self.selected_paths = visible;
-        self.file_list_select_all_armed = false;
+        self.file_list_select_all_toggle = None;
         self.last_selected_path_index = Some(0);
         self.selected_diff = None;
         self.loaded_diff = None;
@@ -2092,16 +2102,32 @@ return remote_url & linefeed & parent_path"#;
         cx: &mut Context<Self>,
     ) {
         let root = repository.worktree_root.clone();
+        let worker_repository = repository.clone();
+        let select_repository = repository;
         let reference = self.history_reference.clone();
         let load_token = self.history_load_token;
+        let initial_page = before.is_none();
         self.activity = "Loading history…".into();
         cx.spawn(async move |this, cx| {
-            let result = cx.background_spawn(async move {
-                let git = GitExecutable::discover().map_err(|error| error.to_string())?;
-                let page = git.history_page(&repository, &HistoryRequest { reference, before, limit: 100 }).map_err(|error| format!("{error:?}"))?;
-                let decorations = git.ref_decorations(&repository).map_err(|error| format!("{error:?}"))?;
-                Ok::<_, String>((page, decorations))
-            }).await;
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    let page = git
+                        .history_page(
+                            &worker_repository,
+                            &HistoryRequest {
+                                reference,
+                                before,
+                                limit: 100,
+                            },
+                        )
+                        .map_err(|error| format!("{error:?}"))?;
+                    let decorations = git
+                        .ref_decorations(&worker_repository)
+                        .map_err(|error| format!("{error:?}"))?;
+                    Ok::<_, String>((page, decorations))
+                })
+                .await;
             let _ = this.update(cx, |app, cx| {
                 if !matches!(&app.state, ShellState::Repository(current) if current.worktree_root == root)
                     || app.history_load_token != load_token
@@ -2111,18 +2137,34 @@ return remote_url & linefeed & parent_path"#;
                 match result {
                     Ok((HistoryPage { commits, next_before }, decorations)) => {
                         let rows = layout_history_graph(&commits, &mut app.history_state);
-                        app.history.extend(commits); app.history_rows.extend(rows); app.history_next = next_before; app.history_decorations = decorations; app.activity = format!("Loaded {} history commits.", app.history.len());
+                        app.history.extend(commits);
+                        app.history_rows.extend(rows);
+                        app.history_next = next_before;
+                        app.history_decorations = decorations;
+                        app.activity = format!("Loaded {} history commits.", app.history.len());
                         app.history_list_state.reset(app.history_row_count());
-                        if let Some(oid) = app.history_reveal_oid.take() {
-                            app.selected_history =
-                                app.history.iter().position(|commit| commit.oid == oid);
+                        let reveal_index = app
+                            .history_reveal_oid
+                            .take()
+                            .and_then(|oid| app.history.iter().position(|commit| commit.oid == oid));
+                        let select_index = reveal_index.or_else(|| {
+                            if initial_page && app.selected_history.is_none() && !app.history.is_empty()
+                            {
+                                Some(0)
+                            } else {
+                                None
+                            }
+                        });
+                        if let Some(index) = select_index {
+                            app.select_history_commit(index, select_repository, cx);
                         }
                     }
                     Err(error) => app.activity = format!("History load failed: {error}"),
                 }
                 cx.notify();
             });
-        }).detach();
+        })
+        .detach();
     }
 
     fn show_reflog(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
@@ -4032,28 +4074,335 @@ return remote_url & linefeed & parent_path"#;
         }).detach();
     }
 
-    fn pull_current(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn pull_current(&mut self, cx: &mut Context<Self>) {
+        self.open_pull_dialog(None, cx);
+    }
+
+    pub(crate) fn pull_branch(&mut self, branch: String, cx: &mut Context<Self>) {
+        // Prefer matching remote-tracking name when a local branch was passed.
+        let preferred = self
+            .default_remote()
+            .map(|remote| format!("{remote}/{branch}"))
+            .filter(|candidate| {
+                self.refs
+                    .remote_branches
+                    .iter()
+                    .any(|entry| String::from_utf8_lossy(&entry.name.0) == candidate.as_str())
+            })
+            .or_else(|| {
+                self.refs.remote_branches.iter().find_map(|entry| {
+                    let name = String::from_utf8(entry.name.0.clone()).ok()?;
+                    (name == branch).then_some(name)
+                })
+            })
+            .or(Some(branch));
+        self.open_pull_dialog(preferred, cx);
+    }
+
+    pub(crate) fn sync_current(&mut self, cx: &mut Context<Self>) {
+        self.fetch_default_remote(cx);
         self.run_network_command(
             "Pulling current branch".into(),
             vec!["pull".into(), "--progress".into()],
             cx,
         );
-    }
-
-    fn pull_branch(&mut self, branch: String, cx: &mut Context<Self>) {
-        self.run_network_command(
-            format!("Pulling {branch}"),
-            vec!["pull".into(), "--progress".into(), branch.into()],
-            cx,
-        );
-    }
-
-    fn push_current(&mut self, cx: &mut Context<Self>) {
         self.run_network_command(
             "Pushing current branch".into(),
             vec!["push".into(), "--progress".into()],
             cx,
         );
+    }
+
+    pub(crate) fn open_pull_dialog(
+        &mut self,
+        preferred_remote_branch: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(self.state, ShellState::Repository(_)) {
+            return;
+        }
+        let remote_branches = self.remote_branch_choices();
+        let remote_branch = preferred_remote_branch
+            .filter(|name| remote_branches.iter().any(|candidate| candidate == name))
+            .or_else(|| self.default_pull_remote_branch(&remote_branches))
+            .unwrap_or_default();
+        self.close_ref_context_menu(cx);
+        self.pull_dialog = Some(PullDialogState {
+            use_rebase: false,
+            remote_branch,
+            remote_branches,
+            branch_menu_open: false,
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn close_pull_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.pull_dialog.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn toggle_pull_dialog_rebase(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.pull_dialog.as_mut() {
+            dialog.use_rebase = !dialog.use_rebase;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn toggle_pull_dialog_branch_menu(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.pull_dialog.as_mut() {
+            dialog.branch_menu_open = !dialog.branch_menu_open;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn select_pull_dialog_remote_branch(
+        &mut self,
+        remote_branch: String,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(dialog) = self.pull_dialog.as_mut() {
+            dialog.remote_branch = remote_branch;
+            dialog.branch_menu_open = false;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn confirm_pull_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.pull_dialog.take() else {
+            return;
+        };
+        let remotes = self.configured_remote_names();
+        let args = pull_command_args(&dialog.remote_branch, dialog.use_rebase, &remotes);
+        let label = if dialog.remote_branch.is_empty() {
+            if dialog.use_rebase {
+                "Pulling current branch (rebase)".into()
+            } else {
+                "Pulling current branch".into()
+            }
+        } else if dialog.use_rebase {
+            format!("Pulling {} (rebase)", dialog.remote_branch)
+        } else {
+            format!("Pulling {}", dialog.remote_branch)
+        };
+        self.run_network_command(label, args, cx);
+        cx.notify();
+    }
+
+    fn remote_branch_choices(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .refs
+            .remote_branches
+            .iter()
+            .filter_map(|branch| String::from_utf8(branch.name.0.clone()).ok())
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    fn configured_remote_names(&self) -> Vec<String> {
+        self.refs
+            .remotes
+            .iter()
+            .filter_map(|remote| String::from_utf8(remote.name.0.clone()).ok())
+            .collect()
+    }
+
+    fn default_pull_remote_branch(&self, remote_branches: &[String]) -> Option<String> {
+        let head = self
+            .working_copy
+            .as_ref()
+            .and_then(|status| match &status.branch.head {
+                HeadStatus::Branch(branch) => String::from_utf8(branch.0.clone()).ok(),
+                _ => None,
+            });
+        if let Some(head) = head.as_ref() {
+            if let Some(local) = self
+                .refs
+                .local_branches
+                .iter()
+                .find(|branch| String::from_utf8_lossy(&branch.name.0) == head.as_str())
+                && let Some(upstream) = local.upstream.clone()
+                && remote_branches.iter().any(|name| name == &upstream)
+            {
+                return Some(upstream);
+            }
+            if let Some(remote) = self.default_remote() {
+                let candidate = format!("{remote}/{head}");
+                if remote_branches.iter().any(|name| name == &candidate) {
+                    return Some(candidate);
+                }
+            }
+        }
+        remote_branches.first().cloned()
+    }
+
+    pub(crate) fn push_current(&mut self, cx: &mut Context<Self>) {
+        self.open_push_dialog(None, cx);
+    }
+
+    pub(crate) fn push_branch(&mut self, branch: &str, cx: &mut Context<Self>) {
+        let preferred = self
+            .default_remote()
+            .map(|remote| format!("{remote}/{branch}"));
+        self.open_push_dialog(preferred, cx);
+    }
+
+    pub(crate) fn open_push_dialog(
+        &mut self,
+        preferred_destination: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(self.state, ShellState::Repository(_)) {
+            return;
+        }
+        let head_branch = self.head_branch_name();
+        let mut destinations = self.remote_branch_choices();
+        if let Some(candidate) = self.proposed_push_destination(head_branch.as_deref())
+            && !destinations.iter().any(|name| name == &candidate)
+        {
+            destinations.insert(0, candidate);
+        }
+        let destination = preferred_destination
+            .filter(|name| destinations.iter().any(|candidate| candidate == name))
+            .or_else(|| self.default_push_destination(&destinations, head_branch.as_deref()))
+            .unwrap_or_default();
+        self.close_ref_context_menu(cx);
+        self.push_dialog = Some(PushDialogState {
+            head_branch: head_branch.unwrap_or_else(|| "HEAD".into()),
+            destination,
+            destinations,
+            destination_menu_open: false,
+            enabled_options: Vec::new(),
+            submodule_mode: SubmodulePushMode::Check,
+            submodule_menu_open: false,
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn close_push_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.push_dialog.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn toggle_push_dialog_destination_menu(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.push_dialog.as_mut() {
+            dialog.destination_menu_open = !dialog.destination_menu_open;
+            dialog.submodule_menu_open = false;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn select_push_dialog_destination(
+        &mut self,
+        destination: String,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(dialog) = self.push_dialog.as_mut() {
+            dialog.destination = destination;
+            dialog.destination_menu_open = false;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn toggle_push_dialog_option(&mut self, option: PushOption, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.push_dialog.as_mut() {
+            dialog.toggle(option);
+            if option == PushOption::RecurseSubmodules
+                && !dialog.is_enabled(PushOption::RecurseSubmodules)
+            {
+                dialog.submodule_menu_open = false;
+            }
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn toggle_push_dialog_submodule_menu(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.push_dialog.as_mut()
+            && dialog.is_enabled(PushOption::RecurseSubmodules)
+        {
+            dialog.submodule_menu_open = !dialog.submodule_menu_open;
+            dialog.destination_menu_open = false;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn select_push_dialog_submodule_mode(
+        &mut self,
+        mode: SubmodulePushMode,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(dialog) = self.push_dialog.as_mut() {
+            dialog.submodule_mode = mode;
+            dialog.submodule_menu_open = false;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn confirm_push_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.push_dialog.take() else {
+            return;
+        };
+        let remotes = self.configured_remote_names();
+        let tracked = self.remote_branch_choices();
+        let options = PushCommandOptions {
+            head_branch: dialog.head_branch.clone(),
+            enabled: dialog.enabled_options.clone(),
+            submodule_mode: dialog.submodule_mode,
+            set_upstream: !dialog.destination.is_empty()
+                && !tracked.iter().any(|name| name == &dialog.destination),
+        };
+        let args = push_command_args(&dialog.destination, &options, &remotes);
+        let label = if dialog.destination.is_empty() {
+            format!("Pushing {}", dialog.head_branch)
+        } else {
+            format!("Pushing {} to {}", dialog.head_branch, dialog.destination)
+        };
+        self.force_push_state = ForcePushState::Idle;
+        self.run_network_command(label, args, cx);
+        cx.notify();
+    }
+
+    fn head_branch_name(&self) -> Option<String> {
+        self.working_copy
+            .as_ref()
+            .and_then(|status| match &status.branch.head {
+                HeadStatus::Branch(branch) => String::from_utf8(branch.0.clone()).ok(),
+                HeadStatus::Detached | HeadStatus::Unborn | HeadStatus::Unknown => None,
+            })
+    }
+
+    fn proposed_push_destination(&self, head_branch: Option<&str>) -> Option<String> {
+        let head = head_branch?;
+        let remote = self.default_remote()?;
+        Some(format!("{remote}/{head}"))
+    }
+
+    fn default_push_destination(
+        &self,
+        destinations: &[String],
+        head_branch: Option<&str>,
+    ) -> Option<String> {
+        if let Some(head) = head_branch {
+            if let Some(local) = self
+                .refs
+                .local_branches
+                .iter()
+                .find(|branch| String::from_utf8_lossy(&branch.name.0) == head)
+                && let Some(upstream) = local.upstream.clone()
+                && destinations.iter().any(|name| name == &upstream)
+            {
+                return Some(upstream);
+            }
+            if let Some(candidate) = self.proposed_push_destination(Some(head))
+                && destinations.iter().any(|name| name == &candidate)
+            {
+                return Some(candidate);
+            }
+        }
+        destinations.first().cloned()
     }
 
     #[allow(dead_code)]
@@ -4301,10 +4650,18 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
-    fn select_ref_context(&mut self, _context: &RefContext, cx: &mut Context<Self>) {
-        // Left-click no longer opens the inline Working Copy panel; keep selection
-        // cleared so WC stays Tower-like. Right-click uses open_ref_context_menu.
+    fn select_ref_context(&mut self, context: &RefContext, cx: &mut Context<Self>) {
         self.close_ref_context_menu(cx);
+        match context {
+            RefContext::LocalBranch(name)
+            | RefContext::RemoteBranch(name)
+            | RefContext::Tag(name) => {
+                self.show_ref_history(name.clone(), cx);
+            }
+            RefContext::Remote(_) => {
+                self.show_remotes(cx);
+            }
+        }
     }
 
     pub(crate) fn open_ref_context_menu(&mut self, context: RefContext, cx: &mut Context<Self>) {
@@ -4509,26 +4866,28 @@ return remote_url & linefeed & parent_path"#;
                 .all(|candidate| self.selected_paths.contains(candidate));
 
         if !additive && !shift {
-            if all_visible_selected && self.selected_paths.contains(&path) {
+            // Clicking the row that cleared a full selection restores it; every other row falls
+            // through to plain single selection so one file can always be picked.
+            if self.file_list_select_all_toggle.as_ref() == Some(&path) && visible.contains(&path) {
+                self.last_selected_path_index = visible.iter().position(|p| p == &path);
+                self.selected_paths = visible;
+                self.file_list_select_all_toggle = None;
+                self.selected_diff = None;
+                self.loaded_diff = None;
+                cx.notify();
+                return;
+            }
+            if visible.len() > 1 && all_visible_selected && self.selected_paths.contains(&path) {
                 self.selected_paths.clear();
-                self.file_list_select_all_armed = true;
+                self.file_list_select_all_toggle = Some(path);
                 self.selected_diff = None;
                 self.loaded_diff = None;
                 self.last_selected_path_index = None;
                 cx.notify();
                 return;
             }
-            if self.file_list_select_all_armed && visible.contains(&path) {
-                self.last_selected_path_index = visible.iter().position(|p| p == &path);
-                self.selected_paths = visible;
-                self.file_list_select_all_armed = false;
-                self.selected_diff = None;
-                self.loaded_diff = None;
-                cx.notify();
-                return;
-            }
-            self.file_list_select_all_armed = false;
         }
+        self.file_list_select_all_toggle = None;
 
         if shift {
             if let Some(last_index) = self.last_selected_path_index {
@@ -4637,22 +4996,30 @@ return remote_url & linefeed & parent_path"#;
         cx: &mut Context<Self>,
     ) {
         if self.mutation_in_flight {
+            self.activity = "Another Git operation is still running. Try again in a moment.".into();
+            cx.notify();
             return;
         }
-        let paths = if self.selected_paths.contains(path) && self.selected_paths.len() > 1 {
-            self.selected_paths.clone()
-        } else {
-            if !self.selected_paths.contains(path) {
-                self.selected_paths = vec![path.clone()];
-            }
-            self.selected_paths.clone()
-        };
-        let operation = if currently_staged {
-            Mutation::UnstageSelected
-        } else {
+        if !self.selected_paths.contains(path) {
+            self.selected_paths = vec![path.clone()];
+        }
+        let paths = self.selected_paths.clone();
+        let staged_flags: Vec<bool> = paths.iter().map(|path| self.path_is_staged(path)).collect();
+        let operation = if should_stage_selection(&staged_flags, currently_staged) {
             Mutation::StageSelected
+        } else {
+            Mutation::UnstageSelected
         };
         self.run_mutation(operation, paths, true, cx);
+    }
+
+    fn path_is_staged(&self, path: &GitPath) -> bool {
+        self.working_copy.as_ref().is_some_and(|status| {
+            status
+                .entries
+                .iter()
+                .any(|entry| status_path(entry) == path && entry_is_staged(entry))
+        })
     }
 
     pub(crate) fn toggle_worktree_show_all(&mut self, cx: &mut Context<Self>) {
@@ -5671,7 +6038,7 @@ return remote_url & linefeed & parent_path"#;
                         app.selected_diff = None;
                         app.loaded_diff = None;
                         app.selected_diff_lines.clear();
-                        app.file_list_select_all_armed = false;
+                        app.file_list_select_all_toggle = None;
                         // Remember OID so History can select the new commit when opened later;
                         // stay on Working Copy (do not auto-navigate).
                         app.history_reveal_oid = Some(oid);
@@ -5763,5 +6130,219 @@ return remote_url & linefeed & parent_path"#;
             });
         })
         .detach();
+    }
+}
+
+fn pull_command_args(remote_branch: &str, use_rebase: bool, remotes: &[String]) -> Vec<OsString> {
+    let mut args = vec![OsString::from("pull"), OsString::from("--progress")];
+    if use_rebase {
+        args.push(OsString::from("--rebase"));
+    }
+    if remote_branch.is_empty() {
+        return args;
+    }
+    if let Some((remote, branch)) = split_remote_tracking_ref(remote_branch, remotes) {
+        args.push(OsString::from(remote));
+        args.push(OsString::from(branch));
+    } else {
+        args.push(OsString::from(remote_branch));
+    }
+    args
+}
+
+/// Direction of a checkbox click in the Working Copy file list.
+///
+/// A click on a multi-file selection fills every checkbox in it, and only clears them once the
+/// whole selection is staged — the clicked row's own state never decides for the group.
+fn should_stage_selection(staged_flags: &[bool], clicked_currently_staged: bool) -> bool {
+    if staged_flags.len() > 1 {
+        !staged_flags.iter().all(|staged| *staged)
+    } else {
+        !clicked_currently_staged
+    }
+}
+
+/// Push options composed by the Push dialog.
+struct PushCommandOptions {
+    head_branch: String,
+    enabled: Vec<PushOption>,
+    submodule_mode: SubmodulePushMode,
+    set_upstream: bool,
+}
+
+impl PushCommandOptions {
+    fn is_enabled(&self, option: PushOption) -> bool {
+        self.enabled.contains(&option)
+    }
+}
+
+fn push_command_args(
+    destination: &str,
+    options: &PushCommandOptions,
+    remotes: &[String],
+) -> Vec<OsString> {
+    let mut args = vec![OsString::from("push"), OsString::from("--progress")];
+    if options.is_enabled(PushOption::AllTags) {
+        args.push(OsString::from("--tags"));
+    }
+    if options.is_enabled(PushOption::Force) {
+        // Never a bare `--force`: a lease keeps unseen remote commits from being discarded.
+        args.push(OsString::from("--force-with-lease"));
+    }
+    if options.is_enabled(PushOption::RecurseSubmodules) {
+        args.push(OsString::from(format!(
+            "--recurse-submodules={}",
+            options.submodule_mode.flag_value()
+        )));
+    }
+    if options.is_enabled(PushOption::SkipHooks) {
+        args.push(OsString::from("--no-verify"));
+    }
+    if destination.is_empty() {
+        return args;
+    }
+    if options.set_upstream {
+        args.push(OsString::from("--set-upstream"));
+    }
+    if let Some((remote, branch)) = split_remote_tracking_ref(destination, remotes) {
+        args.push(OsString::from(remote));
+        args.push(OsString::from(format!("{}:{branch}", options.head_branch)));
+    } else {
+        args.push(OsString::from(destination));
+    }
+    args
+}
+
+fn split_remote_tracking_ref(remote_ref: &str, remotes: &[String]) -> Option<(String, String)> {
+    for remote in remotes {
+        let prefix = format!("{remote}/");
+        if let Some(branch) = remote_ref.strip_prefix(&prefix)
+            && !branch.is_empty()
+        {
+            return Some((remote.clone(), branch.to_owned()));
+        }
+    }
+    let (remote, branch) = remote_ref.split_once('/')?;
+    (!branch.is_empty()).then(|| (remote.to_owned(), branch.to_owned()))
+}
+
+#[cfg(test)]
+mod pull_dialog_tests {
+    use super::{pull_command_args, split_remote_tracking_ref};
+    use std::ffi::OsString;
+
+    #[test]
+    fn splits_remote_tracking_refs_preferring_configured_remotes() {
+        let remotes = vec!["origin".into()];
+        assert_eq!(
+            split_remote_tracking_ref("origin/feature/ui", &remotes),
+            Some(("origin".into(), "feature/ui".into()))
+        );
+    }
+
+    #[test]
+    fn builds_rebase_pull_args_for_remote_branch() {
+        let remotes = vec!["origin".into()];
+        let args = pull_command_args("origin/main", true, &remotes);
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("pull"),
+                OsString::from("--progress"),
+                OsString::from("--rebase"),
+                OsString::from("origin"),
+                OsString::from("main"),
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod staging_selection_tests {
+    use super::should_stage_selection;
+
+    #[test]
+    fn mixed_selection_stages_every_file() {
+        assert!(should_stage_selection(&[true, false, false], true));
+        assert!(should_stage_selection(&[false, false], false));
+    }
+
+    #[test]
+    fn fully_staged_selection_unstages_every_file() {
+        assert!(!should_stage_selection(&[true, true, true], true));
+    }
+
+    #[test]
+    fn single_file_click_toggles_that_file() {
+        assert!(should_stage_selection(&[false], false));
+        assert!(!should_stage_selection(&[true], true));
+    }
+}
+
+#[cfg(test)]
+mod push_dialog_tests {
+    use super::{PushCommandOptions, PushOption, SubmodulePushMode, push_command_args};
+    use std::ffi::OsString;
+
+    fn options(head_branch: &str) -> PushCommandOptions {
+        PushCommandOptions {
+            head_branch: head_branch.to_owned(),
+            enabled: Vec::new(),
+            submodule_mode: SubmodulePushMode::Check,
+            set_upstream: false,
+        }
+    }
+
+    #[test]
+    fn pushes_head_to_selected_remote_branch() {
+        let remotes = vec!["origin".into()];
+        let args = push_command_args("origin/main", &options("main"), &remotes);
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("push"),
+                OsString::from("--progress"),
+                OsString::from("origin"),
+                OsString::from("main:main"),
+            ]
+        );
+    }
+
+    #[test]
+    fn force_push_uses_lease_and_carries_every_option() {
+        let remotes = vec!["origin".into()];
+        let mut options = options("feature/ui");
+        options.enabled = vec![
+            PushOption::AllTags,
+            PushOption::Force,
+            PushOption::RecurseSubmodules,
+            PushOption::SkipHooks,
+        ];
+        options.submodule_mode = SubmodulePushMode::OnDemand;
+        options.set_upstream = true;
+        let args = push_command_args("origin/feature/ui", &options, &remotes);
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("push"),
+                OsString::from("--progress"),
+                OsString::from("--tags"),
+                OsString::from("--force-with-lease"),
+                OsString::from("--recurse-submodules=on-demand"),
+                OsString::from("--no-verify"),
+                OsString::from("--set-upstream"),
+                OsString::from("origin"),
+                OsString::from("feature/ui:feature/ui"),
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_destination_falls_back_to_configured_upstream() {
+        let args = push_command_args("", &options("main"), &["origin".into()]);
+        assert_eq!(
+            args,
+            vec![OsString::from("push"), OsString::from("--progress")]
+        );
     }
 }

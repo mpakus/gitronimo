@@ -87,7 +87,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 - sidebar stays the primary navigation (current design already does this);
 - workspace sidebar lists **Working Copy, History, Stashes, Settings** (Pull Requests, Branches Review, and Reflog remain reachable from the command palette);
-- branch/ref actions open from a **right-click context menu** on sidebar branches, remotes, and tags (Tower pattern), not an inline panel in Working Copy;
+- **left-click** a local/remote branch or tag opens History scoped to that ref (commit list + changeset detail); **right-click** opens the branch context menu (Tower pattern), not an inline panel in Working Copy;
 - add a **remote-activity footer** in the sidebar (or activity bar) showing in-flight fetch/pull/push progress and last result — wire it to the existing `NetworkOperation` state.
 
 ### 1.6 Working Copy — the commit hub
@@ -227,7 +227,9 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 **Done (2026-08-11 — Tower interior pass):**
 
 - [x] In-repo sidebar trimmed to Working Copy / History / Stashes / Settings; PRs, Branches Review, Reflog via palette
-- [x] Branch/ref context menu on sidebar right-click (Checkout, History, Merge, …)
+- [x] Branch/ref: left-click opens scoped History (list + detail); right-click context menu (Checkout, History, Merge, …)
+- [x] Pull dialog: Remote Branch dropdown + Use Rebase Instead of Merge checkbox
+- [x] Push HEAD dialog: Destination dropdown + Options (all tags, force-with-lease, recurse submodules, skip hooks)
 - [x] History: full-width flat rows, multi-lane graph, plain ref labels, scope header + month groups
 - [x] Working Copy file multi-select + batch checkbox staging
 

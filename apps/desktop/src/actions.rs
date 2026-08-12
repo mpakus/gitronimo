@@ -15,6 +15,7 @@ actions!(
         ToggleAppearance,
         WidenSidebar,
         WidenInspector,
-        SelectAllStatusFiles
+        SelectAllStatusFiles,
+        Quit
     ]
 );

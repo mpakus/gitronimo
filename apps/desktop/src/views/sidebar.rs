@@ -5,8 +5,7 @@ use std::path::PathBuf;
 use gpui::{AnyElement, ClickEvent, MouseButton, Render, Window, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
-use git_domain::HeadStatus;
-use git_domain::NamedRef;
+use git_domain::{HeadStatus, HistoryReference, NamedRef};
 
 use crate::app_state::{
     ChoicePromptKind, GitronimoApp, RefContext, RefKind, WelcomeRepoSnapshot, WelcomeShellView,
@@ -398,51 +397,71 @@ impl GitronimoApp {
                 let pad = REF_BASE_PAD + f32::from(nest) * REF_DEPTH_STEP;
                 let is_head = matches!(kind, RefKind::LocalBranch)
                     && current_branch.is_some_and(|branch| branch == name);
+                let is_history_scope = self.repository_view
+                    == crate::app_state::RepositoryView::History
+                    && matches!(
+                        &self.history_reference,
+                        HistoryReference::Named(selected) if selected == &name
+                    );
                 let leaf_label = parts.last().copied().unwrap_or_default().to_owned();
+                let mut row = div()
+                    .id((id_prefix, rows.len()))
+                    .h(px(REF_ROW_HEIGHT))
+                    .pl(px(pad))
+                    .pr_3()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .text_xs()
+                    .text_color(if is_history_scope {
+                        colors.panel_background
+                    } else if is_head {
+                        colors.text_primary
+                    } else {
+                        colors.text_secondary
+                    })
+                    .cursor_pointer();
+                if is_history_scope {
+                    row = row.bg(colors.accent);
+                } else {
+                    row = row.hover(|style| style.bg(colors.selection));
+                }
                 rows.push(
-                    div()
-                        .id((id_prefix, rows.len()))
-                        .h(px(REF_ROW_HEIGHT))
-                        .pl(px(pad))
-                        .pr_3()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .text_xs()
-                        .text_color(if is_head {
-                            colors.text_primary
+                    row.on_click(cx.listener(move |app, _, _, cx| {
+                        app.select_ref_context(&context, cx);
+                    }))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |app, _, _, cx| {
+                            app.open_ref_context_menu(menu_context.clone(), cx);
+                        }),
+                    )
+                    // Align leaf icons under folder name (chevron column + gap).
+                    .when(nest > 0, |row| row.child(div().w(px(12.0)).flex_shrink_0()))
+                    .child(icon(
+                        leaf_icon,
+                        13.0,
+                        if is_history_scope {
+                            colors.panel_background
                         } else {
-                            colors.text_secondary
-                        })
-                        .cursor_pointer()
-                        .hover(|style| style.bg(colors.selection))
-                        .on_click(cx.listener(move |app, _, _, cx| {
-                            app.select_ref_context(&context, cx);
-                        }))
-                        .on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |app, _, _, cx| {
-                                app.open_ref_context_menu(menu_context.clone(), cx);
-                            }),
-                        )
-                        // Align leaf icons under folder name (chevron column + gap).
-                        .when(nest > 0, |row| row.child(div().w(px(12.0)).flex_shrink_0()))
-                        .child(icon(leaf_icon, 13.0, colors.text_muted))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .font_weight(if is_head {
-                                    gpui::FontWeight::MEDIUM
-                                } else {
-                                    gpui::FontWeight::NORMAL
-                                })
-                                .child(leaf_label),
-                        )
-                        .children(is_head.then(|| head_badge(colors)))
-                        .into_any_element(),
+                            colors.text_muted
+                        },
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .font_weight(if is_head || is_history_scope {
+                                gpui::FontWeight::MEDIUM
+                            } else {
+                                gpui::FontWeight::NORMAL
+                            })
+                            .child(leaf_label),
+                    )
+                    .children(is_head.then(|| head_badge(colors)))
+                    .into_any_element(),
                 );
             }
         }

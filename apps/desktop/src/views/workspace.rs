@@ -6,8 +6,8 @@ use gpui::{
 use ui_kit::Theme;
 
 use crate::app_state::{
-    ChoicePromptKind, GitronimoApp, OverlayFocus, PaletteCommand, ShellState,
-    ShortcutReferenceState, TextPromptKind, window_title,
+    ChoicePromptKind, GitronimoApp, OverlayFocus, PaletteCommand, PushOption, ShellState,
+    ShortcutReferenceState, SubmodulePushMode, TextPromptKind, window_title,
 };
 
 use super::components::{
@@ -118,6 +118,16 @@ impl Render for GitronimoApp {
                 self.ref_context_menu_overlay(&colors, cx)
                     .into_any_element()
             }))
+            .children(
+                self.pull_dialog
+                    .is_some()
+                    .then(|| self.pull_dialog_overlay(&colors, cx).into_any_element()),
+            )
+            .children(
+                self.push_dialog
+                    .is_some()
+                    .then(|| self.push_dialog_overlay(&colors, cx).into_any_element()),
+            )
     }
 }
 
@@ -146,6 +156,7 @@ impl GitronimoApp {
                 .child("Command-/  Show or hide this reference")
                 .child("Command-[ / Command-]  Back / Forward")
                 .child("Up / Down  Move through loaded history")
+                .child("Command-Q  Quit Gitronimo")
                 .child(file_action_button(
                     "Hide shortcut reference",
                     colors,
@@ -680,6 +691,589 @@ impl GitronimoApp {
             )
             .into_any_element()
     }
+
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn pull_dialog_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let Some(dialog) = self.pull_dialog.clone() else {
+            return div().into_any_element();
+        };
+        let selected_label = if dialog.remote_branch.is_empty() {
+            "Configured upstream".into()
+        } else {
+            dialog.remote_branch.clone()
+        };
+        div()
+            .absolute()
+            .top(px(56.0))
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(colors.overlay_scrim)
+            .flex()
+            .items_start()
+            .justify_center()
+            .pt_8()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.close_pull_dialog(cx);
+                }),
+            )
+            .child(
+                div()
+                    .w(px(420.0))
+                    .max_h(px(480.0))
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(8.0))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(colors.border)
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child("Pull"),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(colors.text_muted)
+                                    .child("Remote Branch"),
+                            )
+                            .child({
+                                let mut field = div()
+                                    .id("pull-remote-branch")
+                                    .h(px(30.0))
+                                    .px_2()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .rounded(px(4.0))
+                                    .border_1()
+                                    .border_color(colors.border)
+                                    .bg(colors.raised_background)
+                                    .cursor_pointer()
+                                    .hover(|style| style.bg(colors.selection));
+                                field.interactivity().on_click(cx.listener(
+                                    |app, _: &gpui::ClickEvent, _, cx| {
+                                        app.toggle_pull_dialog_branch_menu(cx);
+                                    },
+                                ));
+                                field
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.0))
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .text_sm()
+                                            .child(selected_label),
+                                    )
+                                    .child(div().text_xs().text_color(colors.text_muted).child("▾"))
+                            })
+                            .children(dialog.branch_menu_open.then(|| {
+                                div()
+                                    .max_h(px(160.0))
+                                    .overflow_hidden()
+                                    .rounded(px(4.0))
+                                    .border_1()
+                                    .border_color(colors.border)
+                                    .bg(colors.raised_background)
+                                    .children(dialog.remote_branches.iter().enumerate().map(
+                                        |(index, name)| {
+                                            let selected = name == &dialog.remote_branch;
+                                            let choice = name.clone();
+                                            let mut row = div()
+                                                .id(("pull-branch", index))
+                                                .px_2()
+                                                .py_1()
+                                                .text_sm()
+                                                .cursor_pointer()
+                                                .bg(if selected {
+                                                    colors.accent
+                                                } else {
+                                                    colors.raised_background
+                                                })
+                                                .text_color(if selected {
+                                                    colors.panel_background
+                                                } else {
+                                                    colors.text_primary
+                                                })
+                                                .hover(|style| style.bg(colors.selection));
+                                            row.interactivity().on_click(cx.listener(
+                                                move |app, _: &gpui::ClickEvent, _, cx| {
+                                                    app.select_pull_dialog_remote_branch(
+                                                        choice.clone(),
+                                                        cx,
+                                                    );
+                                                },
+                                            ));
+                                            row.child(name.clone())
+                                        },
+                                    ))
+                                    .into_any_element()
+                            })),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_t_1()
+                            .border_color(colors.border)
+                            .child({
+                                let checked = dialog.use_rebase;
+                                let mut row = div()
+                                    .id("pull-use-rebase")
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .cursor_pointer()
+                                    .text_sm();
+                                row.interactivity().on_click(cx.listener(
+                                    |app, _: &gpui::ClickEvent, _, cx| {
+                                        app.toggle_pull_dialog_rebase(cx);
+                                    },
+                                ));
+                                row.child(
+                                    div()
+                                        .w(px(14.0))
+                                        .h(px(14.0))
+                                        .rounded(px(3.0))
+                                        .border_1()
+                                        .border_color(if checked {
+                                            colors.accent
+                                        } else {
+                                            colors.border
+                                        })
+                                        .bg(if checked {
+                                            colors.accent
+                                        } else {
+                                            colors.panel_background
+                                        })
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_color(colors.panel_background)
+                                        .text_xs()
+                                        .child(if checked { "✓" } else { "" }),
+                                )
+                                .child("Use Rebase Instead of Merge")
+                            }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_t_1()
+                            .border_color(colors.border)
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(file_action_button("Cancel", colors, cx, |app, cx| {
+                                app.close_pull_dialog(cx);
+                            }))
+                            .child(file_action_button("Pull", colors, cx, |app, cx| {
+                                app.confirm_pull_dialog(cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn push_dialog_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let Some(dialog) = self.push_dialog.clone() else {
+            return div().into_any_element();
+        };
+        let destination_label = if dialog.destination.is_empty() {
+            "Configured upstream".into()
+        } else {
+            dialog.destination.clone()
+        };
+        let description = format!(
+            "Pushes new commits from your local HEAD branch \"{}\" to the chosen remote branch.",
+            dialog.head_branch
+        );
+        div()
+            .absolute()
+            .top(px(56.0))
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(colors.overlay_scrim)
+            .flex()
+            .items_start()
+            .justify_center()
+            .pt_8()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.close_push_dialog(cx);
+                }),
+            )
+            .child(
+                div()
+                    .w(px(460.0))
+                    .max_h(px(600.0))
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(8.0))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .px_4()
+                            .py_3()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .child("Push HEAD"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(colors.text_muted)
+                                    .child(description),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .px_4()
+                            .pb_3()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(colors.text_muted)
+                                    .child("Destination"),
+                            )
+                            .child({
+                                let mut field = div()
+                                    .id("push-destination")
+                                    .h(px(30.0))
+                                    .px_2()
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .rounded(px(4.0))
+                                    .border_1()
+                                    .border_color(colors.border)
+                                    .bg(colors.raised_background)
+                                    .cursor_pointer()
+                                    .hover(|style| style.bg(colors.selection));
+                                field.interactivity().on_click(cx.listener(
+                                    |app, _: &gpui::ClickEvent, _, cx| {
+                                        app.toggle_push_dialog_destination_menu(cx);
+                                    },
+                                ));
+                                field
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.0))
+                                            .overflow_hidden()
+                                            .whitespace_nowrap()
+                                            .text_sm()
+                                            .child(destination_label),
+                                    )
+                                    .child(div().text_xs().text_color(colors.text_muted).child("▾"))
+                            })
+                            .children(dialog.destination_menu_open.then(|| {
+                                div()
+                                    .max_h(px(160.0))
+                                    .overflow_hidden()
+                                    .rounded(px(4.0))
+                                    .border_1()
+                                    .border_color(colors.border)
+                                    .bg(colors.raised_background)
+                                    .children(dialog.destinations.iter().enumerate().map(
+                                        |(index, name)| {
+                                            let selected = name == &dialog.destination;
+                                            let choice = name.clone();
+                                            let mut row = div()
+                                                .id(("push-destination-choice", index))
+                                                .px_2()
+                                                .py_1()
+                                                .text_sm()
+                                                .cursor_pointer()
+                                                .bg(if selected {
+                                                    colors.accent
+                                                } else {
+                                                    colors.raised_background
+                                                })
+                                                .text_color(if selected {
+                                                    colors.panel_background
+                                                } else {
+                                                    colors.text_primary
+                                                })
+                                                .hover(|style| style.bg(colors.selection));
+                                            row.interactivity().on_click(cx.listener(
+                                                move |app, _: &gpui::ClickEvent, _, cx| {
+                                                    app.select_push_dialog_destination(
+                                                        choice.clone(),
+                                                        cx,
+                                                    );
+                                                },
+                                            ));
+                                            row.child(name.clone())
+                                        },
+                                    ))
+                                    .into_any_element()
+                            })),
+                    )
+                    .child(
+                        div()
+                            .px_4()
+                            .py_3()
+                            .border_t_1()
+                            .border_color(colors.border)
+                            .bg(colors.raised_background)
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(colors.text_muted)
+                                    .child("Options"),
+                            )
+                            .child(push_option_row(
+                                PushOption::AllTags,
+                                dialog.is_enabled(PushOption::AllTags),
+                                colors,
+                                cx,
+                            ))
+                            .child(push_option_row(
+                                PushOption::Force,
+                                dialog.is_enabled(PushOption::Force),
+                                colors,
+                                cx,
+                            ))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .child(push_option_row(
+                                        PushOption::RecurseSubmodules,
+                                        dialog.is_enabled(PushOption::RecurseSubmodules),
+                                        colors,
+                                        cx,
+                                    ))
+                                    .child(
+                                        div()
+                                            .pl(px(22.0))
+                                            .flex()
+                                            .flex_col()
+                                            .gap_1()
+                                            .child({
+                                                let enabled =
+                                                    dialog.is_enabled(PushOption::RecurseSubmodules);
+                                                let mut field = div()
+                                                    .id("push-submodule-mode")
+                                                    .h(px(26.0))
+                                                    .px_2()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .rounded(px(4.0))
+                                                    .border_1()
+                                                    .border_color(colors.border)
+                                                    .bg(colors.panel_background)
+                                                    .text_color(if enabled {
+                                                        colors.text_primary
+                                                    } else {
+                                                        colors.text_muted
+                                                    });
+                                                if enabled {
+                                                    field = field
+                                                        .cursor_pointer()
+                                                        .hover(|style| style.bg(colors.selection));
+                                                }
+                                                field.interactivity().on_click(cx.listener(
+                                                    |app, _: &gpui::ClickEvent, _, cx| {
+                                                        app.toggle_push_dialog_submodule_menu(cx);
+                                                    },
+                                                ));
+                                                field
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .child(dialog.submodule_mode.label()),
+                                                    )
+                                                    .child(div().text_xs().child("▾"))
+                                            })
+                                            .children(dialog.submodule_menu_open.then(|| {
+                                                div()
+                                                    .rounded(px(4.0))
+                                                    .border_1()
+                                                    .border_color(colors.border)
+                                                    .bg(colors.panel_background)
+                                                    .children(
+                                                        SubmodulePushMode::choices().into_iter().enumerate().map(
+                                                            |(index, mode)| {
+                                                                let selected =
+                                                                    mode == dialog.submodule_mode;
+                                                                let mut row = div()
+                                                                    .id(("push-submodule-mode-choice", index))
+                                                                    .px_2()
+                                                                    .py_1()
+                                                                    .text_xs()
+                                                                    .cursor_pointer()
+                                                                    .bg(if selected {
+                                                                        colors.accent
+                                                                    } else {
+                                                                        colors.panel_background
+                                                                    })
+                                                                    .text_color(if selected {
+                                                                        colors.panel_background
+                                                                    } else {
+                                                                        colors.text_primary
+                                                                    })
+                                                                    .hover(|style| {
+                                                                        style.bg(colors.selection)
+                                                                    });
+                                                                row.interactivity().on_click(
+                                                                    cx.listener(
+                                                                        move |app, _: &gpui::ClickEvent, _, cx| {
+                                                                            app.select_push_dialog_submodule_mode(mode, cx);
+                                                                        },
+                                                                    ),
+                                                                );
+                                                                row.child(mode.label())
+                                                            },
+                                                        ),
+                                                    )
+                                                    .into_any_element()
+                                            })),
+                                    ),
+                            )
+                            .child(push_option_row(
+                                PushOption::SkipHooks,
+                                dialog.is_enabled(PushOption::SkipHooks),
+                                colors,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .px_4()
+                            .py_3()
+                            .border_t_1()
+                            .border_color(colors.border)
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(file_action_button("Cancel", colors, cx, |app, cx| {
+                                app.close_push_dialog(cx);
+                            }))
+                            .child(file_action_button("Push HEAD", colors, cx, |app, cx| {
+                                app.confirm_push_dialog(cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+fn push_option_row(
+    option: PushOption,
+    checked: bool,
+    colors: &ui_kit::ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+) -> AnyElement {
+    let mut row = div()
+        .id(option.element_id())
+        .flex()
+        .items_start()
+        .gap_2()
+        .cursor_pointer();
+    row.interactivity()
+        .on_click(cx.listener(move |app, _: &gpui::ClickEvent, _, cx| {
+            app.toggle_push_dialog_option(option, cx);
+        }));
+    row.child(
+        div()
+            .mt(px(2.0))
+            .w(px(14.0))
+            .h(px(14.0))
+            .flex_none()
+            .rounded(px(3.0))
+            .border_1()
+            .border_color(if checked {
+                colors.accent
+            } else {
+                colors.border
+            })
+            .bg(if checked {
+                colors.accent
+            } else {
+                colors.panel_background
+            })
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(colors.panel_background)
+            .text_xs()
+            .child(if checked { "✓" } else { "" }),
+    )
+    .child(
+        div()
+            .flex()
+            .flex_col()
+            .gap_0p5()
+            .child(div().text_sm().child(option.label()))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child(option.caption()),
+            ),
+    )
+    .into_any_element()
 }
 
 fn welcome_plus_menu_item(

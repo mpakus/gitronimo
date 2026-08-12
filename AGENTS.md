@@ -64,7 +64,7 @@ Prefer these skills for actions, entities, styling, async, and testing patterns 
 When touching file-list selection or staging:
 
 - **`SelectAllStatusFiles`** (`Cmd/Ctrl+A`) selects all paths from `visible_status_paths()` (Modified/All Files tab + search filter).
-- When all visible files are selected, a plain row click toggles between none selected and all selected (`file_list_select_all_armed`).
+- When all visible files are selected, a plain row click clears the selection; clicking that same row again re-selects all (`file_list_select_all_toggle`). Clicking any other row selects that file alone.
 - **Shift+click** and **Cmd/Ctrl+click** extend selection; checkbox clicks on a multi-selected row stage/unstage **all selected paths** and preserve list selection (`run_mutation(..., preserve_selection: true)`).
 - Commit subject/body fields keep their own `SingleLineInput` `Cmd/Ctrl+A` binding when focused.
 

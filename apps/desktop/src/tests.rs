@@ -169,7 +169,20 @@ fn window_titles_distinguish_welcome_loading_and_drafts() {
         window_title(&ShellState::Loading("/tmp/example".into()), false),
         "Opening repository — Gitronimo"
     );
-    assert_eq!(keymap::bindings().len(), 13);
+    assert_eq!(keymap::bindings().len(), 14);
+}
+
+#[test]
+fn command_q_is_bound_to_quit() {
+    let quit = keymap::bindings()
+        .into_iter()
+        .find(|binding| binding.action().partial_eq(&crate::actions::Quit))
+        .expect("Command-Q should be bound");
+    let [keystroke] = quit.keystrokes() else {
+        panic!("Quit should use a single keystroke");
+    };
+    assert_eq!(keystroke.key(), "q");
+    assert!(keystroke.modifiers().platform, "Quit needs the Command key");
 }
 
 #[test]
@@ -414,4 +427,250 @@ fn operation_actions_require_a_paused_operation_and_cancel_is_a_no_op(cx: &mut T
             );
         })
         .expect("window should remain open");
+}
+
+struct StagingFixture {
+    repository: WorktreeRepository,
+}
+
+impl StagingFixture {
+    fn new(name: &str) -> Self {
+        let root = std::env::temp_dir().join(format!("gitronimo-staging-{name}"));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("fixture directory should be creatable");
+        let root = std::fs::canonicalize(&root).expect("fixture root should resolve");
+        let fixture = Self {
+            repository: WorktreeRepository {
+                git_dir: root.join(".git"),
+                worktree_root: root,
+            },
+        };
+        fixture.git(&["init", "--initial-branch=main"]);
+        fixture.git(&["config", "user.email", "test@gitronimo.invalid"]);
+        fixture.git(&["config", "user.name", "Gitronimo Test"]);
+        for file in ["a.txt", "b.txt"] {
+            fixture.write(file, "one\n");
+        }
+        fixture.git(&["add", "."]);
+        fixture.git(&["commit", "-m", "seed"]);
+        for file in ["a.txt", "b.txt"] {
+            fixture.write(file, "two\n");
+        }
+        fixture
+    }
+
+    fn write(&self, name: &str, contents: &str) {
+        std::fs::write(self.repository.worktree_root.join(name), contents)
+            .expect("fixture file should be writable");
+    }
+
+    fn git(&self, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&self.repository.worktree_root)
+            .output()
+            .expect("git should run");
+        assert!(output.status.success(), "git {args:?} failed: {output:?}");
+        String::from_utf8(output.stdout).expect("git output should be utf-8")
+    }
+
+    fn staged_paths(&self) -> Vec<String> {
+        self.git(&["diff", "--cached", "--name-only"])
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn status(&self) -> WorktreeStatus {
+        git_cli::GitExecutable::discover()
+            .expect("git should be discoverable")
+            .worktree_status(&self.repository, false)
+            .expect("status should parse")
+    }
+}
+
+impl Drop for StagingFixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.repository.worktree_root);
+    }
+}
+
+#[gpui::test]
+fn checkbox_click_stages_the_whole_selection_then_unstages_it(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("selection");
+    let window = cx.update(|cx| {
+        cx.open_window(window_options(cx, None), |window, cx| {
+            cx.new(|cx| {
+                GitronimoApp::welcome(
+                    Vec::new(),
+                    RecentRepositoryStore::new(
+                        std::env::temp_dir().join("gitronimo-test-recents.json"),
+                    ),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .expect("the test window should open")
+    });
+    let a = GitPath(b"a.txt".to_vec());
+    let b = GitPath(b"b.txt".to_vec());
+
+    window
+        .update(cx, |app, _, cx| {
+            app.state = ShellState::Repository(fixture.repository.clone());
+            app.working_copy = Some(fixture.status());
+            app.selected_paths = vec![a.clone(), b.clone()];
+            app.toggle_path_staged(&a, false, cx);
+        })
+        .expect("window should remain open");
+    cx.run_until_parked();
+    assert_eq!(
+        fixture.staged_paths(),
+        vec!["a.txt".to_owned(), "b.txt".to_owned()],
+        "one checkbox click stages every selected file"
+    );
+
+    window
+        .update(cx, |app, _, cx| {
+            app.working_copy = Some(fixture.status());
+            assert_eq!(
+                app.selected_paths,
+                vec![a.clone(), b.clone()],
+                "the selection survives the mutation"
+            );
+            app.toggle_path_staged(&a, true, cx);
+        })
+        .expect("window should remain open");
+    cx.run_until_parked();
+    assert!(
+        fixture.staged_paths().is_empty(),
+        "clicking again clears every checkbox in the selection"
+    );
+}
+
+#[gpui::test]
+fn a_plain_click_still_selects_one_file_after_selecting_all(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("selection-click");
+    let window = cx.update(|cx| {
+        cx.open_window(window_options(cx, None), |window, cx| {
+            cx.new(|cx| {
+                GitronimoApp::welcome(
+                    Vec::new(),
+                    RecentRepositoryStore::new(
+                        std::env::temp_dir().join("gitronimo-test-recents.json"),
+                    ),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .expect("the test window should open")
+    });
+    let a = GitPath(b"a.txt".to_vec());
+    let b = GitPath(b"b.txt".to_vec());
+
+    window
+        .update(cx, |app, _, cx| {
+            app.state = ShellState::Repository(fixture.repository.clone());
+            app.working_copy = Some(fixture.status());
+            app.selected_paths = app.visible_status_paths();
+            assert_eq!(app.selected_paths.len(), 2, "select all covers both files");
+
+            app.select_status_path(a.clone(), false, false, false, cx);
+            assert!(
+                app.selected_paths.is_empty(),
+                "clicking a row while everything is selected clears the selection"
+            );
+
+            app.select_status_path(b.clone(), false, false, false, cx);
+            assert_eq!(
+                app.selected_paths,
+                vec![b.clone()],
+                "clicking another row selects just that file"
+            );
+
+            app.selected_paths = app.visible_status_paths();
+            app.select_status_path(a.clone(), false, false, false, cx);
+            app.select_status_path(a.clone(), false, false, false, cx);
+            assert_eq!(
+                app.selected_paths.len(),
+                2,
+                "clicking the same row again restores the full selection"
+            );
+        })
+        .expect("window should remain open");
+}
+
+#[gpui::test]
+fn clicking_a_rendered_checkbox_stages_the_selection(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("rendered-click");
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    app.update(cx, |app, cx| {
+        app.state = ShellState::Repository(fixture.repository.clone());
+        app.working_copy = Some(fixture.status());
+        app.selected_paths = app.visible_status_paths();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    let bounds = cx
+        .debug_bounds("checkbox:a.txt")
+        .expect("the checkbox for a.txt should be rendered");
+    // Deliberately off-centre: the click target has to be forgiving of near misses.
+    let near_miss = bounds.origin + gpui::point(gpui::px(2.0), gpui::px(2.0));
+    cx.simulate_click(near_miss, gpui::Modifiers::none());
+    cx.run_until_parked();
+
+    assert_eq!(
+        fixture.staged_paths(),
+        vec!["a.txt".to_owned(), "b.txt".to_owned()],
+        "clicking the rendered checkbox stages every selected file"
+    );
+    app.update(cx, |app, _| {
+        assert_eq!(
+            app.selected_paths.len(),
+            2,
+            "the click must not collapse the selection"
+        );
+    });
+}
+
+#[gpui::test]
+fn checkbox_click_stages_a_single_file(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("single");
+    let window = cx.update(|cx| {
+        cx.open_window(window_options(cx, None), |window, cx| {
+            cx.new(|cx| {
+                GitronimoApp::welcome(
+                    Vec::new(),
+                    RecentRepositoryStore::new(
+                        std::env::temp_dir().join("gitronimo-test-recents.json"),
+                    ),
+                    window,
+                    cx,
+                )
+            })
+        })
+        .expect("the test window should open")
+    });
+    let a = GitPath(b"a.txt".to_vec());
+
+    window
+        .update(cx, |app, _, cx| {
+            app.state = ShellState::Repository(fixture.repository.clone());
+            app.working_copy = Some(fixture.status());
+            app.toggle_path_staged(&a, false, cx);
+        })
+        .expect("window should remain open");
+    cx.run_until_parked();
+    assert_eq!(
+        fixture.staged_paths(),
+        vec!["a.txt".to_owned()],
+        "an unselected row stages only itself"
+    );
 }

@@ -269,6 +269,119 @@ pub(crate) enum OverlayFocus {
     ChoicePrompt,
 }
 
+/// Tower-style Pull dialog: remote branch + optional rebase.
+#[derive(Clone, Debug)]
+pub(crate) struct PullDialogState {
+    pub use_rebase: bool,
+    /// Selected remote-tracking ref (`origin/main`), or empty for configured upstream.
+    pub remote_branch: String,
+    pub remote_branches: Vec<String>,
+    pub branch_menu_open: bool,
+}
+
+/// How `--recurse-submodules` behaves while pushing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SubmodulePushMode {
+    /// Refuse the push when a referenced submodule commit is missing on its remote.
+    Check,
+    /// Push submodule commits that the superproject references.
+    OnDemand,
+}
+
+impl SubmodulePushMode {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::Check => "Verify submodules before push",
+            Self::OnDemand => "Push submodules on demand",
+        }
+    }
+
+    pub(crate) const fn flag_value(self) -> &'static str {
+        match self {
+            Self::Check => "check",
+            Self::OnDemand => "on-demand",
+        }
+    }
+
+    pub(crate) const fn choices() -> [Self; 2] {
+        [Self::Check, Self::OnDemand]
+    }
+}
+
+/// A toggle in the Push dialog's Options list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PushOption {
+    AllTags,
+    Force,
+    RecurseSubmodules,
+    SkipHooks,
+}
+
+impl PushOption {
+    pub(crate) const fn element_id(self) -> &'static str {
+        match self {
+            Self::AllTags => "push-all-tags",
+            Self::Force => "push-force",
+            Self::RecurseSubmodules => "push-recurse-submodules",
+            Self::SkipHooks => "push-skip-hooks",
+        }
+    }
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::AllTags => "Push All Tags",
+            Self::Force => "Force Push",
+            Self::RecurseSubmodules => "Recurse Submodules",
+            Self::SkipHooks => "Skip Hooks",
+        }
+    }
+
+    pub(crate) const fn caption(self) -> &'static str {
+        match self {
+            Self::AllTags => "All refs under refs/tags are pushed.",
+            Self::Force => {
+                "Enforces a new history on the remote branch when fast-forward is not possible. Uses a lease, so commits you have not seen are never discarded."
+            }
+            Self::RecurseSubmodules => {
+                "Ensures that all submodule commits referenced by the superproject have been pushed."
+            }
+            Self::SkipHooks => "Bypasses any associated hook scripts.",
+        }
+    }
+}
+
+/// Tower-style Push dialog: destination remote branch plus push options.
+#[derive(Clone, Debug)]
+pub(crate) struct PushDialogState {
+    /// Local HEAD branch the commits come from.
+    pub head_branch: String,
+    /// Chosen remote-tracking ref (`origin/main`).
+    pub destination: String,
+    pub destinations: Vec<String>,
+    pub destination_menu_open: bool,
+    pub enabled_options: Vec<PushOption>,
+    pub submodule_mode: SubmodulePushMode,
+    pub submodule_menu_open: bool,
+}
+
+impl PushDialogState {
+    pub(crate) fn is_enabled(&self, option: PushOption) -> bool {
+        self.enabled_options.contains(&option)
+    }
+
+    pub(crate) fn toggle(&mut self, option: PushOption) {
+        if let Some(index) = self
+            .enabled_options
+            .iter()
+            .position(|enabled| *enabled == option)
+        {
+            self.enabled_options.remove(index);
+        } else {
+            self.enabled_options.push(option);
+        }
+    }
+}
+
 pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
     ("Refresh working copy", PaletteCommand::RefreshWorkingCopy),
     ("Show history", PaletteCommand::ShowHistory),
@@ -408,8 +521,9 @@ pub(crate) struct GitronimoApp {
     pub ref_context: Option<RefContext>,
     pub selected_paths: Vec<GitPath>,
     pub last_selected_path_index: Option<usize>,
-    /// After deselecting all changed files via row click, the next row click re-selects all.
-    pub file_list_select_all_armed: bool,
+    /// Row that cleared a full selection; clicking it again re-selects every visible file.
+    /// Clicking any other row selects that row alone.
+    pub file_list_select_all_toggle: Option<GitPath>,
     pub context_path: Option<GitPath>,
     pub loaded_diff: Option<LoadedDiff>,
     pub selected_diff: Option<(GitPath, bool)>,
@@ -425,6 +539,8 @@ pub(crate) struct GitronimoApp {
     pub pending_choice_prompt: Option<ChoicePromptKind>,
     pub choice_prompt_query: String,
     pub choice_prompt_selected: usize,
+    pub pull_dialog: Option<PullDialogState>,
+    pub push_dialog: Option<PushDialogState>,
     pub show_command_palette: bool,
     pub command_palette_query: String,
     pub command_palette_selected: usize,

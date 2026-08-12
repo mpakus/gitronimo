@@ -1,5 +1,65 @@
 # Implementation work log
 
+## 2026-08-11 — Checkbox click target and file-name column
+
+**Intent:** Staging by checkbox felt broken in the running app even though the handler is correct. The visible box is 14px inside a 22px row with no padding, so a near miss hit the row instead — and a row click on a full selection clears it, which looks like nothing happened. Give the checkbox a row-height hit area, surface ignored clicks during an in-flight mutation, and fix the file-name column, which stripped leading letters from staged rows and showed the raw `.M` prefix on unstaged ones.
+
+**Files:** `views/working_copy.rs` (hit area, `display_path`), `main.rs` (`toggle_path_staged` activity message), `tests.rs` (rendered-click test using `debug_selector`/`debug_bounds`).
+
+**Acceptance:** A simulated click 2px inside the corner of the checkbox stages the whole selection and keeps it selected; file names render without status prefixes; staged rows keep their full path.
+
+## 2026-08-11 — Command-Q quits the app
+
+**Intent:** Standard macOS quit shortcut and an application menu entry, which the window was missing.
+
+**Files:** `actions.rs` (`Quit`), `keymap.rs` (`cmd-q`), `menus.rs` (Gitronimo → Quit Gitronimo), `main.rs` (`cx.on_action(… cx.quit())`), `workspace.rs` (shortcut overlay), `tests.rs`, `README.md`, `docs/keyboard-shortcuts.md`.
+
+**Acceptance:** Command-Q quits from any window state; the menu item shows ⌘Q; window geometry is already persisted on every bounds change, so nothing is lost on quit. Binding test asserts the keystroke.
+
+## 2026-08-11 — Single-file selection reachable again after Select All
+
+**Intent:** With every file selected (Command-A, or a preserved selection after batch staging), a plain row click only cycled all/none, so no single file could be picked and staged. Limit that toggle to repeated clicks on the same row.
+
+**Files:** `app_state.rs` (`file_list_select_all_toggle: Option<GitPath>` replaces the bool), `main.rs` (`select_status_path`), `tests.rs`, `AGENTS.md`, `docs/keyboard-shortcuts.md`.
+
+**Acceptance:** Select all → click row A clears → click row B selects only B → click A twice cycles none/all. Lists with a single visible file always single-select. GPUI tests against a temporary repository cover selection and batch/single checkbox staging.
+
+## 2026-08-11 — Batch checkbox direction follows the whole selection
+
+**Intent:** With several files selected, a checkbox click should check every selected box (stage all) and a second click should clear them (unstage all). Previously the clicked row's own staged state chose the direction, so clicking a staged row inside a partly staged selection unstaged everything.
+
+**Files:** `main.rs` (`should_stage_selection`, `path_is_staged`, `toggle_path_staged`), `working_copy.rs` (`entry_is_staged` visibility), `docs/keyboard-shortcuts.md`.
+
+**Acceptance:** Select all → click any checkbox → every box checked; click again → all cleared. Mixed selection stages first. Single-file clicks still toggle only that file. Unit tests cover the three cases.
+
+## 2026-08-11 — Push dialog (destination + push options)
+
+**Intent:** Toolbar Push opens a Tower-like "Push HEAD" dialog: title + description naming the local HEAD branch, Destination dropdown (remote branch), Options list — Push All Tags, Force Push, Recurse Submodules (with verify/on-demand mode), Skip Hooks — and Cancel / Push HEAD buttons.
+
+**Files:** `app_state.rs` (`PushDialogState`, `SubmodulePushMode`), `main.rs` (open/close/toggles/confirm, `push_command_args`), `workspace.rs` (overlay), `toolbar.rs`, `working_copy.rs` (branch menu Push…), docs.
+
+**Acceptance:** Push opens dialog with destination prefilled from upstream; toggles change the composed command; Push HEAD runs `git push --progress [...] <remote> HEAD:<branch>`; Cancel closes without pushing; Force Push uses `--force-with-lease` per AGENTS safety rule; Sync stays immediate. Approach-only from Tower screenshot.
+
+## 2026-08-11 — Pull dialog (remote branch + rebase option)
+
+**Intent:** Toolbar Pull opens a Tower-like dialog: Remote Branch dropdown, collapsible Options with "Use Rebase Instead of Merge", Pull/Cancel. Confirm runs `git pull --progress [--rebase] [remote branch]`.
+
+**Files:** `app_state.rs` (`PullDialogState`), `main.rs` (open/confirm/args), `workspace.rs` (overlay), `toolbar.rs`, `working_copy.rs` (context menu Pull…), docs.
+
+**Acceptance:** Pull button shows dialog; choose remote branch; expand Options → rebase checkbox; Pull runs network command; Cancel closes without pulling. Approach-only from Tower guides / GitComet PullMode.
+
+**Done:** `PullDialogState` overlay; toolbar/context-menu open; `git pull --progress [--rebase] remote branch`; unit tests for arg split; Sync stays immediate.
+
+## 2026-08-11 — Sidebar branch click opens History (Tower)
+
+**Intent:** Left-click a local/remote branch or tag in the sidebar opens History scoped to that ref (middle commit list + right changeset detail), matching Tower. Right-click keeps the context menu. Highlight the active sidebar ref while viewing its history; auto-select the tip commit so panel 3 shows file changes.
+
+**Files:** `main.rs` (`select_ref_context`, history load select), `sidebar.rs` (row highlight), `docs/UI-IMPROVE.md`, `docs/work-log.md`.
+
+**Acceptance:** Click branch → History for that branch; click commit → file changes in inspector; selected branch highlighted; right-click menu unchanged.
+
+**Done:** `select_ref_context` → `show_ref_history` for branch/tag; tip commit auto-selected on fresh history load; sidebar accent for named History scope; docs updated.
+
 ## 2026-08-11 — Stay on Working Copy after commit
 
 **Intent:** After a successful commit/amend from Working Copy, do not navigate to History; clear the composer, refresh status, and remain on Working Copy. Still remember the new OID so History can reveal it when the user opens that view later.
