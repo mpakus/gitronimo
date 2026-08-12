@@ -32,7 +32,7 @@ jobs:
       - run: cargo install cargo-packager --version 0.11.8 --locked
       - run: cargo build --release -p gitronimo-desktop
       - run: cargo packager --release --formats app --manifest-path apps/desktop/Cargo.toml --out-dir target/release
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Gitronimo-unsigned-macos
           path: target/release/Gitronimo.app
