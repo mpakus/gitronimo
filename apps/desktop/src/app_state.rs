@@ -134,10 +134,18 @@ pub(crate) enum RefContext {
     Remote(String),
 }
 
+/// Flyout opened from a ▸ item inside the ref context menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RefContextSubmenu {
+    PushTo,
+    TrackUpstream,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum TextPromptKind {
     BranchRename { current: String },
     CreateBranch { start: Option<String> },
+    CreateTag { start: String },
     FileHistoryPath,
     BlamePath,
     CompareFrom,
@@ -147,6 +155,7 @@ pub(crate) enum TextPromptKind {
     HistorySearch,
     HistoryReference,
     RebaseOnto,
+    MergeRevision,
     AutosquashTarget { squash: bool },
     AutosquashMessage { target: String },
     RewordSubject,
@@ -519,6 +528,11 @@ pub(crate) struct GitronimoApp {
     pub refs: RefSnapshot,
     pub expanded_ref_groups: BTreeSet<String>,
     pub ref_context: Option<RefContext>,
+    /// Window coordinates of the right-click that opened the ref menu.
+    pub ref_context_menu_position: Option<(f32, f32)>,
+    pub ref_context_submenu: Option<RefContextSubmenu>,
+    /// Pinned and archived local branches for the open repository.
+    pub branch_organization: app_core::BranchOrganization,
     pub selected_paths: Vec<GitPath>,
     pub last_selected_path_index: Option<usize>,
     /// Row that cleared a full selection; clicking it again re-selects every visible file.

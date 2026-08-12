@@ -87,7 +87,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 - sidebar stays the primary navigation (current design already does this);
 - workspace sidebar lists **Working Copy, History, Stashes, Settings** (Pull Requests, Branches Review, and Reflog remain reachable from the command palette);
-- **left-click** a local/remote branch or tag opens History scoped to that ref (commit list + changeset detail); **right-click** opens the branch context menu (Tower pattern), not an inline panel in Working Copy;
+- **left-click** a local/remote branch or tag opens History scoped to that ref (commit list + changeset detail); **double-click** a local or remote branch checks it out (`git switch` / `git switch --track`); **right-click** opens the branch context menu (Tower pattern), not an inline panel in Working Copy;
 - add a **remote-activity footer** in the sidebar (or activity bar) showing in-flight fetch/pull/push progress and last result — wire it to the existing `NetworkOperation` state.
 
 ### 1.6 Working Copy — the commit hub
@@ -227,7 +227,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 **Done (2026-08-11 — Tower interior pass):**
 
 - [x] In-repo sidebar trimmed to Working Copy / History / Stashes / Settings; PRs, Branches Review, Reflog via palette
-- [x] Branch/ref: left-click opens scoped History (list + detail); right-click context menu (Checkout, History, Merge, …)
+- [x] Branch/ref: left-click opens scoped History (list + detail); double-click checks out local/remote branches; right-click context menu (Checkout, History, Merge, …)
 - [x] Pull dialog: Remote Branch dropdown + Use Rebase Instead of Merge checkbox
 - [x] Push HEAD dialog: Destination dropdown + Options (all tags, force-with-lease, recurse submodules, skip hooks)
 - [x] History: full-width flat rows, multi-lane graph, plain ref labels, scope header + month groups
@@ -246,7 +246,8 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 - [~] §1.1 Services — hosting view exists; welcome now has vertical Services/Bookmarks/Workflow rail; Workflow tab is placeholder-only
 - [~] §1.4 Back/Forward — Prev/Next labels added; toolbar groups Fetch/Pull/Push/Sync, stash Apply/Save, Refresh, and inline search fields Tower-style
-- [~] §1.5 Remote activity — in-flight progress bar and last-result footer in sidebar; progress is indeterminate (no stderr parsing yet)
+- [~] §1.5 Remote activity — in-flight progress bar in the bottom activity strip (left) and sidebar footer; Cancel available while running; last-result text when idle
+
 - [~] §1.8 History inline detail — Changeset/Tree segmented toggle in History inspector; commit rows use Tower density (author/date/subject)
 - [~] §4 Visual polish — interior pass: in-repo sidebar IA, WC composer rows, accent file selection, diff line backgrounds, stashes/remotes two-pane; OAuth/enterprise still deferred
 
@@ -266,7 +267,8 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 | ----------------------------- | -------------- | ----------------------------------------------------------------------------------- |
 | Workflow view content         | §1.1           | Rail tab exists; full workflow surface still placeholder                            |
 | OAuth / enterprise GitHub     | Delivery notes | Still deferred per `PLAN.md`                                                        |
-| Deterministic remote progress | §1.5           | Indeterminate bar during fetch/pull/push; no byte/object counts from Git stderr yet |
+| Deterministic remote progress | §1.5           | Progress bar bottom-left during fetch/pull/push; sidebar footer mirrors it; Cancel while in flight |
+
 | IME-rich search/composer      | §4             | Inline search uses key-down capture; full EntityInputHandler fields deferred        |
 | Settings dedicated view       | §1.3           | Settings sidebar item routes to Services; no separate preferences panel yet         |
 | History ref label density     | §1.8           | Plain text labels; long ref names still truncate on narrow panes                    |
@@ -292,4 +294,5 @@ Professional Git-client polish targets for Gitronimo's own design system (`ui_ki
 - **Empty states:** every view needs a meaningful empty state (no changes, no history, no PRs, no accounts) rather than a blank panel.
 - **Button hierarchy:** the confirming action of a dialog or confirmation panel (Pull, Push HEAD, Merge, Commit, Confirm discard) is accent-filled via `primary_action_button`; Cancel, Close, and secondary navigation stay on `raised_background`. Both variants brighten on hover. Disabled buttons drop hover and pointer feedback, mute their label, and explain the missing precondition in their tooltip.
 - **Surfaces:** panels are flat and separated by borders, not by stacked fills. The commit composer shares the pane background so the subject and description fields are the only raised surfaces in the pane; a card fill there competed with the fields and the file list.
+- **Branch context menu:** right-clicking a sidebar branch opens a Tower-style menu at the cursor (`apps/desktop/src/views/ref_context_menu.rs`). Items quote the branch name, group with separators, disable with reasons when they cannot run, and open ▸ flyouts for Push To and Track Upstream. Pin and Archive are persisted per repository and reorder the BRANCHES list (pinned first; archived under their own section).
 - **Element ids:** button helpers namespace their GPUI ids (`action-button:{label}`, `toolbar-button:{label}`, …). Two elements sharing an id share interactive state, and the one that is not hovered swallows the other's click.

@@ -18,6 +18,7 @@ pub(crate) mod icons;
 pub(crate) mod lfs;
 pub(crate) mod pull_requests;
 pub(crate) mod rebase;
+pub(crate) mod ref_context_menu;
 pub(crate) mod reflog;
 pub(crate) mod remotes;
 pub(crate) mod services;

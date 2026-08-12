@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use gpui::{AnyElement, ClickEvent, MouseButton, Render, Window, div, prelude::*, px};
+use gpui::{
+    AnyElement, ClickEvent, MouseButton, MouseDownEvent, Render, Window, div, prelude::*, px,
+};
 use ui_kit::ThemeColors;
 
 use git_domain::{HeadStatus, HistoryReference, NamedRef};
@@ -146,14 +148,29 @@ impl GitronimoApp {
                     .flex()
                     .flex_col()
                     .child(sidebar_section_label("BRANCHES", colors))
-                    .children(self.ref_rows(
-                        "local",
-                        &self.refs.local_branches,
-                        RefKind::LocalBranch,
-                        current_branch.as_deref(),
-                        colors,
-                        cx,
-                    ))
+                    .children({
+                        let (active, archived) = self.partition_local_branches();
+                        let mut rows = self.ref_rows(
+                            "local",
+                            &active,
+                            RefKind::LocalBranch,
+                            current_branch.as_deref(),
+                            colors,
+                            cx,
+                        );
+                        if !archived.is_empty() {
+                            rows.push(sidebar_section_label("ARCHIVED", colors));
+                            rows.extend(self.ref_rows(
+                                "local-archived",
+                                &archived,
+                                RefKind::LocalBranch,
+                                current_branch.as_deref(),
+                                colors,
+                                cx,
+                            ));
+                        }
+                        rows
+                    })
                     .child(sidebar_section_label("TAGS", colors))
                     .children(self.ref_rows("tag", &self.refs.tags, RefKind::Tag, None, colors, cx))
                     .child(sidebar_section_label("REMOTES", colors))
@@ -199,8 +216,15 @@ impl GitronimoApp {
                                     }))
                                     .on_mouse_down(
                                         MouseButton::Right,
-                                        cx.listener(move |app, _, _, cx| {
-                                            app.open_ref_context_menu(menu_context.clone(), cx);
+                                        cx.listener(move |app, event: &MouseDownEvent, _, cx| {
+                                            app.open_ref_context_menu(
+                                                menu_context.clone(),
+                                                (
+                                                    f32::from(event.position.x),
+                                                    f32::from(event.position.y),
+                                                ),
+                                                cx,
+                                            );
                                         }),
                                     )
                                     .child(icon(IconKind::Cloud, 12.0, colors.text_muted))
@@ -310,6 +334,39 @@ impl GitronimoApp {
             .into_any_element()
     }
 
+    /// Active local branches (pinned first) and archived local branches.
+    fn partition_local_branches(&self) -> (Vec<NamedRef>, Vec<NamedRef>) {
+        let pinned: std::collections::HashSet<&str> = self
+            .branch_organization
+            .pinned
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let archived: std::collections::HashSet<&str> = self
+            .branch_organization
+            .archived
+            .iter()
+            .map(String::as_str)
+            .collect();
+        let mut active = Vec::new();
+        let mut archived_refs = Vec::new();
+        let mut pinned_refs = Vec::new();
+        for reference in &self.refs.local_branches {
+            let Ok(name) = String::from_utf8(reference.name.0.clone()) else {
+                continue;
+            };
+            if archived.contains(name.as_str()) {
+                archived_refs.push(reference.clone());
+            } else if pinned.contains(name.as_str()) {
+                pinned_refs.push(reference.clone());
+            } else {
+                active.push(reference.clone());
+            }
+        }
+        pinned_refs.append(&mut active);
+        (pinned_refs, archived_refs)
+    }
+
     #[allow(clippy::too_many_lines)]
     fn ref_rows(
         &self,
@@ -324,11 +381,13 @@ impl GitronimoApp {
         let mut rows = Vec::new();
         let id_prefix = match category {
             "local" => "local-ref",
+            "local-archived" => "local-archived-ref",
             "remote" => "remote-branch-ref",
             _ => "tag-ref",
         };
         let group_id_prefix = match category {
             "local" => "local-ref-group",
+            "local-archived" => "local-archived-ref-group",
             "remote" => "remote-ref-group",
             _ => "tag-ref-group",
         };
@@ -427,13 +486,21 @@ impl GitronimoApp {
                     row = row.hover(|style| style.bg(colors.selection));
                 }
                 rows.push(
-                    row.on_click(cx.listener(move |app, _, _, cx| {
-                        app.select_ref_context(&context, cx);
+                    row.on_click(cx.listener(move |app, event: &ClickEvent, _, cx| {
+                        if event.click_count() >= 2 {
+                            app.activate_ref_from_double_click(&context, cx);
+                        } else {
+                            app.select_ref_context(&context, cx);
+                        }
                     }))
                     .on_mouse_down(
                         MouseButton::Right,
-                        cx.listener(move |app, _, _, cx| {
-                            app.open_ref_context_menu(menu_context.clone(), cx);
+                        cx.listener(move |app, event: &MouseDownEvent, _, cx| {
+                            app.open_ref_context_menu(
+                                menu_context.clone(),
+                                (f32::from(event.position.x), f32::from(event.position.y)),
+                                cx,
+                            );
                         }),
                     )
                     // Align leaf icons under folder name (chevron column + gap).

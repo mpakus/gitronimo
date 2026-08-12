@@ -1,5 +1,21 @@
 # Implementation work log
 
+## 2026-08-12 — Branch delete confirmation + network progress chrome
+
+**Intent:** Delete branch from the sidebar must show a Yes/No confirmation popup from any view (not only Working Copy). Network ops (fetch/pull/push/…) must show an in-progress bar in the bottom-left UI so the user can see work is happening.
+
+**Files:** `workspace.rs` (delete confirm overlay; activity-bar progress), `working_copy.rs` (remove WC-only delete strip), `main.rs` (`cancel_branch_delete`, clear pending on confirm), `sidebar.rs` / `components.rs` (keep footer), `docs/UI-IMPROVE.md`, `docs/work-log.md`.
+
+**Acceptance:** Delete… → modal with Yes/No; Yes runs safe `git branch -d` (Force Delete still available for unmerged); No closes; progress bar visible bottom-left during network ops.
+
+## 2026-08-12 — Double-click sidebar branch switches checkout
+
+**Intent:** Tower-style activate: double-click a local or remote branch in the sidebar checks it out. Single-click still opens scoped History; tags stay History-only on double-click.
+
+**Files:** `views/sidebar.rs` (click_count gate), `main.rs` (`activate_ref_from_double_click`, remote tracking path), `git_cli` (`checkout_tracking_branch`), `docs/UI-IMPROVE.md`.
+
+**Acceptance:** Double-click local branch → `git switch`; double-click remote without local → `git switch --track`; existing local short name → switch to it; already-on-HEAD shows a short activity note; single-click History unchanged.
+
 ## 2026-08-11 — Checkbox click target and file-name column
 
 **Intent:** Staging by checkbox felt broken in the running app even though the handler is correct. The visible box is 14px inside a 22px row with no padding, so a near miss hit the row instead — and a row click on a full selection clears it, which looks like nothing happened. Give the checkbox a row-height hit area, surface ignored clicks during an in-flight mutation, and fix the file-name column, which stripped leading letters from staged rows and showed the raw `.M` prefix on unstaged ones.
@@ -2000,3 +2016,22 @@
 **Acceptance checks:** the composer shows no card fill; Commit stays a muted chip until a subject is written and something is staged (or amend is on), then turns accent blue; the disabled tooltip names the missing precondition.
 
 **Verification:** `a_disabled_commit_button_names_what_is_missing` covers the reason matrix. `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+## 2026-08-12 — Tower-parity branch context menu
+
+**Intent:** replace the six-item sidebar ref menu with Tower's branch context menu: same grouping, same wording (quoted ref names), cursor-anchored popup, submenus, disabled items that explain themselves, and the operations Tower offers on a branch.
+
+**Tower reference:** right-click menu on a local branch (screenshot supplied by the user) and `https://www.git-tower.com/learn/git/ebook/en/desktop-gui/branching-merging/working-with-branches`. Groups: pin · pull/push/force-push/sync · publish/push-to · track upstream · merge/rebase · archive · rename/delete · create branch/tag/PR · export/compare · reveal/copy.
+
+**Files:** `crates/app_core/src/lib.rs` (per-repository branch organization), `crates/git_cli/src/lib.rs` (tag create/delete, upstream set/unset, archive export, remote-branch delete), `apps/desktop/src/app_state.rs`, `apps/desktop/src/main.rs`, `apps/desktop/src/views/working_copy.rs` (menu), `apps/desktop/src/views/workspace.rs` (anchored overlay + submenu), `apps/desktop/src/views/sidebar.rs` (pinned first, archived section), `apps/desktop/src/tests.rs`, `docs/UI-IMPROVE.md`, `docs/keyboard-shortcuts.md`.
+
+**Acceptance checks:**
+- The menu opens at the mouse position and stays inside the window.
+- Local-branch menu offers pin/unpin, Pull…, Push…, Force Push with Lease…, Sync…, Publish, Push To ▸, Track Upstream Branch ▸, merge/rebase, archive/unarchive, rename, delete, create branch/tag/pull request, export files, compare, reveal in history, copy name — with Tower's quoted wording.
+- Items that cannot run are disabled and say why (deleting HEAD, publishing a branch that already tracks, syncing a branch that is not checked out).
+- Pinned branches sort first; archived branches move to their own sidebar section; both survive a restart.
+- Tag delete uses `git tag --delete` and remote-branch delete uses `git push <remote> --delete`, instead of `git branch --delete`.
+
+**Not implemented (Tower-only):** `Track Parent Branch` and `Create New Stacked Branch` belong to Tower's stacked-branch feature, and `Pin` ordering is app state rather than a Git concept.
+
+**Verification:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (including `creates_and_deletes_tags_and_exports_an_archive`, `sets_and_unsets_a_branch_upstream`, `branch_organization_is_scoped_per_repository`), and `cargo deny check` all pass. Approach adapted from Tower's Working with Branches guide (UI structure) and local git_cli patterns; no AGPL code copied.

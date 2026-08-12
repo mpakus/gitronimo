@@ -26,8 +26,9 @@ use std::{
 };
 
 use app_core::{
-    BookmarkFolder, BookmarkOrganization, HostingError, HostingService, RecentRepositoryStore,
-    RecoveryJournalStore, RepositoryOpenError, SecretStore, WindowGeometry, open_repository,
+    BookmarkFolder, BookmarkOrganization, BranchOrganization, HostingError, HostingService,
+    RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError, SecretStore, WindowGeometry,
+    open_repository,
 };
 use git_cli::{CommitRequest, GitExecutable, GitStatusError, parse_git_progress_line};
 use git_domain::{
@@ -53,10 +54,10 @@ use crate::app_state::{
     ChoicePromptKind, DEFAULT_LIST_PANE_WIDTH, DEFAULT_SIDEBAR_WIDTH, ForcePushState, GitronimoApp,
     HistoryDetailMode, LastAction, Mutation, NetworkOperation, OpenedRepository, OperationAction,
     OverlayFocus, PR_MERGE_METHOD_CHOICES, PaletteCommand, PullDialogState, PushDialogState,
-    PushOption, RefContext, RepositoryView, ShellState, ShortcutReferenceState, StashAction,
-    SubmodulePushMode, TextPromptKind, ThemeMode, WelcomeRepoSnapshot, WelcomeShellView,
-    appearance_from_window, clamp_list_pane_width, clamp_sidebar_width, discard_selected,
-    git_failure_message, network_failure_message, repository_is_available,
+    PushOption, RefContext, RefContextSubmenu, RepositoryView, ShellState, ShortcutReferenceState,
+    StashAction, SubmodulePushMode, TextPromptKind, ThemeMode, WelcomeRepoSnapshot,
+    WelcomeShellView, appearance_from_window, clamp_list_pane_width, clamp_sidebar_width,
+    discard_selected, git_failure_message, network_failure_message, repository_is_available,
     repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
@@ -328,6 +329,7 @@ impl GitronimoApp {
             .ok()
             .flatten()
             .map_or(DEFAULT_LIST_PANE_WIDTH, clamp_list_pane_width);
+        let branch_organization = BranchOrganization::default();
         let selected_recent = (!recents.is_empty()).then_some(0);
         let (
             welcome_search_input,
@@ -370,6 +372,9 @@ impl GitronimoApp {
             refs: RefSnapshot::default(),
             expanded_ref_groups,
             ref_context: None,
+            ref_context_menu_position: None,
+            ref_context_submenu: None,
+            branch_organization,
             selected_paths: Vec::new(),
             last_selected_path_index: None,
             file_list_select_all_toggle: None,
@@ -555,6 +560,12 @@ impl GitronimoApp {
             .ok()
             .flatten()
             .map_or(DEFAULT_LIST_PANE_WIDTH, clamp_list_pane_width);
+        let branch_organization = match &state {
+            ShellState::Repository(repository) => store
+                .load_branch_organization(&repository.worktree_root)
+                .unwrap_or_default(),
+            _ => BranchOrganization::default(),
+        };
         let (
             welcome_search_input,
             worktree_search_input,
@@ -596,6 +607,9 @@ impl GitronimoApp {
             refs: RefSnapshot::default(),
             expanded_ref_groups,
             ref_context: None,
+            ref_context_menu_position: None,
+            ref_context_submenu: None,
+            branch_organization,
             selected_paths: Vec::new(),
             last_selected_path_index: None,
             file_list_select_all_toggle: None,
@@ -827,6 +841,16 @@ impl GitronimoApp {
                 self.working_copy = None;
                 self.refs = RefSnapshot::default();
                 self.ref_context = None;
+                self.ref_context_menu_position = None;
+                self.ref_context_submenu = None;
+                if let ShellState::Repository(repository) = &self.state {
+                    self.branch_organization = self
+                        .store
+                        .load_branch_organization(&repository.worktree_root)
+                        .unwrap_or_default();
+                } else {
+                    self.branch_organization = BranchOrganization::default();
+                }
                 self.pull_dialog = None;
                 self.push_dialog = None;
                 self.selected_paths.clear();
@@ -1390,8 +1414,15 @@ return remote_url & linefeed & parent_path"#;
     }
 
     fn request_branch_delete(&mut self, branch: String, cx: &mut Context<Self>) {
-        self.activity = format!("Review deletion choices for branch {branch}.");
+        self.close_ref_context_menu(cx);
+        self.activity = format!("Confirm deletion of branch {branch}.");
         self.pending_branch_delete = Some(branch);
+        cx.notify();
+    }
+
+    pub(crate) fn cancel_branch_delete(&mut self, cx: &mut Context<Self>) {
+        self.pending_branch_delete = None;
+        self.activity = "Branch deletion cancelled.".into();
         cx.notify();
     }
 
@@ -1449,6 +1480,20 @@ return remote_url & linefeed & parent_path"#;
                 self.pending_text_prompt = None;
                 self.text_prompt_value.clear();
                 self.create_branch_from(value, start, cx);
+            }
+            TextPromptKind::CreateTag { start } => {
+                if value.is_empty() {
+                    self.activity = "Enter a tag name.".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.run_branch_command(
+                    format!("Creating tag {value}"),
+                    move |git, repository| git.create_tag(repository, &value, &start),
+                    cx,
+                );
             }
             TextPromptKind::FileHistoryPath => {
                 if value.is_empty() {
@@ -1579,6 +1624,16 @@ return remote_url & linefeed & parent_path"#;
                     move |git, repository| git.start_rebase(repository, &value),
                     cx,
                 );
+            }
+            TextPromptKind::MergeRevision => {
+                if value.is_empty() {
+                    self.activity = "Enter a revision to merge.".into();
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.merge_branch_into_current(value, cx);
             }
             TextPromptKind::AutosquashTarget { squash } => {
                 if value.is_empty() {
@@ -1977,6 +2032,289 @@ return remote_url & linefeed & parent_path"#;
 
     fn prompt_create_branch_from_ref(&mut self, start: String, cx: &mut Context<Self>) {
         self.begin_text_prompt(TextPromptKind::CreateBranch { start: Some(start) }, "", cx);
+    }
+
+    pub(crate) fn prompt_create_tag_from_ref(&mut self, start: String, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::CreateTag { start }, "", cx);
+    }
+
+    pub(crate) fn copy_text_to_clipboard(&mut self, text: &str, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
+        self.activity = format!("Copied {text} to the clipboard.");
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_branch_pin(&mut self, branch: &str, cx: &mut Context<Self>) {
+        if let Some(index) = self
+            .branch_organization
+            .pinned
+            .iter()
+            .position(|name| name == branch)
+        {
+            self.branch_organization.pinned.remove(index);
+            self.activity = format!("Unpinned {branch}.");
+        } else {
+            self.branch_organization.pinned.push(branch.to_owned());
+            self.branch_organization
+                .archived
+                .retain(|name| name != branch);
+            self.activity = format!("Pinned {branch}.");
+        }
+        self.persist_branch_organization();
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_branch_archive(&mut self, branch: &str, cx: &mut Context<Self>) {
+        if let Some(index) = self
+            .branch_organization
+            .archived
+            .iter()
+            .position(|name| name == branch)
+        {
+            self.branch_organization.archived.remove(index);
+            self.activity = format!("Unarchived {branch}.");
+        } else {
+            self.branch_organization.archived.push(branch.to_owned());
+            self.branch_organization
+                .pinned
+                .retain(|name| name != branch);
+            self.activity = format!("Archived {branch}.");
+        }
+        self.persist_branch_organization();
+        cx.notify();
+    }
+
+    fn persist_branch_organization(&mut self) {
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        if self
+            .store
+            .save_branch_organization(&repository.worktree_root, &self.branch_organization)
+            .is_err()
+        {
+            self.activity = "Branch organization could not be saved.".into();
+        }
+    }
+
+    pub(crate) fn publish_branch(&mut self, branch: &str, cx: &mut Context<Self>) {
+        let Some(remote) = self.default_remote() else {
+            self.activity = "No configured remote to publish to.".into();
+            cx.notify();
+            return;
+        };
+        let branch = branch.to_owned();
+        self.run_network_command(
+            format!("Publishing {branch} to {remote}"),
+            vec![
+                "push".into(),
+                "--progress".into(),
+                "--set-upstream".into(),
+                remote.into(),
+                branch.into(),
+            ],
+            cx,
+        );
+    }
+
+    pub(crate) fn push_branch_to_destination(&mut self, destination: &str, cx: &mut Context<Self>) {
+        self.open_push_dialog(Some(destination.to_owned()), cx);
+    }
+
+    pub(crate) fn set_branch_upstream(
+        &mut self,
+        branch: &str,
+        upstream: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let branch = branch.to_owned();
+        let upstream = upstream.to_owned();
+        self.run_branch_command(
+            format!("Tracking {upstream} from {branch}"),
+            move |git, repository| git.set_branch_upstream(repository, &branch, &upstream),
+            cx,
+        );
+    }
+
+    pub(crate) fn unset_branch_upstream(&mut self, branch: &str, cx: &mut Context<Self>) {
+        let branch = branch.to_owned();
+        self.run_branch_command(
+            format!("Stopping upstream tracking for {branch}"),
+            move |git, repository| git.unset_branch_upstream(repository, &branch),
+            cx,
+        );
+    }
+
+    pub(crate) fn delete_tag(&mut self, tag: String, cx: &mut Context<Self>) {
+        self.run_branch_command(
+            format!("Deleting tag {tag}"),
+            move |git, repository| git.delete_tag(repository, &tag),
+            cx,
+        );
+    }
+
+    pub(crate) fn request_remote_branch_delete(&mut self, branch: &str, cx: &mut Context<Self>) {
+        let Some((remote, name)) = branch.split_once('/') else {
+            self.activity = format!("Remote branch {branch} is missing a remote prefix.");
+            cx.notify();
+            return;
+        };
+        let remote = remote.to_owned();
+        let name = name.to_owned();
+        let label = format!("Deleting remote branch {branch}");
+        self.run_network_command(
+            label,
+            vec![
+                "push".into(),
+                "--progress".into(),
+                remote.into(),
+                "--delete".into(),
+                name.into(),
+            ],
+            cx,
+        );
+    }
+
+    pub(crate) fn export_branch_archive(&mut self, reference: &str, cx: &mut Context<Self>) {
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let reference = reference.to_owned();
+        let default_name = format!("{}.zip", reference.replace('/', "-"));
+        cx.spawn(async move |this, cx| {
+            let destination = cx
+                .background_spawn({
+                    let default_name = default_name.clone();
+                    async move {
+                        let output = Command::new("osascript")
+                            .args([
+                                "-e",
+                                &format!(
+                                    "POSIX path of (choose file name with prompt \"Export archive\" default name \"{default_name}\")"
+                                ),
+                            ])
+                            .output()
+                            .ok()
+                            .filter(|output| output.status.success())?;
+                        let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                        (!path.is_empty()).then(|| PathBuf::from(path))
+                    }
+                })
+                .await;
+            let Some(destination) = destination else {
+                return;
+            };
+            let result = cx
+                .background_spawn({
+                    let repository = repository.clone();
+                    let reference = reference.clone();
+                    let destination = destination.clone();
+                    async move {
+                        let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                        git.export_archive(&repository, &reference, &destination)
+                            .map_err(|error| format!("{error:?}"))
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                match result {
+                    Ok(()) => {
+                        app.activity = format!(
+                            "Exported {reference} to {}.",
+                            destination.display()
+                        );
+                    }
+                    Err(error) => app.activity = format!("Export failed: {error}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn prompt_create_pull_request_from_branch(
+        &mut self,
+        head: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self.pull_request_repository.is_none()
+            && let Some(hosted) = self.hosted_repositories.first().cloned()
+        {
+            self.pull_request_repository = Some(hosted);
+        }
+        let Some(repository) = self.pull_request_repository.clone() else {
+            self.activity = "Select a hosted repository from Services first.".into();
+            cx.notify();
+            return;
+        };
+        let head = head.to_owned();
+        let base = self
+            .default_remote()
+            .map_or_else(|| "main".into(), |remote| format!("{remote}/main"));
+        cx.spawn(async move |this, cx| {
+            let fields = cx
+                .background_spawn({
+                    let head = head.clone();
+                    let base = base.clone();
+                    async move {
+                        let script = format!(
+                            r#"set title_text to text returned of (display dialog "Pull request title" default answer "")
+set body_text to text returned of (display dialog "Pull request description" default answer "")
+set head_text to text returned of (display dialog "Head branch" default answer "{head}")
+set base_text to text returned of (display dialog "Base branch" default answer "{base}")
+return title_text & linefeed & body_text & linefeed & head_text & linefeed & base_text"#
+                        );
+                        let output = Command::new("osascript")
+                            .args(["-e", &script])
+                            .output()
+                            .ok()
+                            .filter(|output| output.status.success())?;
+                        let fields = String::from_utf8_lossy(&output.stdout)
+                            .lines()
+                            .map(str::trim_end)
+                            .map(ToOwned::to_owned)
+                            .collect::<Vec<_>>();
+                        (fields.len() == 4).then_some(fields)
+                    }
+                })
+                .await;
+            let Some(fields) = fields else {
+                return;
+            };
+            if fields.iter().any(String::is_empty) {
+                return;
+            }
+            let worker_repository = repository.clone();
+            let result = cx
+                .background_spawn(async move {
+                    let keychain = MacKeychainStore;
+                    let token = keychain
+                        .read(&MacKeychainStore::github_key("default"))
+                        .map_err(|_| HostingError::Network)?
+                        .ok_or(HostingError::Authentication)?;
+                    GitHubService::default().create_pull_request(
+                        &token,
+                        &worker_repository,
+                        &fields[0],
+                        &fields[1],
+                        &fields[2],
+                        &fields[3],
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                match result {
+                    Ok(request) => {
+                        app.activity = format!("Created pull request #{}.", request.number);
+                        app.load_pull_requests(repository, cx);
+                    }
+                    Err(error) => app.activity = format!("Create pull request failed: {error:?}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn prompt_branch_from_selected(&mut self, cx: &mut Context<Self>) {
@@ -3992,8 +4330,8 @@ return remote_url & linefeed & parent_path"#;
         }).detach();
     }
 
-    fn confirm_branch_delete(&mut self, force: bool, cx: &mut Context<Self>) {
-        let Some(branch) = self.pending_branch_delete.clone() else {
+    pub(crate) fn confirm_branch_delete(&mut self, force: bool, cx: &mut Context<Self>) {
+        let Some(branch) = self.pending_branch_delete.take() else {
             return;
         };
         let label = if force {
@@ -4189,7 +4527,7 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
-    fn remote_branch_choices(&self) -> Vec<String> {
+    pub(crate) fn remote_branch_choices(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .refs
             .remote_branches
@@ -4201,7 +4539,7 @@ return remote_url & linefeed & parent_path"#;
         names
     }
 
-    fn configured_remote_names(&self) -> Vec<String> {
+    pub(crate) fn configured_remote_names(&self) -> Vec<String> {
         self.refs
             .remotes
             .iter()
@@ -4365,7 +4703,7 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
-    fn head_branch_name(&self) -> Option<String> {
+    pub(crate) fn head_branch_name(&self) -> Option<String> {
         self.working_copy
             .as_ref()
             .and_then(|status| match &status.branch.head {
@@ -4437,8 +4775,7 @@ return remote_url & linefeed & parent_path"#;
         );
     }
 
-    #[allow(dead_code)]
-    fn request_force_with_lease(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn request_force_with_lease(&mut self, cx: &mut Context<Self>) {
         self.force_push_state = ForcePushState::AwaitingConfirmation;
         self.activity =
             "Force-with-lease can rewrite the remote branch. Review and confirm.".into();
@@ -4664,15 +5001,96 @@ return remote_url & linefeed & parent_path"#;
         }
     }
 
-    pub(crate) fn open_ref_context_menu(&mut self, context: RefContext, cx: &mut Context<Self>) {
+    /// Double-click a sidebar branch to check it out (Tower: switch on activate).
+    pub(crate) fn activate_ref_from_double_click(
+        &mut self,
+        context: &RefContext,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_ref_context_menu(cx);
+        match context {
+            RefContext::LocalBranch(name) => {
+                if self.head_branch_name().as_deref() == Some(name.as_str()) {
+                    self.activity = format!("{name} is already checked out.");
+                    cx.notify();
+                    return;
+                }
+                self.checkout_branch(name.clone(), cx);
+            }
+            RefContext::RemoteBranch(name) => {
+                self.checkout_remote_tracking_branch(name.clone(), cx);
+            }
+            RefContext::Tag(name) => {
+                self.show_ref_history(name.clone(), cx);
+                self.activity = "Tags open History; check out a branch to switch.".into();
+                cx.notify();
+            }
+            RefContext::Remote(_) => {
+                self.show_remotes(cx);
+            }
+        }
+    }
+
+    fn checkout_remote_tracking_branch(&mut self, remote_branch: String, cx: &mut Context<Self>) {
+        let Some((_remote, short)) = remote_branch.split_once('/') else {
+            self.activity = format!("Remote branch {remote_branch} is missing a remote prefix.");
+            cx.notify();
+            return;
+        };
+        let short = short.to_owned();
+        let local_exists = self
+            .refs
+            .local_branches
+            .iter()
+            .any(|branch| String::from_utf8_lossy(&branch.name.0) == short);
+        if local_exists {
+            if self.head_branch_name().as_deref() == Some(short.as_str()) {
+                self.activity = format!("{short} is already checked out.");
+                cx.notify();
+                return;
+            }
+            self.checkout_branch(short, cx);
+            return;
+        }
+        self.run_branch_command(
+            format!("Checking out {short} from {remote_branch}"),
+            move |git, repository| git.checkout_tracking_branch(repository, &remote_branch),
+            cx,
+        );
+    }
+
+    pub(crate) fn open_ref_context_menu(
+        &mut self,
+        context: RefContext,
+        position: (f32, f32),
+        cx: &mut Context<Self>,
+    ) {
         self.ref_context = Some(context);
+        self.ref_context_menu_position = Some(position);
+        self.ref_context_submenu = None;
         cx.notify();
     }
 
     pub(crate) fn close_ref_context_menu(&mut self, cx: &mut Context<Self>) {
-        if self.ref_context.take().is_some() {
+        let closed = self.ref_context.take().is_some()
+            || self.ref_context_menu_position.take().is_some()
+            || self.ref_context_submenu.take().is_some();
+        if closed {
             cx.notify();
         }
+    }
+
+    pub(crate) fn open_ref_context_submenu(
+        &mut self,
+        submenu: RefContextSubmenu,
+        cx: &mut Context<Self>,
+    ) {
+        if self.ref_context_submenu.as_ref() == Some(&submenu) {
+            self.ref_context_submenu = None;
+        } else {
+            self.ref_context_submenu = Some(submenu);
+        }
+        cx.notify();
     }
 
     fn show_ref_history(&mut self, reference: String, cx: &mut Context<Self>) {

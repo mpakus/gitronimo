@@ -6,8 +6,7 @@ use ui_kit::ThemeColors;
 use git_domain::{GitPath, InProgressOperation, StatusEntry, WorktreeRepository};
 
 use crate::app_state::{
-    ForcePushState, GitronimoApp, Mutation, OperationAction, RefContext, RepositoryView,
-    StashAction,
+    ForcePushState, GitronimoApp, Mutation, OperationAction, RepositoryView, StashAction,
 };
 use crate::views::components::{
     centered_empty_state, file_action_button, list_pane_resize_handle, mutation_button,
@@ -108,7 +107,6 @@ impl GitronimoApp {
             .children(self.hunk_discard_confirmation_view(colors, cx))
             .children(self.stash_pop_confirmation_view(colors, cx))
             .children(self.stash_drop_confirmation_view(colors, cx))
-            .children(self.branch_delete_confirmation_view(colors, cx))
             .children(self.force_with_lease_confirmation_view(colors, cx))
             .children(self.context_menu_view(repository, colors, cx))
             .child(self.file_review_workspace(colors, cx))
@@ -355,151 +353,6 @@ impl GitronimoApp {
             .child(Self::file_list_column_header(colors))
             .children(rows)
             .into_any_element()
-    }
-
-    #[allow(clippy::too_many_lines)]
-    pub(crate) fn ref_context_menu_view(
-        &self,
-        colors: &ThemeColors,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        let context = self.ref_context.clone()?;
-        let (title, reference) = match &context {
-            RefContext::LocalBranch(name) => ("Local branch", name.clone()),
-            RefContext::RemoteBranch(name) => ("Remote branch", name.clone()),
-            RefContext::Tag(name) => ("Tag", name.clone()),
-            RefContext::Remote(name) => ("Remote", name.clone()),
-        };
-        let mut menu = div()
-            .id("ref-context-menu")
-            .p_1p5()
-            .flex()
-            .flex_col()
-            .gap_0p5()
-            .min_w(px(240.0))
-            .max_w(px(320.0))
-            .bg(colors.panel_background)
-            .border_1()
-            .border_color(colors.border)
-            .rounded(px(8.0))
-            .shadow_lg()
-            .child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .text_xs()
-                    .text_color(colors.text_muted)
-                    .border_b_1()
-                    .border_color(colors.border)
-                    .child(format!("{title}: {reference}")),
-            );
-        match context {
-            RefContext::LocalBranch(branch) => {
-                let checkout = branch.clone();
-                let history = branch.clone();
-                let delete_branch = branch.clone();
-                let rename_branch = branch.clone();
-                let merge_branch = branch.clone();
-                let rebase_branch = branch.clone();
-                let push_branch = branch.clone();
-                menu = menu
-                    .child(menu_item("Checkout", colors, cx, move |app, _, cx| {
-                        app.checkout_branch(checkout.clone(), cx);
-                    }))
-                    .child(menu_item("View History", colors, cx, move |app, _, cx| {
-                        app.show_ref_history(history.clone(), cx);
-                    }))
-                    .child(menu_item("Push…", colors, cx, move |app, _, cx| {
-                        app.push_branch(&push_branch, cx);
-                    }))
-                    .child(menu_separator(colors))
-                    .child(menu_item(
-                        "Merge into Current…",
-                        colors,
-                        cx,
-                        move |app, _, cx| {
-                            app.merge_branch_into_current(merge_branch.clone(), cx);
-                        },
-                    ))
-                    .child(menu_item(
-                        "Rebase Current onto…",
-                        colors,
-                        cx,
-                        move |app, _, cx| {
-                            app.rebase_current_onto(rebase_branch.clone(), cx);
-                        },
-                    ))
-                    .child(menu_separator(colors))
-                    .child(menu_item("Rename…", colors, cx, move |app, _, cx| {
-                        app.prompt_rename_branch(rename_branch.clone(), cx);
-                    }))
-                    .child(menu_item("Delete", colors, cx, move |app, _, cx| {
-                        app.request_branch_delete(delete_branch.clone(), cx);
-                    }));
-            }
-            RefContext::RemoteBranch(branch) => {
-                let create_start = branch.clone();
-                let history = branch.clone();
-                let pull_branch = branch.clone();
-                let delete_ref = branch.clone();
-                menu = menu
-                    .child(menu_item(
-                        "New Branch from Here…",
-                        colors,
-                        cx,
-                        move |app, _, cx| {
-                            app.prompt_create_branch_from_ref(create_start.clone(), cx);
-                        },
-                    ))
-                    .child(menu_item("View History", colors, cx, move |app, _, cx| {
-                        app.show_ref_history(history.clone(), cx);
-                    }))
-                    .child(menu_separator(colors))
-                    .child(menu_item("Pull…", colors, cx, move |app, _, cx| {
-                        app.pull_branch(pull_branch.clone(), cx);
-                    }))
-                    .child(menu_separator(colors))
-                    .child(menu_item("Delete", colors, cx, move |app, _, cx| {
-                        app.request_branch_delete(delete_ref.clone(), cx);
-                    }));
-            }
-            RefContext::Tag(branch) => {
-                let create_start = branch.clone();
-                let history = branch.clone();
-                let delete_ref = branch.clone();
-                menu = menu
-                    .child(menu_item(
-                        "New Branch from Here…",
-                        colors,
-                        cx,
-                        move |app, _, cx| {
-                            app.prompt_create_branch_from_ref(create_start.clone(), cx);
-                        },
-                    ))
-                    .child(menu_item("View History", colors, cx, move |app, _, cx| {
-                        app.show_ref_history(history.clone(), cx);
-                    }))
-                    .child(menu_separator(colors))
-                    .child(menu_item("Delete", colors, cx, move |app, _, cx| {
-                        app.request_branch_delete(delete_ref.clone(), cx);
-                    }));
-            }
-            RefContext::Remote(remote) => {
-                let fetch_remote = remote.clone();
-                menu = menu.child(menu_item("Fetch", colors, cx, move |app, _, cx| {
-                    app.run_network_command(
-                        format!("Fetching {fetch_remote}"),
-                        vec![
-                            "fetch".into(),
-                            "--progress".into(),
-                            fetch_remote.clone().into(),
-                        ],
-                        cx,
-                    );
-                }));
-            }
-        }
-        Some(menu.into_any_element())
     }
 
     #[allow(dead_code)]
@@ -755,52 +608,6 @@ impl GitronimoApp {
                     GitronimoApp::drop_latest_stash,
                 ))
                 .into_any_element()
-        })
-    }
-
-    pub(crate) fn branch_delete_confirmation_view(
-        &self,
-        colors: &ThemeColors,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        self.pending_branch_delete.as_ref().map(|branch| {
-            div()
-                .p_2()
-                .bg(colors.raised_background)
-                .border_1()
-                .border_color(colors.border)
-                .child(format!(
-                    "Delete local branch {branch}? Safe deletion refuses unmerged work."
-                ))
-                .child(primary_action_button(
-                    "Delete merged branch",
-                    colors,
-                    cx,
-                    |app, cx| {
-                        app.confirm_branch_delete(false, cx);
-                    },
-                ))
-                .child(file_action_button(
-                    "Force delete unmerged branch",
-                    colors,
-                    cx,
-                    |app, cx| app.confirm_branch_delete(true, cx),
-                ))
-                .into_any_element()
-        })
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn network_cancel_button(
-        &self,
-        colors: &ThemeColors,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        self.network_operation.as_ref().map(|_| {
-            file_action_button("Cancel network operation", colors, cx, |app, cx| {
-                app.cancel_network_operation(cx);
-            })
-            .into_any_element()
         })
     }
 
@@ -1194,34 +1001,4 @@ fn file_list_mode_tab(
     tab.interactivity()
         .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)));
     tab.child(label).into_any_element()
-}
-
-fn menu_item(
-    label: &'static str,
-    colors: &ThemeColors,
-    cx: &mut gpui::Context<GitronimoApp>,
-    on_click: impl Fn(&mut GitronimoApp, &ClickEvent, &mut gpui::Context<GitronimoApp>) + 'static,
-) -> gpui::AnyElement {
-    let mut item = div()
-        .id(gpui::ElementId::Name(
-            format!("context-menu-item:{label}").into(),
-        ))
-        .h(px(24.0))
-        .px_2()
-        .flex()
-        .items_center()
-        .text_sm()
-        .rounded(px(3.0))
-        .cursor_pointer()
-        .hover(|style| style.bg(colors.selection));
-    item.interactivity()
-        .on_click(cx.listener(move |app, event, _, cx| {
-            app.close_ref_context_menu(cx);
-            on_click(app, event, cx);
-        }));
-    item.child(label).into_any_element()
-}
-
-fn menu_separator(colors: &ThemeColors) -> gpui::AnyElement {
-    div().h(px(1.0)).my_1().bg(colors.border).into_any_element()
 }

@@ -374,6 +374,43 @@ impl RecentRepositoryStore {
         self.save(&document)
     }
 
+    /// Loads pinned and archived branch names for one repository.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_branch_organization(
+        &self,
+        repository: &Path,
+    ) -> Result<BranchOrganization, RecentRepositoryStoreError> {
+        let document = self.load_document()?;
+        Ok(document
+            .branch_organization
+            .get(&repository.to_string_lossy().into_owned())
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Persists pinned and archived branch names for one repository.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_branch_organization(
+        &self,
+        repository: &Path,
+        organization: &BranchOrganization,
+    ) -> Result<(), RecentRepositoryStoreError> {
+        let mut document = self.load_document()?;
+        let key = repository.to_string_lossy().into_owned();
+        if organization.pinned.is_empty() && organization.archived.is_empty() {
+            document.branch_organization.remove(&key);
+        } else {
+            document
+                .branch_organization
+                .insert(key, organization.clone());
+        }
+        self.save(&document)
+    }
+
     fn load_document(&self) -> Result<RecentRepositoryDocument, RecentRepositoryStoreError> {
         match fs::read(&self.path) {
             Ok(bytes) => {
@@ -563,6 +600,16 @@ fn default_folder_expanded() -> bool {
     true
 }
 
+/// Per-repository branch presentation flags. Pinned branches sort first in the
+/// sidebar; archived branches move to their own section.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+pub struct BranchOrganization {
+    #[serde(default)]
+    pub pinned: Vec<String>,
+    #[serde(default)]
+    pub archived: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct BookmarkOrganization {
     pub folders: Vec<BookmarkFolder>,
@@ -586,6 +633,9 @@ struct RecentRepositoryDocument {
     bookmark_folders: Vec<BookmarkFolder>,
     #[serde(default)]
     repository_folders: std::collections::BTreeMap<String, String>,
+    /// Absolute repository path → pinned/archived branch names.
+    #[serde(default)]
+    branch_organization: std::collections::BTreeMap<String, BranchOrganization>,
 }
 
 impl Default for RecentRepositoryDocument {
@@ -599,6 +649,7 @@ impl Default for RecentRepositoryDocument {
             list_pane_width: None,
             bookmark_folders: Vec::new(),
             repository_folders: std::collections::BTreeMap::new(),
+            branch_organization: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -627,7 +678,8 @@ mod tests {
     };
 
     use super::{
-        RecentRepositoryStore, RecentRepositoryStoreError, RecoveryJournalStore, WindowGeometry,
+        BranchOrganization, RecentRepositoryStore, RecentRepositoryStoreError,
+        RecoveryJournalStore, WindowGeometry,
     };
     use git_domain::{GitPath, RecoveredBranchTip, RecoveryRecord};
 
@@ -659,6 +711,40 @@ mod tests {
         let recents = store.remove(&first).expect("remove should save");
         assert_eq!(recents, vec![second.clone()]);
         assert_eq!(store.load().expect("store should reload"), recents);
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn branch_organization_is_scoped_per_repository() {
+        let (directory, store) = temporary_store();
+        let first = directory.join("first");
+        let second = directory.join("second");
+        let organization = BranchOrganization {
+            pinned: vec!["main".into()],
+            archived: vec!["old".into()],
+        };
+        store
+            .save_branch_organization(&first, &organization)
+            .expect("save should persist");
+        assert_eq!(
+            store.load_branch_organization(&first).expect("load first"),
+            organization
+        );
+        assert_eq!(
+            store
+                .load_branch_organization(&second)
+                .expect("empty second"),
+            BranchOrganization::default()
+        );
+        store
+            .save_branch_organization(&first, &BranchOrganization::default())
+            .expect("empty org should clear");
+        assert_eq!(
+            store
+                .load_branch_organization(&first)
+                .expect("cleared first"),
+            BranchOrganization::default()
+        );
         let _ = fs::remove_dir_all(directory);
     }
 

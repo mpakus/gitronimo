@@ -1124,6 +1124,20 @@ impl GitExecutable {
         self.mutate(repository, ["switch", branch])
     }
 
+    /// Creates a local branch that tracks `remote_branch` (e.g. `origin/feature`)
+    /// and checks it out. Git derives the local name from the remote ref.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the remote ref is unknown or a conflicting
+    /// local branch already exists.
+    pub fn checkout_tracking_branch(
+        &self,
+        repository: &WorktreeRepository,
+        remote_branch: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["switch", "--track", remote_branch])
+    }
+
     /// Creates and checks out a branch from HEAD or an explicit starting ref.
     ///
     /// # Errors
@@ -1171,6 +1185,82 @@ impl GitExecutable {
         self.mutate(
             repository,
             ["branch", if force { "-D" } else { "--delete" }, branch],
+        )
+    }
+
+    /// Deletes a tag. `git branch --delete` cannot remove tags, so tag removal
+    /// needs its own command.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the tag does not exist.
+    pub fn delete_tag(
+        &self,
+        repository: &WorktreeRepository,
+        tag: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["tag", "--delete", tag])
+    }
+
+    /// Creates a lightweight tag at `start`.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the name already exists or the ref is invalid.
+    pub fn create_tag(
+        &self,
+        repository: &WorktreeRepository,
+        tag: &str,
+        start: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["tag", tag, start])
+    }
+
+    /// Points a local branch at a remote-tracking branch.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when either ref is unknown.
+    pub fn set_branch_upstream(
+        &self,
+        repository: &WorktreeRepository,
+        branch: &str,
+        upstream: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(
+            repository,
+            ["branch", &format!("--set-upstream-to={upstream}"), branch],
+        )
+    }
+
+    /// Removes a local branch's upstream association.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the branch has no upstream.
+    pub fn unset_branch_upstream(
+        &self,
+        repository: &WorktreeRepository,
+        branch: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["branch", "--unset-upstream", branch])
+    }
+
+    /// Writes a zip archive of `reference` to `destination`.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the ref is unknown or the path is unwritable.
+    pub fn export_archive(
+        &self,
+        repository: &WorktreeRepository,
+        reference: &str,
+        destination: &Path,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(
+            repository,
+            [
+                OsString::from("archive"),
+                OsString::from("--format=zip"),
+                OsString::from("--output"),
+                destination.as_os_str().to_owned(),
+                OsString::from(reference),
+            ],
         )
     }
 
@@ -4518,6 +4608,144 @@ index 1111111..2222222 100644\n\
             .git
             .delete_branch(&worktree, "topic", true)
             .expect("explicit forced deletion should work");
+    }
+
+    #[test]
+    fn checks_out_a_remote_tracking_branch() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        repository.success(["branch", "topic"]);
+        let remote = repository.path.with_extension("track.git");
+        repository.success([
+            "clone",
+            "--bare",
+            ".",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        let clone_path = repository.path.with_extension("track-clone");
+        repository.success([
+            "clone",
+            remote.to_str().expect("temporary path is UTF-8"),
+            clone_path.to_str().expect("temporary path is UTF-8"),
+        ]);
+        let clone = Repository::at(clone_path);
+        let RepositoryLocation::Worktree(worktree) = clone
+            .git
+            .discover_repository(&clone.path)
+            .expect("clone should resolve")
+        else {
+            panic!("clone should be worktree")
+        };
+        clone
+            .git
+            .checkout_branch(&worktree, "main")
+            .expect("main should checkout");
+        clone
+            .git
+            .checkout_tracking_branch(&worktree, "origin/topic")
+            .expect("tracking checkout should create local topic");
+        let snapshot = clone
+            .git
+            .ref_snapshot(&worktree)
+            .expect("snapshot should load");
+        assert!(
+            snapshot
+                .local_branches
+                .iter()
+                .any(|branch| branch.name.0 == b"topic")
+        );
+        let status = clone
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status should load");
+        assert_eq!(
+            status.branch.head,
+            HeadStatus::Branch(GitPath(b"topic".to_vec()))
+        );
+        let _ = fs::remove_dir_all(remote);
+    }
+
+    #[test]
+    fn creates_and_deletes_tags_and_exports_an_archive() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("worktree should resolve")
+        else {
+            panic!("fixture should be worktree")
+        };
+        repository
+            .git
+            .create_tag(&worktree, "v0.1.0", "HEAD")
+            .expect("tag should create");
+        let archive = repository.path.join("v0.1.0.zip");
+        repository
+            .git
+            .export_archive(&worktree, "v0.1.0", &archive)
+            .expect("archive should write");
+        assert!(archive.is_file());
+        repository
+            .git
+            .delete_tag(&worktree, "v0.1.0")
+            .expect("tag should delete");
+        let snapshot = repository
+            .git
+            .ref_snapshot(&worktree)
+            .expect("refs should load");
+        assert!(!snapshot.tags.iter().any(|tag| tag.name.0 == b"v0.1.0"));
+    }
+
+    #[test]
+    fn sets_and_unsets_a_branch_upstream() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let remote = repository.path.with_extension("upstream.git");
+        repository.success([
+            "clone",
+            "--bare",
+            repository.path.to_str().unwrap(),
+            remote.to_str().unwrap(),
+        ]);
+        repository.success(["remote", "add", "origin", remote.to_str().unwrap()]);
+        repository.success(["fetch", "origin"]);
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("worktree should resolve")
+        else {
+            panic!("fixture should be worktree")
+        };
+        repository
+            .git
+            .set_branch_upstream(&worktree, "main", "origin/main")
+            .expect("upstream should set");
+        let snapshot = repository
+            .git
+            .ref_snapshot(&worktree)
+            .expect("refs should load");
+        let main = snapshot
+            .local_branches
+            .iter()
+            .find(|branch| branch.name.0 == b"main")
+            .expect("main exists");
+        assert_eq!(main.upstream.as_deref(), Some("origin/main"));
+        repository
+            .git
+            .unset_branch_upstream(&worktree, "main")
+            .expect("upstream should clear");
+        let snapshot = repository
+            .git
+            .ref_snapshot(&worktree)
+            .expect("refs should reload");
+        let main = snapshot
+            .local_branches
+            .iter()
+            .find(|branch| branch.name.0 == b"main")
+            .expect("main exists");
+        assert!(main.upstream.is_none());
+        let _ = fs::remove_dir_all(remote);
     }
 
     #[test]

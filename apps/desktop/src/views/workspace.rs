@@ -2,6 +2,7 @@
 
 use gpui::{
     AnyElement, Focusable, MouseButton, MouseDownEvent, Render, Window, div, prelude::*, px,
+    relative,
 };
 use ui_kit::Theme;
 
@@ -84,12 +85,20 @@ impl Render for GitronimoApp {
                     .px_4()
                     .flex()
                     .items_center()
+                    .gap_3()
                     .bg(colors.panel_background)
                     .border_t_1()
                     .border_color(colors.border)
                     .text_xs()
                     .text_color(activity_color(&self.activity, &colors))
-                    .child(activity_label(&self.activity)),
+                    .children(self.network_activity_progress(&colors, cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .overflow_hidden()
+                            .child(activity_label(&self.activity)),
+                    ),
             )
             // Overlays after chrome so they paint above in-flow content.
             .children(
@@ -128,6 +137,10 @@ impl Render for GitronimoApp {
                     .is_some()
                     .then(|| self.push_dialog_overlay(&colors, cx).into_any_element()),
             )
+            .children(self.pending_branch_delete.is_some().then(|| {
+                self.branch_delete_confirm_overlay(&colors, cx)
+                    .into_any_element()
+            }))
     }
 }
 
@@ -355,6 +368,7 @@ impl GitronimoApp {
                 (format!("Rename branch '{current}'"), "Rename")
             }
             TextPromptKind::CreateBranch { .. } => ("New branch".into(), "Create"),
+            TextPromptKind::CreateTag { start } => (format!("New tag from {start}"), "Create tag"),
             TextPromptKind::FileHistoryPath => ("File history for path".into(), "Show history"),
             TextPromptKind::BlamePath => ("Blame path".into(), "Show blame"),
             TextPromptKind::CompareFrom => ("Compare from ref".into(), "Next"),
@@ -366,6 +380,7 @@ impl GitronimoApp {
             TextPromptKind::HistorySearch => ("Search loaded history".into(), "Search"),
             TextPromptKind::HistoryReference => ("Branch or tag history".into(), "Show"),
             TextPromptKind::RebaseOnto => ("Rebase onto".into(), "Rebase"),
+            TextPromptKind::MergeRevision => ("Merge revision into current branch".into(), "Merge"),
             TextPromptKind::AutosquashTarget { squash } => (
                 if *squash {
                     "Squash into commit".into()
@@ -647,52 +662,6 @@ impl GitronimoApp {
                             app.prompt_clone_repository(cx);
                         },
                     )),
-            )
-            .into_any_element()
-    }
-
-    /// Anchored popup for sidebar branch/remote/tag actions (Tower-style right-click menu).
-    pub(crate) fn ref_context_menu_overlay(
-        &self,
-        colors: &ui_kit::ThemeColors,
-        cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        // Sit over the sidebar tree: below toolbar/activity, inset from the left edge.
-        let menu_top = px(90.0);
-        let menu_left = px(12.0);
-        div()
-            .absolute()
-            .inset_0()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|app, _: &MouseDownEvent, _, cx| {
-                    app.close_ref_context_menu(cx);
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(|app, _: &MouseDownEvent, _, cx| {
-                    app.close_ref_context_menu(cx);
-                }),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .top(menu_top)
-                    .left(menu_left)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .children(self.ref_context_menu_view(colors, cx)),
             )
             .into_any_element()
     }
@@ -1221,6 +1190,135 @@ impl GitronimoApp {
                     ),
             )
             .into_any_element()
+    }
+
+    pub(crate) fn branch_delete_confirm_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let Some(branch) = self.pending_branch_delete.clone() else {
+            return div().into_any_element();
+        };
+        div()
+            .absolute()
+            .top(px(56.0))
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(colors.overlay_scrim)
+            .flex()
+            .items_start()
+            .justify_center()
+            .pt_8()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.cancel_branch_delete(cx);
+                }),
+            )
+            .child(
+                div()
+                    .w(px(420.0))
+                    .flex()
+                    .flex_col()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(8.0))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(colors.border)
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(format!("Delete branch \"{branch}\"?")),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .text_xs()
+                            .text_color(colors.text_secondary)
+                            .child(
+                                "Yes deletes the local branch. Safe deletion refuses unmerged work; use Force Delete only when you intend to discard those commits from this branch tip.",
+                            ),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_3()
+                            .border_t_1()
+                            .border_color(colors.border)
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(file_action_button("No", colors, cx, |app, cx| {
+                                app.cancel_branch_delete(cx);
+                            }))
+                            .child(file_action_button("Force Delete", colors, cx, |app, cx| {
+                                app.confirm_branch_delete(true, cx);
+                            }))
+                            .child(primary_action_button("Yes", colors, cx, |app, cx| {
+                                app.confirm_branch_delete(false, cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn network_activity_progress(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> Option<AnyElement> {
+        let operation = self.network_operation.as_ref()?;
+        let label = operation.lock().ok()?.label.clone();
+        let fill = self.network_progress.clamp(0.08, 0.92);
+        Some(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .flex_shrink_0()
+                .child(
+                    div()
+                        .w(px(120.0))
+                        .h(px(6.0))
+                        .rounded_full()
+                        .bg(colors.raised_background)
+                        .border_1()
+                        .border_color(colors.border)
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .h_full()
+                                .w(relative(fill))
+                                .bg(colors.accent)
+                                .rounded_full(),
+                        ),
+                )
+                .child(
+                    div()
+                        .max_w(px(220.0))
+                        .overflow_hidden()
+                        .text_color(colors.text_secondary)
+                        .child(label),
+                )
+                .child(file_action_button("Cancel", colors, cx, |app, cx| {
+                    app.cancel_network_operation(cx);
+                }))
+                .into_any_element(),
+        )
     }
 }
 
