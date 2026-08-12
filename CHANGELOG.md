@@ -5,8 +5,13 @@
 ### Included
 
 - Open local Git repositories and inspect working-copy status and diffs.
-- Stage, unstage, discard tracked changes, and create commits.
-- Browse bounded history and manage local branches.
+- Stage, unstage, discard tracked changes, and create commits (including amend and sign-off).
+- Partial line and hunk staging in the diff viewer.
+- Working Copy multi-select: Command-A, Shift-click, toggle deselect/reselect; batch stage/unstage via checkboxes on multi-selection.
+- Browse bounded history with graph, scope filter, Changeset/Tree detail, and Commit Detail navigation.
+- Stashes, remotes, services (GitHub token), pull requests, and settings surfaces (two-pane layouts).
+- Welcome/Repositories: bookmarks, grouped recents, add/create/clone, Services rail.
+- Branch/ref context menu on sidebar right-click; trimmed workspace sidebar (Working Copy, History, Stashes, Settings).
 - Fetch, pull, publish, and push with cancellation for network work.
 - Recover safely from missing repositories, stale index locks, malformed preferences, and application panics.
 
@@ -18,6 +23,7 @@
 
 ### Known limitations
 
-- Partial staging, stash, merge and rebase workflows, and hosting-service integration are not included.
-- The public package is not signed or notarized yet.
+- Merge and rebase wizards, OAuth/enterprise GitHub, and notarized distribution are not complete.
+- Remote progress is partly indeterminate (no full Git stderr byte/object parsing everywhere).
 - VoiceOver parity is limited by the pinned GPUI framework; see the [accessibility note](docs/troubleshooting.md#keyboard-and-assistive-technology).
+- Secondary views (Reflog, Blame, Compare, Branches Review, etc.) remain reachable from the command palette rather than the primary sidebar.

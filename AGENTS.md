@@ -32,6 +32,7 @@ System `cargo` older than 1.97 will fail on this workspace.
 | Doc | Purpose |
 |-----|---------|
 | `PLAN.md` | Product roadmap and checklist — source of truth for scope |
+| `docs/README.md` | Documentation index |
 | `docs/work-log.md` | Per-task intent, files, acceptance checks (write **before** coding) |
 | `docs/UI-PLAN.md` | Tower parity phases and screenshot regression matrix |
 | `docs/UI-IMPROVE.md` | Tower guide patterns mapped to Gitronimo views |
@@ -39,6 +40,7 @@ System `cargo` older than 1.97 will fail on this workspace.
 | `docs/implementation-boundaries.md` | Layering constraints |
 | `docs/troubleshooting.md` | User-facing recovery and keyboard reference |
 | `docs/keyboard-shortcuts.md` | Global shortcuts and Working Copy selection rules |
+| `docs/screens/README.md` | Screenshot inventory and attribution rules |
 | `docs/dependency-policy.md` | `cargo deny` policy |
 | `docs/packaging.md` | macOS bundle notes |
 | `docs/adr/` | Architecture decision records |

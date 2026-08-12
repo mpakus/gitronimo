@@ -26,7 +26,7 @@ Working Copy file selection:
 - When all visible files are selected, click a row to clear selection; click again to select all.
 - With multiple files selected, clicking a row's stage checkbox stages or unstages all selected files.
 
-Full shortcut and selection rules: [`keyboard-shortcuts.md`](keyboard-shortcuts.md).
+Full shortcut and selection rules: [`keyboard-shortcuts.md`](keyboard-shortcuts.md). Screenshot inventory: [`screens/README.md`](screens/README.md).
 
 GPUI 0.2.2 does not expose macOS accessibility roles or programmatic labels for its custom elements, so VoiceOver parity is a known beta limitation. It will need framework support before Gitronimo can provide a complete assistive-technology experience.
 

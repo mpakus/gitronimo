@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-08-11 — Documentation pass + README screenshots
+
+**Intent:** Align all docs with current beta scope (Working Copy multi-select, History/sidebar polish, Services/PRs/stashes); add committed Gitronimo screenshots to README; index docs under `docs/README.md`.
+
+**Files:** `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `AGENTS.md`, `.gitignore`, `docs/README.md`, `docs/screens/README.md`, `docs/screens/gitronimo-*.png`, `docs/UI-IMPROVE.md`, `docs/UI-PLAN.md`, `docs/architecture.md`, `docs/troubleshooting.md`, `docs/keyboard-shortcuts.md`.
+
+**Acceptance:** README shows welcome, repositories, working copy, history, and branch menu; beta scope matches implemented features; docs index links all major files; Tower reference shots remain gitignored.
+
+**Done:** five `gitronimo-*.png` captures committed; README/CHANGELOG scope updated; docs index and screens README added.
+
 ## 2026-08-11 — Working Copy select all / toggle deselect / batch checkbox
 
 **Intent:** Cmd/Ctrl+A selects all files in the visible Working Copy list; when all are selected, clicking any selected row deselects all; the next row click re-selects all (toggle). When multiple files are selected (Cmd-A, Shift, or Cmd-click), clicking a row checkbox stages/unstages all selected files and keeps list selection.

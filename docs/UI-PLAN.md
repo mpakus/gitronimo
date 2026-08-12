@@ -24,9 +24,10 @@ Bring Gitronimo to **~99% Tower parity** — same information architecture, work
 | 22px list rows, 28px panel headers, 52px toolbar, full-width accent selection | |
 
 **Reference screenshots** (internal study only, per `AGENTS.md`):
-- `docs/screens/tower-guides/overview-*.png`, `workflow-*.png`
-- `docs/screens/tower-history.png`, `docs/screens/tower-branch-menu.png`
-- User comparison captures in project assets
+
+- `docs/screens/gitronimo-*.png` — committed Gitronimo product captures (see [`screens/README.md`](screens/README.md))
+- `docs/screens/tower-guides/overview-*.png`, `workflow-*.png` — Tower help guides (local, gitignored)
+- `docs/screens/tower-history.png`, `docs/screens/tower-branch-menu.png` — Tower comparison (local, gitignored)
 
 ---
 

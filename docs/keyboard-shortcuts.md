@@ -1,6 +1,6 @@
 # Keyboard shortcuts
 
-Press **Command-/** in the app to toggle the in-app shortcut reference overlay.
+Press **Command-/** in the app to toggle the in-app shortcut reference overlay. The overlay lists the most common shortcuts; this document is the complete reference.
 
 ## Global (repository window)
 

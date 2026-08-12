@@ -2,6 +2,8 @@
 
 Status: **complete** — Tower 99% parity roadmap Phases 1–10 implemented; manual screenshot QA remains optional follow-up.
 
+**Companion docs:** [`UI-PLAN.md`](UI-PLAN.md), [`README.md`](README.md), [`screens/README.md`](screens/README.md)
+
 **Sources**
 
 - Tower "Getting Started": <https://www.git-tower.com/help/guides/first-steps/get-started-with-tower/mac>
@@ -117,7 +119,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 ![Tower History](screens/tower-guides/overview-08-history.png)
 
-**Guide text:** the History view shows the commit log; selecting a commit shows details on the right in two modes: (a) *Changeset* — meta data (author, date, message) plus detailed changes; (b) *Tree* — the project's complete file structure at that moment. Double-click opens the Commit Detail view.
+**Guide text:** the History view shows the commit log; selecting a commit shows details on the right in two modes: (a) _Changeset_ — meta data (author, date, message) plus detailed changes; (b) _Tree_ — the project's complete file structure at that moment. Double-click opens the Commit Detail view.
 
 **Adopt in Gitronimo:**
 
@@ -189,24 +191,25 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 ## 3. Priority order
 
-| # | Improvement | View | Phase |
-|---|-------------|------|-------|
-| 1 | Commit composer visible above Working Copy file list | Working Copy | now |
-| 2 | Modified-only / All-files list-mode toggle | Working Copy | now |
-| 3 | Per-file stage checkbox + staged/unstaged badge | Working Copy | now |
-| 4 | Visible Back/Forward toolbar buttons | Toolbar | now |
-| 5 | Reveal new commit in History after committing | History | now |
-| 6 | Changeset / Tree mode toggle on commit detail | History | now |
-| 7 | Commit Detail destination (double-click) | History | now |
-| 8 | Remote-activity progress in sidebar footer | Sidebar | now |
-| 9 | Stashes and Remotes sidebar destinations | Sidebar | now |
-| 10 | Repositories view: folders, create-new, grouping | Welcome | Phase 9 |
-| 11 | Services view (accounts + clone-from-service) | Services | Phase 9 |
-| 12 | Pull Requests view (list, detail, comment, merge, create) | PRs | Phase 9 |
+| #   | Improvement                                               | View         | Phase   |
+| --- | --------------------------------------------------------- | ------------ | ------- |
+| 1   | Commit composer visible above Working Copy file list      | Working Copy | now     |
+| 2   | Modified-only / All-files list-mode toggle                | Working Copy | now     |
+| 3   | Per-file stage checkbox + staged/unstaged badge           | Working Copy | now     |
+| 4   | Visible Back/Forward toolbar buttons                      | Toolbar      | now     |
+| 5   | Reveal new commit in History after committing             | History      | now     |
+| 6   | Changeset / Tree mode toggle on commit detail             | History      | now     |
+| 7   | Commit Detail destination (double-click)                  | History      | now     |
+| 8   | Remote-activity progress in sidebar footer                | Sidebar      | now     |
+| 9   | Stashes and Remotes sidebar destinations                  | Sidebar      | now     |
+| 10  | Repositories view: folders, create-new, grouping          | Welcome      | Phase 9 |
+| 11  | Services view (accounts + clone-from-service)             | Services     | Phase 9 |
+| 12  | Pull Requests view (list, detail, comment, merge, create) | PRs          | Phase 9 |
 
 ### Implementation status
 
 **Done (functional):**
+
 - [x] Working Copy composer above file list, Modified/All Files toggle, per-file stage checkbox, staged/unstaged badges
 - [x] Working Copy multi-select: Command-A select all visible files; toggle deselect/reselect on row click when all selected; batch stage/unstage via checkbox on multi-selection
 - [x] Visible Back/Forward (Prev/Next) toolbar navigation with disabled state
@@ -222,12 +225,14 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Visual polish pass: welcome detail headers, commit focus border, diff tabs/hunk headers, HEAD badge, activity bar
 
 **Done (2026-08-11 — Tower interior pass):**
+
 - [x] In-repo sidebar trimmed to Working Copy / History / Stashes / Settings; PRs, Branches Review, Reflog via palette
 - [x] Branch/ref context menu on sidebar right-click (Checkout, History, Merge, …)
 - [x] History: full-width flat rows, multi-lane graph, plain ref labels, scope header + month groups
 - [x] Working Copy file multi-select + batch checkbox staging
 
 **Done (consistency pass — 2026-08-10):**
+
 - [x] Shared layout constants (`LIST_ROW_HEIGHT`, `NAV_ROW_HEIGHT`, `PANEL_HEADER_HEIGHT`, etc.) in `components.rs`
 - [x] Shared helpers: `section_header`, `detail_section`, `detail_row`, `view_panel_header`, `two_pane_view`, `head_badge`, `count_badge`
 - [x] Full-width accent selection in sidebar nav (no rounded inset) and welcome repo list
@@ -236,6 +241,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Panel headers standardized to 28px across Stashes, Remotes, Services, PRs
 
 **Partially done (works but visually or structurally short of Tower):**
+
 - [~] §1.1 Services — hosting view exists; welcome now has vertical Services/Bookmarks/Workflow rail; Workflow tab is placeholder-only
 - [~] §1.4 Back/Forward — Prev/Next labels added; toolbar groups Fetch/Pull/Push/Sync, stash Apply/Save, Refresh, and inline search fields Tower-style
 - [~] §1.5 Remote activity — in-flight progress bar and last-result footer in sidebar; progress is indeterminate (no stderr parsing yet)
@@ -243,6 +249,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [~] §4 Visual polish — interior pass: in-repo sidebar IA, WC composer rows, accent file selection, diff line backgrounds, stashes/remotes two-pane; OAuth/enterprise still deferred
 
 **Done (interior views — 2026-08-10 pass):**
+
 - [x] In-repo sidebar: WORKSPACE/BRANCHES/TAGS/REMOTES sections, nav icons, scrollable ref tree, no welcome clutter
 - [x] Working Copy: Tower commit row order (subject + count, Stage All | Commit), square status badges, accent file-row selection
 - [x] Toolbar subtitle: `View (branch - N Changed Files)`; Quick Open label
@@ -253,14 +260,14 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 ### Remaining gaps (priority order)
 
-| Gap | Section | Notes |
-|-----|---------|-------|
-| Workflow view content | §1.1 | Rail tab exists; full workflow surface still placeholder |
-| OAuth / enterprise GitHub | Delivery notes | Still deferred per `PLAN.md` |
-| Deterministic remote progress | §1.5 | Indeterminate bar during fetch/pull/push; no byte/object counts from Git stderr yet |
-| IME-rich search/composer | §4 | Inline search uses key-down capture; full EntityInputHandler fields deferred |
-| Settings dedicated view | §1.3 | Settings sidebar item routes to Services; no separate preferences panel yet |
-| History ref label density | §1.8 | Plain text labels; long ref names still truncate on narrow panes |
+| Gap                           | Section        | Notes                                                                               |
+| ----------------------------- | -------------- | ----------------------------------------------------------------------------------- |
+| Workflow view content         | §1.1           | Rail tab exists; full workflow surface still placeholder                            |
+| OAuth / enterprise GitHub     | Delivery notes | Still deferred per `PLAN.md`                                                        |
+| Deterministic remote progress | §1.5           | Indeterminate bar during fetch/pull/push; no byte/object counts from Git stderr yet |
+| IME-rich search/composer      | §4             | Inline search uses key-down capture; full EntityInputHandler fields deferred        |
+| Settings dedicated view       | §1.3           | Settings sidebar item routes to Services; no separate preferences panel yet         |
+| History ref label density     | §1.8           | Plain text labels; long ref names still truncate on narrow panes                    |
 
 See also [`keyboard-shortcuts.md`](keyboard-shortcuts.md) for Working Copy selection behavior.
 

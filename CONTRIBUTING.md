@@ -1,6 +1,8 @@
 # Contributing to Gitronimo
 
-Read [PLAN.md](PLAN.md) and [AGENTS.md](AGENTS.md) before coding. Keep each change tied to one checklist group and record its intended files and acceptance checks in `docs/work-log.md`.
+Read [PLAN.md](PLAN.md) and [AGENTS.md](AGENTS.md) before coding. Keep each change tied to one checklist group and record its intended files and acceptance checks in [docs/work-log.md](docs/work-log.md).
+
+Documentation lives under [docs/](docs/README.md). Update [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) when shortcuts or Working Copy selection behavior changes, and refresh [README.md](README.md) screenshots when the UI changes materially.
 
 ## Development rules
 
@@ -11,7 +13,7 @@ Read [PLAN.md](PLAN.md) and [AGENTS.md](AGENTS.md) before coding. Keep each chan
 
 ## Verification
 
-Run the full gate before opening a pull request:
+Install Rust **1.97+** (`edition2024`), then run the full gate before opening a pull request:
 
 ```bash
 cargo fmt --all -- --check
