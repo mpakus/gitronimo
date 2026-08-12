@@ -16,8 +16,34 @@ use crate::app_state::{
     repository_is_available, resize_width, window_title,
 };
 use crate::keymap;
+use crate::views::commit_composer::commit_unavailable_reason;
 use crate::views::components::{activity_label, empty_status_message};
 use crate::views::working_copy::operation_conflict_overview;
+
+#[test]
+fn a_disabled_commit_button_names_what_is_missing() {
+    assert_eq!(
+        commit_unavailable_reason(false, true, 0, false),
+        "Stage changes and write a commit subject"
+    );
+    assert_eq!(
+        commit_unavailable_reason(false, false, 0, false),
+        "Stage at least one change to commit"
+    );
+    assert_eq!(
+        commit_unavailable_reason(false, true, 3, false),
+        "Write a commit subject"
+    );
+    assert_eq!(
+        commit_unavailable_reason(false, true, 0, true),
+        "Write a commit subject",
+        "amending needs a subject but no staged change"
+    );
+    assert_eq!(
+        commit_unavailable_reason(true, false, 3, false),
+        "Another Git operation is still running"
+    );
+}
 
 #[test]
 fn conflict_overview_names_the_count_and_the_next_step() {
@@ -636,6 +662,85 @@ fn clicking_a_rendered_checkbox_stages_the_selection(cx: &mut TestAppContext) {
             app.selected_paths.len(),
             2,
             "the click must not collapse the selection"
+        );
+    });
+}
+
+#[gpui::test]
+fn navigation_history_does_not_add_an_inline_back_row(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("inline-back");
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    app.update(cx, |app, _| {
+        app.state = ShellState::Repository(fixture.repository.clone());
+        app.working_copy = Some(fixture.status());
+        app.navigation_back.push(RepositoryView::History);
+    });
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+
+    assert!(
+        cx.debug_bounds("button:Back").is_none(),
+        "the toolbar chevrons own navigation; the content area must not add a Back row"
+    );
+}
+
+#[gpui::test]
+fn the_toolbar_pull_button_opens_the_pull_dialog(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("toolbar-pull");
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    app.update(cx, |app, _| {
+        app.state = ShellState::Repository(fixture.repository.clone());
+        app.working_copy = Some(fixture.status());
+    });
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+
+    let bounds = cx
+        .debug_bounds("toolbar-button:Pull")
+        .expect("the toolbar Pull button should be rendered");
+    cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+
+    app.update(cx, |app, _| {
+        assert!(
+            app.pull_dialog.is_some(),
+            "the toolbar Pull button opens the dialog"
+        );
+    });
+}
+
+#[gpui::test]
+fn confirming_the_pull_dialog_starts_the_network_command(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("pull-dialog");
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    app.update(cx, |app, cx| {
+        app.state = ShellState::Repository(fixture.repository.clone());
+        app.working_copy = Some(fixture.status());
+        app.open_pull_dialog(None, cx);
+    });
+    cx.run_until_parked();
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+
+    let bounds = cx
+        .debug_bounds("button:Pull")
+        .expect("the Pull button should be rendered");
+    cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+
+    app.update(cx, |app, _| {
+        assert!(app.pull_dialog.is_none(), "confirming closes the dialog");
+        assert!(
+            app.mutation_in_flight || app.activity.contains("Pulling"),
+            "confirming starts the pull command, activity was {:?}",
+            app.activity
         );
     });
 }

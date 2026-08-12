@@ -113,7 +113,7 @@ impl GitronimoApp {
         let active = self.history_detail_mode == mode;
         let repository = repository.clone();
         div()
-            .id(label)
+            .id(gpui::ElementId::Name(format!("detail-tab:{label}").into()))
             .px_2()
             .py_1()
             .bg(if active {

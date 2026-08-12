@@ -11,7 +11,8 @@ use crate::app_state::{
 };
 use crate::views::components::{
     centered_empty_state, file_action_button, list_pane_resize_handle, mutation_button,
-    state_panel, status_badge_info, status_badge_square, status_label, status_path,
+    primary_action_button, state_panel, status_badge_info, status_badge_square, status_label,
+    status_path,
 };
 
 impl GitronimoApp {
@@ -92,7 +93,6 @@ impl GitronimoApp {
             .flex_1()
             .h_full()
             .overflow_hidden()
-            .children(self.navigation_controls(colors, cx))
             .children(self.operation_banner_view(colors, cx))
             .children(self.operation_confirmation_view(colors, cx))
             .children(self.working_copy.as_ref().is_none().then(|| {
@@ -502,37 +502,6 @@ impl GitronimoApp {
         Some(menu.into_any_element())
     }
 
-    pub(crate) fn navigation_controls(
-        &self,
-        colors: &ThemeColors,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        (!self.navigation_back.is_empty() || !self.navigation_forward.is_empty()).then(|| {
-            div()
-                .flex()
-                .gap_2()
-                .children(self.navigation_back.last().map(|_| {
-                    file_action_button("Back", colors, cx, |app, cx| {
-                        if let Some(view) = app.navigation_back.pop() {
-                            app.navigation_forward.push(app.repository_view);
-                            app.repository_view = view;
-                            cx.notify();
-                        }
-                    })
-                }))
-                .children(self.navigation_forward.last().map(|_| {
-                    file_action_button("Forward", colors, cx, |app, cx| {
-                        if let Some(view) = app.navigation_forward.pop() {
-                            app.navigation_back.push(app.repository_view);
-                            app.repository_view = view;
-                            cx.notify();
-                        }
-                    })
-                }))
-                .into_any_element()
-        })
-    }
-
     #[allow(dead_code)]
     pub(crate) fn mutation_controls(
         &self,
@@ -675,7 +644,7 @@ impl GitronimoApp {
                     "Discard {} path(s)? Tracked changes restore from HEAD; untracked files move to Trash.",
                     paths.len()
                 ))
-                .child(file_action_button("Confirm discard", colors, cx, |app, cx| {
+                .child(primary_action_button("Confirm discard", colors, cx, |app, cx| {
                     app.confirm_discard(cx);
                 }))
                 .into_any_element()
@@ -698,7 +667,7 @@ impl GitronimoApp {
                     selection.len(),
                     String::from_utf8_lossy(&path.0)
                 ))
-                .child(file_action_button(
+                .child(primary_action_button(
                     "Confirm line discard",
                     colors,
                     cx,
@@ -732,7 +701,7 @@ impl GitronimoApp {
                     hunk_index + 1,
                     String::from_utf8_lossy(&path.0)
                 ))
-                .child(file_action_button(
+                .child(primary_action_button(
                     "Confirm hunk discard",
                     colors,
                     cx,
@@ -760,7 +729,7 @@ impl GitronimoApp {
                 .border_1()
                 .border_color(colors.border)
                 .child("Pop the latest stash? Its recovery entry will be removed after a successful apply.")
-                .child(file_action_button("Confirm pop latest stash", colors, cx, |app, cx| {
+                .child(primary_action_button("Confirm pop latest stash", colors, cx, |app, cx| {
                     app.pop_latest_stash(cx);
                 }))
                 .into_any_element()
@@ -779,7 +748,7 @@ impl GitronimoApp {
                 .border_1()
                 .border_color(colors.border)
                 .child("Drop the latest stash permanently? This cannot be undone.")
-                .child(file_action_button(
+                .child(primary_action_button(
                     "Confirm drop latest stash",
                     colors,
                     cx,
@@ -803,7 +772,7 @@ impl GitronimoApp {
                 .child(format!(
                     "Delete local branch {branch}? Safe deletion refuses unmerged work."
                 ))
-                .child(file_action_button(
+                .child(primary_action_button(
                     "Delete merged branch",
                     colors,
                     cx,
@@ -847,7 +816,7 @@ impl GitronimoApp {
                 .border_1()
                 .border_color(colors.border)
                 .child("Force-with-lease can replace remote commits only when your fetched remote ref is current.")
-                .child(file_action_button("Confirm force-with-lease", colors, cx, |app, cx| {
+                .child(primary_action_button("Confirm force-with-lease", colors, cx, |app, cx| {
                     app.confirm_force_with_lease(cx);
                 }))
                 .into_any_element()
@@ -1203,7 +1172,9 @@ fn file_list_mode_tab(
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> gpui::AnyElement {
     let mut tab = div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("file-list-tab:{label}").into(),
+        ))
         .px_2()
         .py_0p5()
         .rounded(px(3.0))
@@ -1232,7 +1203,9 @@ fn menu_item(
     on_click: impl Fn(&mut GitronimoApp, &ClickEvent, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> gpui::AnyElement {
     let mut item = div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("context-menu-item:{label}").into(),
+        ))
         .h(px(24.0))
         .px_2()
         .flex()

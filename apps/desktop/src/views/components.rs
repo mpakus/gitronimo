@@ -153,14 +153,26 @@ pub(crate) fn mutation_button(
 ) -> gpui::AnyElement {
     let tooltip_colors = *colors;
     div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("mutation-button:{label}").into(),
+        ))
+        .debug_selector(|| format!("button:{label}"))
         .h(px(ACTION_BUTTON_HEIGHT))
         .px_2()
         .flex()
         .items_center()
         .bg(colors.raised_background)
         .rounded(px(4.0))
-        .cursor_pointer()
+        .text_color(if disabled {
+            colors.text_muted
+        } else {
+            colors.text_primary
+        })
+        .when(!disabled, |button| {
+            button
+                .cursor_pointer()
+                .hover(|style| style.bg(colors.selection))
+        })
         .tooltip(move |_, cx| {
             cx.new(|_| ActionTooltip {
                 label,
@@ -184,15 +196,55 @@ pub(crate) fn file_action_button(
     cx: &mut gpui::Context<GitronimoApp>,
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> gpui::AnyElement {
+    action_button(label, ActionButtonStyle::Secondary, colors, cx, on_click)
+}
+
+/// Primary (accent-filled) variant for the confirming action of a dialog or panel.
+pub(crate) fn primary_action_button(
+    label: &'static str,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> gpui::AnyElement {
+    action_button(label, ActionButtonStyle::Primary, colors, cx, on_click)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActionButtonStyle {
+    Primary,
+    Secondary,
+}
+
+fn action_button(
+    label: &'static str,
+    style: ActionButtonStyle,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> gpui::AnyElement {
     let tooltip_colors = *colors;
+    let primary = style == ActionButtonStyle::Primary;
+    let background = if primary {
+        colors.accent
+    } else {
+        colors.raised_background
+    };
+    let hover_background = if primary {
+        colors.accent_hover
+    } else {
+        colors.selection
+    };
     div()
-        .id(label)
+        .id(action_button_id(label))
+        .debug_selector(|| format!("button:{label}"))
         .h(px(ACTION_BUTTON_HEIGHT))
         .px_2()
         .flex()
         .items_center()
-        .bg(colors.raised_background)
+        .bg(background)
+        .when(primary, |el| el.text_color(colors.accent_foreground))
         .rounded(px(4.0))
+        .hover(move |el| el.bg(hover_background))
         .cursor_pointer()
         .tooltip(move |_, cx| {
             cx.new(|_| ActionTooltip {
@@ -207,6 +259,13 @@ pub(crate) fn file_action_button(
         .into_any_element()
 }
 
+/// Action buttons live in the same id namespace as toolbar and sidebar buttons, so
+/// a bare label (`Pull`, `Fetch`, `Services`) would share interactive state with the
+/// toolbar button of the same name and lose its clicks.
+fn action_button_id(label: &'static str) -> gpui::ElementId {
+    gpui::ElementId::Name(format!("action-button:{label}").into())
+}
+
 #[allow(dead_code)]
 pub(crate) fn window_action_button(
     label: &'static str,
@@ -216,13 +275,17 @@ pub(crate) fn window_action_button(
 ) -> gpui::AnyElement {
     let tooltip_colors = *colors;
     div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("window-button:{label}").into(),
+        ))
+        .debug_selector(|| format!("button:{label}"))
         .h(px(ACTION_BUTTON_HEIGHT))
         .px_2()
         .flex()
         .items_center()
         .bg(colors.raised_background)
         .rounded(px(4.0))
+        .hover(|style| style.bg(colors.selection))
         .cursor_pointer()
         .tooltip(move |_, cx| {
             cx.new(|_| ActionTooltip {
@@ -245,14 +308,33 @@ pub(crate) fn primary_window_action_button(
     cx: &mut gpui::Context<GitronimoApp>,
     on_click: impl Fn(&mut GitronimoApp, &mut Window, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> gpui::AnyElement {
+    primary_window_action_button_with_reason(
+        label,
+        enabled,
+        "Enter a subject and stage changes to commit",
+        colors,
+        cx,
+        on_click,
+    )
+}
+
+/// Primary action that explains, in its tooltip, what is still missing while disabled.
+#[allow(clippy::redundant_closure_for_method_calls)]
+pub(crate) fn primary_window_action_button_with_reason(
+    label: &'static str,
+    enabled: bool,
+    unavailable_reason: &'static str,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut Window, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> gpui::AnyElement {
     let tooltip_colors = *colors;
-    let unavailable = if enabled {
-        label
-    } else {
-        "Enter a subject and stage changes to commit"
-    };
+    let unavailable = if enabled { label } else { unavailable_reason };
     div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("primary-window-button:{label}").into(),
+        ))
+        .debug_selector(|| format!("button:{label}"))
         .h(px(ACTION_BUTTON_HEIGHT))
         .px_3()
         .flex()
@@ -264,11 +346,15 @@ pub(crate) fn primary_window_action_button(
         })
         .rounded(px(4.0))
         .text_color(if enabled {
-            colors.panel_background
+            colors.accent_foreground
         } else {
             colors.text_muted
         })
-        .when(enabled, |button| button.cursor_pointer())
+        .when(enabled, |button| {
+            button
+                .cursor_pointer()
+                .hover(|style| style.bg(colors.accent_hover))
+        })
         .tooltip(move |_, cx| {
             cx.new(|_| ActionTooltip {
                 label: unavailable,
@@ -294,7 +380,9 @@ pub(crate) fn commit_option_chip(
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> gpui::AnyElement {
     div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("commit-option-chip:{label}").into(),
+        ))
         .h(px(LIST_ROW_HEIGHT))
         .px_2()
         .flex()
@@ -332,7 +420,9 @@ pub(crate) fn validated_action_button(
     }
     let tooltip_colors = *colors;
     div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("disabled-action-button:{label}").into(),
+        ))
         .h(px(ACTION_BUTTON_HEIGHT))
         .px_2()
         .flex()
@@ -665,7 +755,7 @@ fn segmented_toggle_tab(
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> gpui::AnyElement {
     let mut tab = div()
-        .id(label)
+        .id(gpui::ElementId::Name(format!("segment-tab:{label}").into()))
         .px_2()
         .py_0p5()
         .rounded(px(3.0))
@@ -931,7 +1021,10 @@ pub(crate) fn stacked_toolbar_button(
         colors.text_primary
     };
     div()
-        .id(tooltip_label)
+        .id(gpui::ElementId::Name(
+            format!("toolbar-button:{tooltip_label}").into(),
+        ))
+        .debug_selector(|| format!("toolbar-button:{tooltip_label}"))
         .w(px(48.0))
         .h(px(48.0))
         .flex()

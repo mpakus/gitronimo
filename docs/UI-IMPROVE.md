@@ -75,7 +75,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 **Guide text:** the first toolbar items are Back and Forward buttons to step back or replay your path.
 
-**Adopt in Gitronimo:** Gitronimo already tracks `navigation_back`/`navigation_forward` (actions `NavigateBack`/`NavigateForward`). Render them as visible toolbar buttons (disabled when empty), not only keyboard shortcuts.
+**Adopt in Gitronimo:** Gitronimo already tracks `navigation_back`/`navigation_forward` (actions `NavigateBack`/`NavigateForward`). The toolbar chevrons are the only navigation affordance — disabled when the stack is empty. The content area must not add its own Back/Forward row; that duplicated the toolbar and pushed both panes down by a row.
 
 ### 1.5 Sidebar — single source of navigation + remote activity
 
@@ -290,3 +290,6 @@ Professional Git-client polish targets for Gitronimo's own design system (`ui_ki
 - **Diff legibility:** preserve syntax-highlighted hunks, subtle background for added/removed lines, and a visible current-line indicator.
 - **Commit clarity:** the commit area should make "subject vs body", staged file count, and the Commit affordance unambiguous.
 - **Empty states:** every view needs a meaningful empty state (no changes, no history, no PRs, no accounts) rather than a blank panel.
+- **Button hierarchy:** the confirming action of a dialog or confirmation panel (Pull, Push HEAD, Merge, Commit, Confirm discard) is accent-filled via `primary_action_button`; Cancel, Close, and secondary navigation stay on `raised_background`. Both variants brighten on hover. Disabled buttons drop hover and pointer feedback, mute their label, and explain the missing precondition in their tooltip.
+- **Surfaces:** panels are flat and separated by borders, not by stacked fills. The commit composer shares the pane background so the subject and description fields are the only raised surfaces in the pane; a card fill there competed with the fields and the file list.
+- **Element ids:** button helpers namespace their GPUI ids (`action-button:{label}`, `toolbar-button:{label}`, …). Two elements sharing an id share interactive state, and the one that is not hovered swallows the other's click.

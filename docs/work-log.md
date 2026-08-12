@@ -1960,3 +1960,43 @@
 - Theme adds `toolbar_background`, `search_field_background`, `list_row_border`.
 
 **Verification:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (102 tests), and `cargo deny check` all pass. `cargo run -p gitronimo-desktop` launches successfully.
+
+## 2026-08-12 — Dialog buttons: unique element ids and accent primary style
+
+**Intent:** fix the dead Pull button in the Pull dialog and give confirming actions an accent (blue) fill so they read as the primary choice next to Cancel/Close.
+
+**Files:** `apps/desktop/src/views/components.rs`, `workspace.rs`, `working_copy.rs`, `toolbar.rs`, `commit_composer.rs`, `welcome.rs`, `commit_detail.rs`, `crates/ui_kit/src/theme.rs`, `apps/desktop/src/tests.rs`, `docs/UI-IMPROVE.md`, and this work log.
+
+**Root cause:** button helpers used the bare label as the GPUI element id, so the dialog's `Pull` button and the toolbar's `Pull` button shared one interactive state. The toolbar hitbox is not hovered on mouse-up, so its handler cleared the shared pending mouse-down and the dialog button never produced a click. The same collision existed for `Fetch` (Remotes view), `Services` (Pull Requests view), and `Amend` (composer checkbox vs commit button).
+
+**Acceptance checks:**
+- Every button helper namespaces its element id (`action-button:`, `toolbar-button:`, `mutation-button:`, `context-menu-item:`, …).
+- Clicking the rendered Pull button in the Pull dialog starts `git pull`; the toolbar Pull button still opens the dialog.
+- Confirming actions (Pull, Push HEAD, Merge, prompt confirm, discard/stash/force-with-lease confirmations) render with `accent` fill and `accent_foreground` text; Cancel/Close stay neutral.
+- Theme gains `accent_hover` and `accent_foreground` for both appearances.
+
+**Verification:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass. Two new GPUI click tests (`the_toolbar_pull_button_opens_the_pull_dialog`, `confirming_the_pull_dialog_starts_the_network_command`) fail without the id fix.
+
+## 2026-08-12 — Working Copy: drop the duplicated inline Back/Forward row
+
+**Intent:** remove the stray `Back` button above the Working Copy panes and the empty band it created across the content area.
+
+**Files:** `apps/desktop/src/views/working_copy.rs`, `apps/desktop/src/tests.rs`, `docs/UI-IMPROVE.md`, and this work log.
+
+**Design:** `navigation_controls` rendered a full-width row above the two panes whenever the navigation stack was non-empty, duplicating the toolbar chevrons (which dispatch the same `NavigateBack`/`NavigateForward` actions) and reserving a row of empty space to the right of the button. Deleted the helper and its call site.
+
+**Acceptance checks:** with navigation history present, the Working Copy content starts directly under the toolbar and no `Back` button renders; toolbar chevrons still navigate.
+
+**Verification:** `navigation_history_does_not_add_an_inline_back_row` asserts the row is absent. `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
+
+## 2026-08-12 — Commit composer: flush section and an unmistakable primary action
+
+**Intent:** drop the raised card fill behind the commit composer and make the Commit button read as active only when it can actually run.
+
+**Files:** `apps/desktop/src/views/commit_composer.rs`, `apps/desktop/src/views/components.rs`, `apps/desktop/src/tests.rs`, `docs/UI-IMPROVE.md`, and this work log.
+
+**Design:** the composer no longer paints its own background, margin, or rounded border; it is a flush section that shares the pane background and is separated from the file list by a single bottom border, so the subject/description fields are the only raised surfaces. `mutation_button` now mutes its label and drops hover/pointer feedback while disabled. `primary_window_action_button_with_reason` lets the composer state the missing precondition in the tooltip (`Stage at least one change to commit`, `Write a commit subject`, …) instead of one generic string; enabled it fills with `accent` and brightens on hover.
+
+**Acceptance checks:** the composer shows no card fill; Commit stays a muted chip until a subject is written and something is staged (or amend is on), then turns accent blue; the disabled tooltip names the missing precondition.
+
+**Verification:** `a_disabled_commit_button_names_what_is_missing` covers the reason matrix. `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.

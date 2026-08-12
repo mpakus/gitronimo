@@ -430,7 +430,9 @@ fn shell_tab_button(
         colors.text_muted
     };
     div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("shell-tab-button:{label}").into(),
+        ))
         .w(px(72.0))
         .h(px(48.0))
         .px_2()
@@ -486,7 +488,9 @@ fn icon_toolbar_button(
         colors.text_primary
     };
     div()
-        .id(tooltip_label)
+        .id(gpui::ElementId::Name(
+            format!("icon-toolbar-button:{tooltip_label}").into(),
+        ))
         .w(px(28.0))
         .h(px(28.0))
         .flex()

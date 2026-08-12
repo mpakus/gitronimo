@@ -8,7 +8,7 @@ use ui_kit::ThemeColors;
 use git_domain::HeadStatus;
 
 use crate::app_state::{GitronimoApp, Mutation};
-use crate::views::components::{mutation_button, primary_window_action_button};
+use crate::views::components::{mutation_button, primary_window_action_button_with_reason};
 use crate::views::icons::{IconKind, icon};
 use crate::views::single_line_input::{composer_multiline_shell, composer_subject_shell};
 
@@ -34,21 +34,20 @@ impl GitronimoApp {
         let subject_filled = !self.commit_subject.trim().is_empty();
         let expanded = self.commit_composer_expanded;
 
-        // Card padding (`p_3`) is the only horizontal inset for fields and footer.
+        // Flush section at the top of the file pane: it shares the pane background so the
+        // fields are the only raised surfaces, `px_3` is the sole horizontal inset, and the
+        // bottom border is the only separation from the file list.
         let mut card = div()
             .w_full()
             .flex_shrink_0()
-            .m_2()
             .px_3()
             .pt_3()
-            .pb_3()
+            .pb_2()
             .flex()
             .flex_col()
             .gap_2()
-            .rounded(px(8.0))
-            .bg(colors.raised_background)
-            .border_1()
-            .border_color(colors.border)
+            .border_b_1()
+            .border_color(colors.separator)
             .child(
                 div()
                     .w_full()
@@ -214,9 +213,15 @@ impl GitronimoApp {
                             String::new()
                         }),
                 )
-                .child(primary_window_action_button(
+                .child(primary_window_action_button_with_reason(
                     primary_label,
                     enabled,
+                    commit_unavailable_reason(
+                        self.mutation_in_flight,
+                        self.commit_subject.trim().is_empty(),
+                        staged_count,
+                        amending,
+                    ),
                     colors,
                     cx,
                     move |app, _, cx| {
@@ -246,6 +251,28 @@ impl GitronimoApp {
     }
 }
 
+/// Tooltip for a disabled Commit/Amend button: name the one thing still missing.
+pub(crate) fn commit_unavailable_reason(
+    mutation_in_flight: bool,
+    subject_empty: bool,
+    staged_count: usize,
+    amending: bool,
+) -> &'static str {
+    if mutation_in_flight {
+        "Another Git operation is still running"
+    } else if staged_count == 0 && !amending {
+        if subject_empty {
+            "Stage changes and write a commit subject"
+        } else {
+            "Stage at least one change to commit"
+        }
+    } else if subject_empty {
+        "Write a commit subject"
+    } else {
+        "Commit the staged changes"
+    }
+}
+
 fn split_author_identity(identity: &str) -> (String, String) {
     let identity = identity.trim();
     if identity.is_empty() || identity.starts_with("Loading") {
@@ -272,7 +299,9 @@ fn commit_checkbox(
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> AnyElement {
     div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("commit-checkbox:{label}").into(),
+        ))
         .flex()
         .items_center()
         .gap_1p5()

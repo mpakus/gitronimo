@@ -12,7 +12,7 @@ use crate::app_state::{
 
 use super::components::{
     activity_color, activity_label, error_view, file_action_button, loading_view,
-    sidebar_resize_handle,
+    primary_action_button, sidebar_resize_handle,
 };
 
 impl Render for GitronimoApp {
@@ -440,9 +440,14 @@ impl GitronimoApp {
                             .py_2()
                             .flex()
                             .gap_2()
-                            .child(file_action_button(confirm_label, colors, cx, |app, cx| {
-                                app.confirm_text_prompt(cx);
-                            }))
+                            .child(primary_action_button(
+                                confirm_label,
+                                colors,
+                                cx,
+                                |app, cx| {
+                                    app.confirm_text_prompt(cx);
+                                },
+                            ))
                             .child(file_action_button("Cancel", colors, cx, |app, cx| {
                                 app.cancel_text_prompt(cx);
                             })),
@@ -527,7 +532,7 @@ impl GitronimoApp {
                             .py_2()
                             .flex()
                             .gap_2()
-                            .child(file_action_button("Merge", colors, cx, |app, cx| {
+                            .child(primary_action_button("Merge", colors, cx, |app, cx| {
                                 app.confirm_choice_prompt(cx);
                             }))
                             .child(file_action_button("Cancel", colors, cx, |app, cx| {
@@ -896,7 +901,7 @@ impl GitronimoApp {
                             .child(file_action_button("Cancel", colors, cx, |app, cx| {
                                 app.close_pull_dialog(cx);
                             }))
-                            .child(file_action_button("Pull", colors, cx, |app, cx| {
+                            .child(primary_action_button("Pull", colors, cx, |app, cx| {
                                 app.confirm_pull_dialog(cx);
                             })),
                     ),
@@ -1210,7 +1215,7 @@ impl GitronimoApp {
                             .child(file_action_button("Cancel", colors, cx, |app, cx| {
                                 app.close_push_dialog(cx);
                             }))
-                            .child(file_action_button("Push HEAD", colors, cx, |app, cx| {
+                            .child(primary_action_button("Push HEAD", colors, cx, |app, cx| {
                                 app.confirm_push_dialog(cx);
                             })),
                     ),
@@ -1283,7 +1288,9 @@ fn welcome_plus_menu_item(
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> AnyElement {
     div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("welcome-plus-menu:{label}").into(),
+        ))
         .px_3()
         .py_1p5()
         .mx_1()

@@ -121,7 +121,9 @@ fn welcome_text_action(
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Window, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> AnyElement {
     div()
-        .id(label)
+        .id(gpui::ElementId::Name(
+            format!("welcome-button:{label}").into(),
+        ))
         .px_2()
         .py_1()
         .rounded(px(4.0))

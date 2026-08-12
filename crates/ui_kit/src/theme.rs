@@ -27,6 +27,10 @@ pub struct ThemeColors {
     pub text_secondary: Rgba,
     pub text_muted: Rgba,
     pub accent: Rgba,
+    /// Hover state for accent-filled controls.
+    pub accent_hover: Rgba,
+    /// Label color that stays readable on top of `accent`.
+    pub accent_foreground: Rgba,
     pub selection: Rgba,
     pub focus_ring: Rgba,
     pub success: Rgba,
@@ -66,6 +70,8 @@ impl Theme {
                 text_secondary: rgb(0x4b_5d_70),
                 text_muted: rgb(0x5e_6e_7e),
                 accent: rgb(0x00_68_cc),
+                accent_hover: rgb(0x00_57_ad),
+                accent_foreground: rgb(0xff_ff_ff),
                 selection: rgb(0xd6_e8_f8),
                 focus_ring: rgb(0x00_7a_eb),
                 success: rgb(0x12_8a_4b),
@@ -104,6 +110,8 @@ impl Theme {
                 text_secondary: rgb(0xb1_bd_cb),
                 text_muted: rgb(0x7e_8c_9d),
                 accent: rgb(0x43_9a_ff),
+                accent_hover: rgb(0x6a_b1_ff),
+                accent_foreground: rgb(0x0d_16_22),
                 selection: rgb(0x2a_3f_5c),
                 focus_ring: rgb(0x77_ba_ff),
                 success: rgb(0x49_c6_7c),
