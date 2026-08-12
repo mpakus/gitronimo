@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-08-11 — Stay on Working Copy after commit
+
+**Intent:** After a successful commit/amend from Working Copy, do not navigate to History; clear the composer, refresh status, and remain on Working Copy. Still remember the new OID so History can reveal it when the user opens that view later.
+
+**Files:** `apps/desktop/src/main.rs` (commit success path), `docs/UI-IMPROVE.md`, `docs/work-log.md`.
+
+**Acceptance:** Commit or Amend leaves the user on Working Copy with refreshed file list; History is not auto-opened.
+
+**Done:** removed `navigate_to(History)` / eager `load_history` from commit success path; still sets `history_reveal_oid` for later History open; clears selection/diff; docs updated.
+
 ## 2026-08-11 — Documentation pass + README screenshots
 
 **Intent:** Align all docs with current beta scope (Working Copy multi-select, History/sidebar polish, Services/PRs/stashes); add committed Gitronimo screenshots to README; index docs under `docs/README.md`.

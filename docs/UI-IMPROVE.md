@@ -197,7 +197,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 | 2   | Modified-only / All-files list-mode toggle                | Working Copy | now     |
 | 3   | Per-file stage checkbox + staged/unstaged badge           | Working Copy | now     |
 | 4   | Visible Back/Forward toolbar buttons                      | Toolbar      | now     |
-| 5   | Reveal new commit in History after committing             | History      | now     |
+| 5   | Remember new commit OID for History (stay on Working Copy after commit) | History / WC | now     |
 | 6   | Changeset / Tree mode toggle on commit detail             | History      | now     |
 | 7   | Commit Detail destination (double-click)                  | History      | now     |
 | 8   | Remote-activity progress in sidebar footer                | Sidebar      | now     |
@@ -213,7 +213,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Working Copy composer above file list, Modified/All Files toggle, per-file stage checkbox, staged/unstaged badges
 - [x] Working Copy multi-select: Command-A select all visible files; toggle deselect/reselect on row click when all selected; batch stage/unstage via checkbox on multi-selection
 - [x] Visible Back/Forward (Prev/Next) toolbar navigation with disabled state
-- [x] Reveal new commit in History after committing
+- [x] Remember new commit OID for History reveal; stay on Working Copy after commit (no auto-redirect)
 - [x] Commit Detail view with Changeset/Tree modes (double-click from History)
 - [x] Stashes, Remotes, and Git LFS sidebar destinations
 - [x] Repositories welcome view: grouped/flat recents, detail panel, Add/Create/Clone actions

@@ -5667,11 +5667,16 @@ return remote_url & linefeed & parent_path"#;
                         } else {
                             "Commit complete.".into()
                         };
-                        app.load_working_copy(repository.clone(), cx);
+                        app.selected_paths.clear();
+                        app.selected_diff = None;
+                        app.loaded_diff = None;
+                        app.selected_diff_lines.clear();
+                        app.file_list_select_all_armed = false;
+                        // Remember OID so History can select the new commit when opened later;
+                        // stay on Working Copy (do not auto-navigate).
                         app.history_reveal_oid = Some(oid);
-                        app.navigate_to(RepositoryView::History, cx);
                         app.reset_history();
-                        app.load_history(repository, None, cx);
+                        app.load_working_copy(repository, cx);
                     }
                     Err(error) => {
                         app.activity =
