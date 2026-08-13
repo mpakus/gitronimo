@@ -1,5 +1,21 @@
 # Implementation work log
 
+## 2026-08-12 — Keep composer open for Amend / Sign-off
+
+**Intent:** Checking Amend or Sign-off must keep the commit subject block expanded after focus leaves the fields.
+
+**Files:** `main.rs` (`sync_commit_composer_expanded`, `toggle_commit_sign_off`), `commit_composer.rs` (checkbox mouse-down), `single_line_input.rs`.
+
+**Acceptance:** With empty subject/body, checking Amend or Sign-off keeps the expanded composer open; unchecking both (and clearing fields) allows collapse.
+
+## 2026-08-12 — Faster commit composer expand
+
+**Intent:** Clicking Commit Subject felt delayed before the description/options appeared. Expand on mouse-down (not only focus-in) and use a short ease-out fade so the panel opens immediately but still smoothly.
+
+**Files:** `single_line_input.rs` (expand on mouse-down), `commit_composer.rs` (snappier reveal animation), `docs/work-log.md`.
+
+**Acceptance:** Subject click opens description + options with no noticeable pause; fade is short (ease-out); collapse behavior unchanged.
+
 ## 2026-08-12 — Branch delete confirmation + network progress chrome
 
 **Intent:** Delete branch from the sidebar must show a Yes/No confirmation popup from any view (not only Working Copy). Network ops (fetch/pull/push/…) must show an in-progress bar in the bottom-left UI so the user can see work is happening.

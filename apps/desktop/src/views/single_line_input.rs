@@ -286,6 +286,28 @@ impl SingleLineInput {
         // Explicit focus (rgitui text_input pattern). track_focus also auto-focuses when
         // the hitbox is hovered; call out so caret/IME activate even if a parent stole focus.
         self.focus_handle.focus(window);
+        // Expand the commit card on the same mouse-down as focus so details don't wait
+        // for the focus-in subscription (one frame later).
+        if matches!(
+            self.binding,
+            TextFieldBinding::CommitSubject | TextFieldBinding::CommitBody
+        ) {
+            let binding = self.binding;
+            self.app.update(cx, |app, cx| {
+                match binding {
+                    TextFieldBinding::CommitSubject => {
+                        app.commit_subject_focused = true;
+                        app.commit_composer_expanded = true;
+                    }
+                    TextFieldBinding::CommitBody => {
+                        app.commit_body_focused = true;
+                        app.commit_composer_expanded = true;
+                    }
+                    _ => {}
+                }
+                cx.notify();
+            });
+        }
         self.is_selecting = true;
         let index = self.index_for_mouse_position(event.position);
         if event.modifiers.shift {
@@ -977,6 +999,7 @@ impl GitronimoApp {
                 if !self.commit_body.trim().is_empty()
                     || !self.commit_subject.trim().is_empty()
                     || self.commit_amend
+                    || self.commit_sign_off
                     || self.commit_subject_focused
                     || self.commit_body_focused
                 {

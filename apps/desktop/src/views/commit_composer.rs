@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use gpui::{Animation, AnimationExt, AnyElement, div, ease_in_out, prelude::*, px};
+use gpui::{Animation, AnimationExt, AnyElement, MouseButton, div, ease_out_quint, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use git_domain::HeadStatus;
@@ -10,7 +10,9 @@ use git_domain::HeadStatus;
 use crate::app_state::{GitronimoApp, Mutation};
 use crate::views::components::{mutation_button, primary_window_action_button_with_reason};
 use crate::views::icons::{IconKind, icon};
-use crate::views::single_line_input::{composer_multiline_shell, composer_subject_shell};
+use crate::views::single_line_input::{
+    COMPOSER_BODY_HEIGHT, composer_multiline_shell, composer_subject_shell,
+};
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -95,15 +97,25 @@ impl GitronimoApp {
                 .next()
                 .map_or_else(|| "?".into(), |c| c.to_uppercase().to_string());
 
-            // Description must be a direct full-width flex_col child (like subject).
-            // Wrapping it in with_animation collapsed w_full against an indefinite
-            // containing block → ~0px vertical slit. Do not touch subject mounting.
+            // Reveal details with a short ease-out fade. Keep definite width/height on the
+            // animated wrappers so GPUI's AnimationElement does not collapse the fields
+            // (wrapping description alone previously shrank to a ~0px slit).
+            let reveal = Animation::new(Duration::from_millis(90)).with_easing(ease_out_quint());
             card = card
-                .child(composer_multiline_shell(
-                    self.commit_body_input.clone(),
-                    colors,
-                    self.commit_body_focused,
-                ))
+                .child(
+                    div()
+                        .id("commit-body-reveal")
+                        .w_full()
+                        .flex_shrink_0()
+                        .h(px(COMPOSER_BODY_HEIGHT))
+                        .min_h(px(COMPOSER_BODY_HEIGHT))
+                        .child(composer_multiline_shell(
+                            self.commit_body_input.clone(),
+                            colors,
+                            self.commit_body_focused,
+                        ))
+                        .with_animation("commit-body-fade", reveal.clone(), gpui::Styled::opacity),
+                )
                 .child(
                     div()
                         .id("commit-composer-options")
@@ -180,11 +192,7 @@ impl GitronimoApp {
                                         })),
                                 ),
                         )
-                        .with_animation(
-                            "commit-options-fade",
-                            Animation::new(Duration::from_millis(140)).with_easing(ease_in_out),
-                            gpui::Styled::opacity,
-                        ),
+                        .with_animation("commit-options-fade", reveal, gpui::Styled::opacity),
                 );
         }
 
@@ -306,7 +314,14 @@ fn commit_checkbox(
         .items_center()
         .gap_1p5()
         .cursor_pointer()
-        .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)))
+        // Toggle on mouse-down so Amend/Sign-off sticks before subject blur collapses the card.
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |app, _, _, cx| {
+                on_click(app, cx);
+                cx.stop_propagation();
+            }),
+        )
         .child(
             div()
                 .w(px(14.0))

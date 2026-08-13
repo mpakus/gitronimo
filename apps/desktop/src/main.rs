@@ -802,6 +802,7 @@ impl GitronimoApp {
         let keep_open = self.commit_subject_focused
             || self.commit_body_focused
             || self.commit_amend
+            || self.commit_sign_off
             || !self.commit_subject.trim().is_empty()
             || !self.commit_body.trim().is_empty();
         if self.commit_composer_expanded != keep_open {
@@ -6393,6 +6394,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     }
     fn toggle_commit_sign_off(&mut self, cx: &mut Context<Self>) {
         self.commit_sign_off = !self.commit_sign_off;
+        if self.commit_sign_off {
+            self.commit_composer_expanded = true;
+        } else {
+            self.sync_commit_composer_expanded(cx);
+        }
         cx.notify();
     }
 
