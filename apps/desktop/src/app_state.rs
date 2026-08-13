@@ -187,12 +187,21 @@ pub(crate) enum ForcePushState {
 pub(crate) enum AppConfirmDialog {
     /// Safe delete refused because the branch is not fully merged.
     ForceDeleteBranch { branch: String },
+    /// Hard reset discards uncommitted work and moves HEAD.
+    HardReset { oid: String },
+    /// Create a revert commit for the selected history commit.
+    RevertCommit { oid: String },
+    /// Drop a commit from the current branch history via rebase.
+    DropCommit { oid: String },
 }
 
 impl AppConfirmDialog {
     pub(crate) fn title(&self) -> String {
         match self {
             Self::ForceDeleteBranch { .. } => "Could Not Delete Branch".into(),
+            Self::HardReset { .. } => "Hard Reset".into(),
+            Self::RevertCommit { .. } => "Revert Commit".into(),
+            Self::DropCommit { .. } => "Delete Commit".into(),
         }
     }
 
@@ -201,6 +210,22 @@ impl AppConfirmDialog {
             Self::ForceDeleteBranch { branch } => format!(
                 "The branch \"{branch}\" contains unmerged changes. Do you really want to delete it?"
             ),
+            Self::HardReset { oid } => {
+                let short = short_commit_label(oid);
+                format!(
+                    "Reset HEAD hard to \"{short}\"? Uncommitted changes and commits after this point will be discarded."
+                )
+            }
+            Self::RevertCommit { oid } => {
+                let short = short_commit_label(oid);
+                format!("Create a revert commit for \"{short}\"?")
+            }
+            Self::DropCommit { oid } => {
+                let short = short_commit_label(oid);
+                format!(
+                    "Delete \"{short}\" from the current branch? This rewrites history via rebase."
+                )
+            }
         }
     }
 
@@ -210,9 +235,25 @@ impl AppConfirmDialog {
 
     pub(crate) fn confirm_label(&self) -> &'static str {
         match self {
-            Self::ForceDeleteBranch { .. } => "Delete",
+            Self::ForceDeleteBranch { .. } | Self::DropCommit { .. } => "Delete",
+            Self::HardReset { .. } => "Reset",
+            Self::RevertCommit { .. } => "Revert",
         }
     }
+}
+
+fn short_commit_label(oid: &str) -> String {
+    oid.chars().take(8).collect()
+}
+
+/// Selected History commit for the right-click context menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CommitContext {
+    pub oid: String,
+    pub short_oid: String,
+    pub index: usize,
+    pub subject: String,
+    pub is_head: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -274,6 +315,10 @@ pub(crate) enum ChoicePromptKind {
         id: String,
     },
     HistoryFilter,
+    /// Soft / Mixed / Hard reset of HEAD to `oid`.
+    ResetMode {
+        oid: String,
+    },
 }
 
 pub(crate) const MERGE_TOOL_CHOICES: &[&str] = &["opendiff", "meld", "kdiff3", "vimdiff", "bc3"];
@@ -294,6 +339,8 @@ pub(crate) const HISTORY_FILTER_CHOICES: &[&str] = &[
     "New branch from commit…",
 ];
 
+pub(crate) const RESET_MODE_CHOICES: &[&str] = &["Soft", "Mixed (Keep Changes)", "Hard"];
+
 impl ChoicePromptKind {
     pub(crate) fn title(&self) -> String {
         match self {
@@ -311,6 +358,9 @@ impl ChoicePromptKind {
             }
             Self::BookmarkFolderActions { .. } => "Group".into(),
             Self::HistoryFilter => "History filter".into(),
+            Self::ResetMode { oid } => {
+                format!("Reset HEAD to \"{}\"", short_commit_label(oid))
+            }
         }
     }
 
@@ -324,6 +374,7 @@ impl ChoicePromptKind {
             Self::ConfirmMergePullRequest { .. } => Vec::new(),
             Self::BookmarkFolderActions { .. } => vec!["Rename…", "Delete Group"],
             Self::HistoryFilter => HISTORY_FILTER_CHOICES.to_vec(),
+            Self::ResetMode { .. } => RESET_MODE_CHOICES.to_vec(),
         }
     }
 
@@ -700,6 +751,9 @@ pub(crate) struct GitronimoApp {
     /// Window coordinates of the right-click that opened the ref menu.
     pub ref_context_menu_position: Option<(f32, f32)>,
     pub ref_context_submenu: Option<RefContextSubmenu>,
+    /// History commit under the right-click context menu.
+    pub commit_context: Option<CommitContext>,
+    pub commit_context_menu_position: Option<(f32, f32)>,
     /// Pinned and archived local branches for the open repository.
     pub branch_organization: app_core::BranchOrganization,
     pub selected_paths: Vec<GitPath>,

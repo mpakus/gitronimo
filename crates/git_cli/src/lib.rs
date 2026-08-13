@@ -38,6 +38,24 @@ pub struct CommitRequest {
     pub sign_off: bool,
 }
 
+/// How far `git reset` moves the index and worktree relative to `HEAD`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetMode {
+    Soft,
+    Mixed,
+    Hard,
+}
+
+impl ResetMode {
+    pub(crate) const fn flag(self) -> &'static str {
+        match self {
+            Self::Soft => "--soft",
+            Self::Mixed => "--mixed",
+            Self::Hard => "--hard",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthorIdentity {
     pub name: String,
@@ -1122,6 +1140,53 @@ impl GitExecutable {
         branch: &str,
     ) -> Result<(), GitStatusError> {
         self.mutate(repository, ["switch", branch])
+    }
+
+    /// Checks out a commit in detached HEAD state (`git switch --detach`).
+    ///
+    /// # Errors
+    /// Returns Git's actionable failure, including dirty-worktree rejection.
+    pub fn checkout_detached(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["switch", "--detach", oid])
+    }
+
+    /// Moves `HEAD` (and optionally the index/worktree) to `oid`.
+    ///
+    /// # Errors
+    /// Returns Git's refusal for an unknown commit or a blocked hard reset.
+    pub fn reset_to(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+        mode: ResetMode,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["reset", mode.flag(), oid])
+    }
+
+    /// Writes a single-commit patch for `oid` into `output_dir` via `format-patch`.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the commit is unknown or the directory is unwritable.
+    pub fn format_patch_to_dir(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+        output_dir: &Path,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(
+            repository,
+            [
+                OsString::from("format-patch"),
+                OsString::from("-1"),
+                OsString::from(oid),
+                OsString::from("-o"),
+                output_dir.as_os_str().to_owned(),
+            ],
+        )
     }
 
     /// Creates a local branch that tracks `remote_branch` (e.g. `origin/feature`)
@@ -3239,7 +3304,7 @@ mod tests {
 
     use super::{
         CommitRequest, GitExecutable, GitStatusError, MAX_PROCESS_OUTPUT_BYTES, RenameKind,
-        git_candidates, parse_commit_records, parse_git_progress_line, parse_lfs_status,
+        ResetMode, git_candidates, parse_commit_records, parse_git_progress_line, parse_lfs_status,
         parse_nul_paths, parse_numstat_line, parse_porcelain_v2_z, parse_rebase_todo,
         parse_ref_ahead_behind, parse_ref_snapshot, parse_signature, parse_stash_records,
         parse_unified_diff, read_limited, trim_oid,
@@ -3478,6 +3543,106 @@ mod tests {
             git_candidates()
                 .iter()
                 .any(|path| path == std::path::Path::new("/usr/bin/git"))
+        );
+    }
+
+    fn rev_parse(repository: &Repository, rev: &str) -> String {
+        String::from_utf8(
+            repository
+                .git
+                .run(&repository.path, ["rev-parse", rev])
+                .expect("rev-parse should run")
+                .stdout,
+        )
+        .expect("oid utf-8")
+        .trim()
+        .to_owned()
+    }
+
+    fn worktree_of(repository: &Repository) -> git_domain::WorktreeRepository {
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("fixture should be a worktree")
+        else {
+            panic!("fixture should be a working tree");
+        };
+        worktree
+    }
+
+    #[test]
+    fn checkout_detached_leaves_head_detached() {
+        let repository = Repository::new();
+        repository.commit("first");
+        repository.commit("second");
+        let worktree = worktree_of(&repository);
+        let first_oid = rev_parse(&repository, "HEAD~1");
+        repository
+            .git
+            .checkout_detached(&worktree, &first_oid)
+            .expect("detach onto first commit");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status after detach");
+        assert_eq!(status.branch.head, HeadStatus::Detached);
+    }
+
+    #[test]
+    fn reset_to_supports_soft_mixed_and_hard() {
+        let repository = Repository::new();
+        repository.commit("first");
+        repository.commit("second");
+        let worktree = worktree_of(&repository);
+        let first_oid = rev_parse(&repository, "HEAD~1");
+        repository
+            .git
+            .reset_to(&worktree, &first_oid, ResetMode::Soft)
+            .expect("soft reset");
+        let soft = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status after soft reset");
+        assert!(!soft.entries.is_empty(), "soft reset keeps later change");
+        assert_eq!(rev_parse(&repository, "HEAD"), first_oid);
+
+        repository.success(["reset", "--hard", "HEAD"]);
+        repository.commit("third");
+        let before = rev_parse(&repository, "HEAD~1");
+        repository
+            .git
+            .reset_to(&worktree, &before, ResetMode::Mixed)
+            .expect("mixed reset");
+        repository
+            .git
+            .reset_to(&worktree, &before, ResetMode::Hard)
+            .expect("hard reset");
+        assert_eq!(rev_parse(&repository, "HEAD"), before);
+    }
+
+    #[test]
+    fn format_patch_to_dir_writes_one_patch() {
+        let repository = Repository::new();
+        repository.commit("first");
+        let worktree = worktree_of(&repository);
+        let tip = rev_parse(&repository, "HEAD");
+        let patch_dir = repository.path.join("patches");
+        fs::create_dir(&patch_dir).expect("patch dir");
+        repository
+            .git
+            .format_patch_to_dir(&worktree, &tip, &patch_dir)
+            .expect("format-patch writes one file");
+        let patches: Vec<_> = fs::read_dir(&patch_dir)
+            .expect("patch dir reads")
+            .filter_map(Result::ok)
+            .collect();
+        assert_eq!(patches.len(), 1, "exactly one patch file");
+        assert!(
+            patches[0]
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "patch"),
+            "format-patch emits a .patch file"
         );
     }
 

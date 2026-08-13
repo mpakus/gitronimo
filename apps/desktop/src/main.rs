@@ -30,7 +30,7 @@ use app_core::{
     RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError, SecretStore, WindowGeometry,
     open_repository,
 };
-use git_cli::{CommitRequest, GitExecutable, GitStatusError, parse_git_progress_line};
+use git_cli::{CommitRequest, GitExecutable, GitStatusError, ResetMode, parse_git_progress_line};
 use git_domain::{
     ConflictSide, FileHistoryRequest, GitPath, GraphState, HeadStatus, HistoryPage,
     HistoryReference, HistoryRequest, RefSnapshot, ReflogRequest, TreeEntry, TreeEntryKind,
@@ -51,7 +51,7 @@ use crate::actions::{
     WidenSidebar,
 };
 use crate::app_state::{
-    ACTIVITY_LOG_CAPACITY, ActivityLogEntry, AppConfirmDialog, ChoicePromptKind,
+    ACTIVITY_LOG_CAPACITY, ActivityLogEntry, AppConfirmDialog, ChoicePromptKind, CommitContext,
     DEFAULT_LIST_PANE_WIDTH, DEFAULT_SIDEBAR_WIDTH, ForcePushState, GitronimoApp,
     HistoryDetailMode, LastAction, Mutation, NetworkOperation, OpenedRepository, OperationAction,
     OverlayFocus, PR_MERGE_METHOD_CHOICES, PaletteCommand, PullDialogState, PushDialogState,
@@ -382,6 +382,8 @@ impl GitronimoApp {
             ref_context: None,
             ref_context_menu_position: None,
             ref_context_submenu: None,
+            commit_context: None,
+            commit_context_menu_position: None,
             branch_organization,
             selected_paths: Vec::new(),
             last_selected_path_index: None,
@@ -624,6 +626,8 @@ impl GitronimoApp {
             ref_context: None,
             ref_context_menu_position: None,
             ref_context_submenu: None,
+            commit_context: None,
+            commit_context_menu_position: None,
             branch_organization,
             selected_paths: Vec::new(),
             last_selected_path_index: None,
@@ -908,6 +912,8 @@ impl GitronimoApp {
                 self.ref_context = None;
                 self.ref_context_menu_position = None;
                 self.ref_context_submenu = None;
+                self.commit_context = None;
+                self.commit_context_menu_position = None;
                 if let ShellState::Repository(repository) = &self.state {
                     self.branch_organization = self
                         .store
@@ -1519,7 +1525,7 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
-    fn navigate_to(&mut self, view: RepositoryView, cx: &mut Context<Self>) {
+    pub(crate) fn navigate_to(&mut self, view: RepositoryView, cx: &mut Context<Self>) {
         if self.repository_view != view {
             self.navigation_back.push(self.repository_view);
             self.navigation_forward.clear();
@@ -1580,10 +1586,27 @@ return remote_url & linefeed & parent_path"#;
                 self.pending_branch_delete = Some(branch);
                 self.confirm_branch_delete(true, cx);
             }
+            AppConfirmDialog::HardReset { oid } => {
+                self.run_reset_to(&oid, ResetMode::Hard, cx);
+            }
+            AppConfirmDialog::RevertCommit { oid } => {
+                self.run_worktree_mutation(
+                    format!("Revert {}", oid.chars().take(8).collect::<String>()),
+                    move |git, repository| git.revert_commit(repository, &oid),
+                    cx,
+                );
+            }
+            AppConfirmDialog::DropCommit { oid } => {
+                self.run_worktree_mutation(
+                    format!("Drop {}", oid.chars().take(8).collect::<String>()),
+                    move |git, repository| git.drop_commit(repository, &oid),
+                    cx,
+                );
+            }
         }
     }
 
-    fn begin_text_prompt(
+    pub(crate) fn begin_text_prompt(
         &mut self,
         kind: TextPromptKind,
         initial: impl Into<String>,
@@ -1979,7 +2002,8 @@ return remote_url & linefeed & parent_path"#;
             ChoicePromptKind::SetMergeTool
             | ChoicePromptKind::MergePullRequest { .. }
             | ChoicePromptKind::BookmarkFolderActions { .. }
-            | ChoicePromptKind::HistoryFilter => {
+            | ChoicePromptKind::HistoryFilter
+            | ChoicePromptKind::ResetMode { .. } => {
                 let options = kind.filtered_options(&self.choice_prompt_query);
                 let Some((_, label)) = options
                     .get(
@@ -2093,6 +2117,26 @@ return remote_url & linefeed & parent_path"#;
                     _ => {}
                 }
             }
+            ChoicePromptKind::ResetMode { oid } => {
+                self.apply_reset_mode_choice(oid, label, cx);
+            }
+        }
+    }
+
+    fn apply_reset_mode_choice(&mut self, oid: &str, label: &str, cx: &mut Context<Self>) {
+        self.pending_choice_prompt = None;
+        self.choice_prompt_query.clear();
+        self.choice_prompt_selected = 0;
+        match label {
+            "Soft" => self.run_reset_to(oid, ResetMode::Soft, cx),
+            "Mixed (Keep Changes)" => self.run_reset_to(oid, ResetMode::Mixed, cx),
+            "Hard" => {
+                self.confirm_dialog = Some(AppConfirmDialog::HardReset {
+                    oid: oid.to_owned(),
+                });
+                cx.notify();
+            }
+            _ => {}
         }
     }
 
@@ -2187,7 +2231,7 @@ return remote_url & linefeed & parent_path"#;
         self.begin_text_prompt(TextPromptKind::BranchRename { current }, "", cx);
     }
 
-    fn prompt_create_branch_from_ref(&mut self, start: String, cx: &mut Context<Self>) {
+    pub(crate) fn prompt_create_branch_from_ref(&mut self, start: String, cx: &mut Context<Self>) {
         self.begin_text_prompt(TextPromptKind::CreateBranch { start: Some(start) }, "", cx);
     }
 
@@ -3890,7 +3934,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         self.begin_text_prompt(TextPromptKind::DropCommit, "HEAD~1", cx);
     }
 
-    fn prompt_reword_last_commit(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn prompt_reword_last_commit(&mut self, cx: &mut Context<Self>) {
         self.begin_text_prompt(TextPromptKind::RewordSubject, "", cx);
     }
 
@@ -5276,6 +5320,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         position: (f32, f32),
         cx: &mut Context<Self>,
     ) {
+        self.close_commit_context_menu(cx);
         self.ref_context = Some(context);
         self.ref_context_menu_position = Some(position);
         self.ref_context_submenu = None;
@@ -5289,6 +5334,199 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         if closed {
             cx.notify();
         }
+    }
+
+    pub(crate) fn open_commit_context_menu(
+        &mut self,
+        index: usize,
+        repository: WorktreeRepository,
+        position: (f32, f32),
+        cx: &mut Context<Self>,
+    ) {
+        let Some(commit) = self.history.get(index).cloned() else {
+            return;
+        };
+        self.close_ref_context_menu(cx);
+        self.select_history_commit(index, repository, cx);
+        let short_oid = commit.oid.chars().take(8).collect();
+        let subject = String::from_utf8_lossy(&commit.subject).into_owned();
+        let is_head = self
+            .head_commit_oid()
+            .is_some_and(|head| head == commit.oid);
+        self.commit_context = Some(CommitContext {
+            oid: commit.oid,
+            short_oid,
+            index,
+            subject,
+            is_head,
+        });
+        self.commit_context_menu_position = Some(position);
+        cx.notify();
+    }
+
+    pub(crate) fn close_commit_context_menu(&mut self, cx: &mut Context<Self>) {
+        let closed = self.commit_context.take().is_some()
+            || self.commit_context_menu_position.take().is_some();
+        if closed {
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn history_is_head_branch_scope(&self) -> bool {
+        let Some(head) = self.head_branch_name() else {
+            return false;
+        };
+        match &self.history_reference {
+            HistoryReference::Current => true,
+            HistoryReference::Named(name) => name == &head,
+            HistoryReference::All => false,
+        }
+    }
+
+    fn head_commit_oid(&self) -> Option<String> {
+        self.working_copy.as_ref().and_then(|status| {
+            status
+                .branch
+                .oid
+                .as_ref()
+                .and_then(|bytes| String::from_utf8(bytes.clone()).ok())
+        })
+    }
+
+    pub(crate) fn copy_commit_hash(&mut self, oid: &str, cx: &mut Context<Self>) {
+        let short = oid.chars().take(8).collect::<String>();
+        let text = format!("{short}\n{oid}");
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.set_activity(format!("Copied commit hash {short}."));
+        cx.notify();
+    }
+
+    pub(crate) fn copy_commit_info(&mut self, index: usize, oid: &str, cx: &mut Context<Self>) {
+        let Some(commit) = self.history.get(index) else {
+            self.copy_commit_hash(oid, cx);
+            return;
+        };
+        let author = String::from_utf8_lossy(&commit.author.name);
+        let email = String::from_utf8_lossy(&commit.author.email);
+        let subject = String::from_utf8_lossy(&commit.subject);
+        let when = crate::views::components::short_calendar_date(commit.author.timestamp);
+        let text =
+            format!("Author: {author} <{email}>\nDate: {when}\nSubject: {subject}\nCommit: {oid}");
+        cx.write_to_clipboard(ClipboardItem::new_string(text));
+        self.set_activity("Copied commit info.");
+        cx.notify();
+    }
+
+    pub(crate) fn reveal_history_commit(&mut self, index: usize, cx: &mut Context<Self>) {
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        self.navigate_to(RepositoryView::History, cx);
+        self.select_history_commit(index, repository, cx);
+    }
+
+    pub(crate) fn checkout_detached_commit(&mut self, oid: &str, cx: &mut Context<Self>) {
+        let short = oid.chars().take(8).collect::<String>();
+        let oid = oid.to_owned();
+        self.run_worktree_mutation(
+            format!("Checking out {short} (detached)"),
+            move |git, repository| git.checkout_detached(repository, &oid),
+            cx,
+        );
+    }
+
+    pub(crate) fn prompt_reset_head_to(&mut self, oid: &str, cx: &mut Context<Self>) {
+        self.begin_choice_prompt(
+            ChoicePromptKind::ResetMode {
+                oid: oid.to_owned(),
+            },
+            cx,
+        );
+    }
+
+    pub(crate) fn prompt_revert_commit(&mut self, oid: &str, cx: &mut Context<Self>) {
+        self.confirm_dialog = Some(AppConfirmDialog::RevertCommit {
+            oid: oid.to_owned(),
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn prompt_rebase_onto_commit(&mut self, oid: &str, cx: &mut Context<Self>) {
+        self.begin_text_prompt(TextPromptKind::RebaseOnto, oid, cx);
+    }
+
+    pub(crate) fn prompt_drop_history_commit(&mut self, oid: &str, cx: &mut Context<Self>) {
+        self.confirm_dialog = Some(AppConfirmDialog::DropCommit {
+            oid: oid.to_owned(),
+        });
+        cx.notify();
+    }
+
+    fn run_reset_to(&mut self, oid: &str, mode: ResetMode, cx: &mut Context<Self>) {
+        let short = oid.chars().take(8).collect::<String>();
+        let mode_label = match mode {
+            ResetMode::Soft => "soft",
+            ResetMode::Mixed => "mixed",
+            ResetMode::Hard => "hard",
+        };
+        let oid = oid.to_owned();
+        self.run_worktree_mutation(
+            format!("Reset {mode_label} to {short}"),
+            move |git, repository| git.reset_to(repository, &oid, mode),
+            cx,
+        );
+    }
+
+    pub(crate) fn save_commit_patch(&mut self, oid: &str, cx: &mut Context<Self>) {
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let oid = oid.to_owned();
+        let short = oid.chars().take(8).collect::<String>();
+        cx.spawn(async move |this, cx| {
+            let destination = cx
+                .background_spawn(async move {
+                    let output = Command::new("osascript")
+                        .args([
+                            "-e",
+                            "POSIX path of (choose folder with prompt \"Save patch to folder\")",
+                        ])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())?;
+                    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+                    (!path.is_empty()).then(|| PathBuf::from(path))
+                })
+                .await;
+            let Some(destination) = destination else {
+                return;
+            };
+            let result = cx
+                .background_spawn({
+                    let repository = repository.clone();
+                    let oid = oid.clone();
+                    let destination = destination.clone();
+                    async move {
+                        let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                        git.format_patch_to_dir(&repository, &oid, &destination)
+                            .map_err(|error| format!("{error:?}"))
+                    }
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                match result {
+                    Ok(()) => app.set_activity(format!(
+                        "Saved patch for {short} to {}.",
+                        destination.display()
+                    )),
+                    Err(error) => app.set_activity(format!("Save patch failed: {error}")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     pub(crate) fn open_ref_context_submenu(
@@ -6545,7 +6783,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         window.focus(&self.commit_subject_input.focus_handle(cx));
         cx.notify();
     }
-    fn toggle_commit_amend(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_commit_amend(&mut self, cx: &mut Context<Self>) {
         if self.commit_amend {
             self.commit_amend = false;
             self.commit_amend_short_oid = None;

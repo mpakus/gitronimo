@@ -7,6 +7,7 @@
 pub(crate) mod blame;
 pub(crate) mod branches_review;
 pub(crate) mod commit_composer;
+pub(crate) mod commit_context_menu;
 pub(crate) mod commit_detail;
 pub(crate) mod compare;
 pub(crate) mod components;

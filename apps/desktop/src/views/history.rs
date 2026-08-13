@@ -1,8 +1,8 @@
 //! History view: virtualized commit rows, graph canvas, search, inspector.
 
 use gpui::{
-    Bounds, ClickEvent, PathBuilder, Pixels, Rgba, SharedString, canvas, div, list, point,
-    prelude::*, px,
+    Bounds, ClickEvent, MouseButton, MouseDownEvent, PathBuilder, Pixels, Rgba, SharedString,
+    canvas, div, list, point, prelude::*, px,
 };
 use ui_kit::ThemeColors;
 
@@ -164,6 +164,7 @@ impl GitronimoApp {
                         refs,
                     } => {
                         let repository = list_repository.clone();
+                        let menu_repository = list_repository.clone();
                         let selected_row = selected == Some(history_index);
                         let primary = if selected_row {
                             list_colors.panel_background
@@ -318,6 +319,17 @@ impl GitronimoApp {
                                 app.show_commit_detail(&repository, history_index, cx);
                             }
                         }))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |app, event: &MouseDownEvent, _, cx| {
+                                app.open_commit_context_menu(
+                                    history_index,
+                                    menu_repository.clone(),
+                                    (f32::from(event.position.x), f32::from(event.position.y)),
+                                    cx,
+                                );
+                            }),
+                        )
                         .into_any_element()
                     }
                 }

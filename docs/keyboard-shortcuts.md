@@ -95,6 +95,14 @@ The destination is pushed as `<remote> HEAD:<branch>`; picking a remote branch t
 | Archive | Branch moves under **ARCHIVED** |
 | Delete… | Cancel / Delete (`git branch -d`); if unmerged → **Could Not Delete Branch** Cancel / Delete force (`-D`) |
 
+## History
+
+| Interaction | Behavior |
+|-------------|----------|
+| Left-click commit | Select row and load changeset detail |
+| Double-click commit | Open Commit Detail |
+| Right-click commit | Commit context menu (copy, checkout, reset/revert/rebase, amend, branch/tag, patch, export, compare) |)
+
 ## Welcome window
 
 Welcome search and repository actions use the command palette and toolbar; see in-app menus for repository-specific shortcuts.

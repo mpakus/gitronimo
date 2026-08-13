@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-12 — History commit context menu (Tower-style)
+
+**Intent:** Right-click a History commit to open a Tower-grouped menu (copy, checkout detach, reset/revert/rebase with confirms, amend/reword when HEAD, create branch/tag, patch, export, compare). Approach from Tower Commit History / Undoing Commits / Checkout guides; original menu chrome reused from ref context menu.
+
+**Files:** `crates/git_cli` (detach/reset/format-patch), `app_state.rs` (CommitContext, confirms, reset choice), `views/commit_context_menu.rs`, `history.rs`, `workspace.rs`, `main.rs`, `docs/desktop-shell.md`, `docs/UI-IMPROVE.md`, `docs/work-log.md`.
+
+**Acceptance:** Right-click opens menu; Reset/Revert/Delete gated to HEAD-branch history scope; Hard reset / Revert / Delete confirm; Amend & Edit Message only on HEAD; Edit disabled with reason; gates pass. **Done.**
+
 ## 2026-08-12 — Docs: shell chrome functional pass
 
 **Intent:** After the shell feature commits (message history, force-delete confirm, pins, palette), sync `docs/` and `AGENTS.md` with the shipped behavior.

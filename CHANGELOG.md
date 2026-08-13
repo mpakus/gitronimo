@@ -9,6 +9,7 @@
 - Branch delete Cancel/Delete; unmerged tips open **Could Not Delete Branch** for force delete (`git branch -D`).
 - Pinned branches persist per repository and sort flat at the top of BRANCHES; preference writes are serialized so geometry saves cannot wipe pins.
 - Network progress strip in the bottom activity bar during fetch/pull/push/sync.
+- History commit context menu (right-click): copy, detached checkout, reset/revert/rebase with confirms, amend/reword on HEAD, branch/tag/patch/export/compare.
 
 ## 0.1.0 beta
 

@@ -129,6 +129,10 @@ impl Render for GitronimoApp {
                 self.ref_context_menu_overlay(&colors, cx)
                     .into_any_element()
             }))
+            .children(self.commit_context.is_some().then(|| {
+                self.commit_context_menu_overlay(&colors, cx)
+                    .into_any_element()
+            }))
             .children(
                 self.pull_dialog
                     .is_some()

@@ -10,7 +10,7 @@ Functional reference for the repository window chrome that sits outside individu
 │ BRANCHES│                                                                   │
 │ (pins…) │                                                                   │
 ├─ Activity bar: [history] [network progress…] status line ───────────────────┤
-└─ Overlays: command palette, text/choice prompts, Pull/Push, confirms ───────┘
+└─ Overlays: palette, prompts, ref/commit menus, Pull/Push, confirms ─────────┘
 ```
 
 Preferences live at `~/Library/Application Support/Gitronimo/recent-repositories.json` (schema v1).
@@ -35,9 +35,21 @@ Destructive or blocked Git outcomes use modal overlays (not only the activity fl
 | Flow | First step | Second step (if needed) |
 |------|------------|-------------------------|
 | Delete local branch | **Delete Branch** — Cancel / Delete (`git branch -d`) | If not fully merged → **Could Not Delete Branch** — Cancel / Delete (`git branch -D`) via `AppConfirmDialog::ForceDeleteBranch` |
+| History → Hard reset | Choice prompt Soft / Mixed / Hard | **Hard Reset** confirm via `AppConfirmDialog::HardReset` |
+| History → Revert / Delete | `AppConfirmDialog::RevertCommit` / `DropCommit` | — |
 | Force push | Existing force-with-lease confirmation | — |
 
 `AppConfirmDialog` is the shared enum for blocked-action confirmations; render through `workspace` modal helpers. Domain logic stays in `main.rs`, not in `Render`.
+
+## History commit context menu
+
+Right-click a History commit (`views/commit_context_menu.rs`) for a Tower-grouped menu (quoted short OID labels):
+
+- Copy hash / info, Reveal in History, Check Out (detached), Create branch/tag, Save Patch, Export Files, Compare
+- Reset / Revert / Rebase / Delete — enabled only when History is scoped to the current HEAD branch (`Current` or that branch’s named filter); otherwise disabled with a tooltip
+- Amend and Edit Commit Message — HEAD commit only; **Edit** stays disabled (no interactive rebase-edit from History yet)
+
+Chrome matches the sidebar ref menu (cursor-anchored overlay).
 
 ## Pinned and archived branches
 
