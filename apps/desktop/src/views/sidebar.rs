@@ -149,15 +149,23 @@ impl GitronimoApp {
                     .flex_col()
                     .child(sidebar_section_label("BRANCHES", colors))
                     .children({
-                        let (active, archived) = self.partition_local_branches();
-                        let mut rows = self.ref_rows(
+                        let (pinned, active, archived) = self.partition_local_branches();
+                        let mut rows = self.flat_ref_rows(
+                            "local-pinned",
+                            &pinned,
+                            RefKind::LocalBranch,
+                            current_branch.as_deref(),
+                            colors,
+                            cx,
+                        );
+                        rows.extend(self.ref_rows(
                             "local",
                             &active,
                             RefKind::LocalBranch,
                             current_branch.as_deref(),
                             colors,
                             cx,
-                        );
+                        ));
                         if !archived.is_empty() {
                             rows.push(sidebar_section_label("ARCHIVED", colors));
                             rows.extend(self.ref_rows(
@@ -334,9 +342,9 @@ impl GitronimoApp {
             .into_any_element()
     }
 
-    /// Active local branches (pinned first) and archived local branches.
-    fn partition_local_branches(&self) -> (Vec<NamedRef>, Vec<NamedRef>) {
-        let pinned: std::collections::HashSet<&str> = self
+    /// Pinned (pin order), remaining active, and archived local branches.
+    fn partition_local_branches(&self) -> (Vec<NamedRef>, Vec<NamedRef>, Vec<NamedRef>) {
+        let pinned_names: std::collections::HashSet<&str> = self
             .branch_organization
             .pinned
             .iter()
@@ -348,23 +356,131 @@ impl GitronimoApp {
             .iter()
             .map(String::as_str)
             .collect();
+        let by_name: std::collections::HashMap<String, NamedRef> = self
+            .refs
+            .local_branches
+            .iter()
+            .filter_map(|reference| {
+                String::from_utf8(reference.name.0.clone())
+                    .ok()
+                    .map(|name| (name, reference.clone()))
+            })
+            .collect();
+        let pinned_refs = self
+            .branch_organization
+            .pinned
+            .iter()
+            .filter_map(|name| by_name.get(name).cloned())
+            .collect();
         let mut active = Vec::new();
         let mut archived_refs = Vec::new();
-        let mut pinned_refs = Vec::new();
         for reference in &self.refs.local_branches {
             let Ok(name) = String::from_utf8(reference.name.0.clone()) else {
                 continue;
             };
             if archived.contains(name.as_str()) {
                 archived_refs.push(reference.clone());
-            } else if pinned.contains(name.as_str()) {
-                pinned_refs.push(reference.clone());
+            } else if pinned_names.contains(name.as_str()) {
+                // Listed under PINNED only.
             } else {
                 active.push(reference.clone());
             }
         }
-        pinned_refs.append(&mut active);
-        (pinned_refs, archived_refs)
+        (pinned_refs, active, archived_refs)
+    }
+
+    /// Root-level ref rows without folder nesting (used for PINNED).
+    fn flat_ref_rows(
+        &self,
+        id_prefix: &'static str,
+        refs: &[NamedRef],
+        kind: RefKind,
+        current_branch: Option<&str>,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut rows = Vec::new();
+        for reference in refs {
+            let Ok(name) = String::from_utf8(reference.name.0.clone()) else {
+                continue;
+            };
+            let context = kind.context(name.clone());
+            let menu_context = context.clone();
+            let is_head = matches!(kind, RefKind::LocalBranch)
+                && current_branch.is_some_and(|branch| branch == name);
+            let is_history_scope = self.repository_view
+                == crate::app_state::RepositoryView::History
+                && matches!(
+                    &self.history_reference,
+                    HistoryReference::Named(selected) if selected == &name
+                );
+            let selected = is_history_scope;
+            let label_color = if selected {
+                colors.panel_background
+            } else if is_head {
+                colors.text_primary
+            } else {
+                colors.text_secondary
+            };
+            let icon_color = if selected {
+                colors.panel_background
+            } else {
+                colors.text_muted
+            };
+            let label = name.clone();
+            let mut row = div()
+                .id((id_prefix, rows.len()))
+                .h(px(REF_ROW_HEIGHT))
+                .pl(px(REF_BASE_PAD))
+                .pr_3()
+                .flex()
+                .items_center()
+                .gap_2()
+                .text_xs()
+                .text_color(label_color)
+                .cursor_pointer();
+            if selected {
+                row = row.bg(colors.accent);
+            } else {
+                row = row.hover(|style| style.bg(colors.selection));
+            }
+            rows.push(
+                row.on_click(cx.listener(move |app, event: &ClickEvent, _, cx| {
+                    if event.click_count() >= 2 {
+                        app.activate_ref_from_double_click(&context, cx);
+                    } else {
+                        app.select_ref_context(&context, cx);
+                    }
+                }))
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |app, event: &MouseDownEvent, _, cx| {
+                        app.open_ref_context_menu(
+                            menu_context.clone(),
+                            (f32::from(event.position.x), f32::from(event.position.y)),
+                            cx,
+                        );
+                    }),
+                )
+                .child(icon(IconKind::Bookmark, 13.0, icon_color))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .font_weight(if is_head || selected {
+                            gpui::FontWeight::MEDIUM
+                        } else {
+                            gpui::FontWeight::NORMAL
+                        })
+                        .child(label),
+                )
+                .children(is_head.then(|| head_badge(colors, selected)))
+                .into_any_element(),
+            );
+        }
+        rows
     }
 
     #[allow(clippy::too_many_lines)]

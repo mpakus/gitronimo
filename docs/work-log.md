@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-12 — Persist pinned branches across relaunch
+
+**Intent:** Pinned branches must look the same after quitting and reopening. Prefs already store pins, but unsynchronized preference writes (window geometry, widths, etc.) can overwrite them, and nested pins stay hidden inside folders so relaunch looks unchanged.
+
+**Files:** `crates/app_core/src/lib.rs` (serialize preference RMW), `apps/desktop/src/views/sidebar.rs` (PINNED section), `docs/work-log.md`, `docs/UI-IMPROVE.md`.
+
+**Acceptance:** Pin a nested branch → quit → reopen → it still appears flat above other BRANCHES in pin order (no PINNED label); concurrent geometry saves do not clear pins.
+
 ## 2026-08-12 — Unmerged branch delete confirmation dialog
 
 **Intent:** Safe branch delete failures (not fully merged) currently flash in the activity bar. Show a Tower-style modal (“Could Not Delete Branch”) with Cancel / Delete (force), and keep the initial delete prompt as Cancel / Delete only.

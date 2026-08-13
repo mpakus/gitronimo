@@ -1,8 +1,10 @@
 //! Application use cases and ports. UI and infrastructure depend on this crate, never vice versa.
 
 use std::{
+    collections::HashMap,
     fmt, fs, io,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -183,6 +185,9 @@ pub fn open_repository(
 #[derive(Clone, Debug)]
 pub struct RecentRepositoryStore {
     path: PathBuf,
+    /// Serializes load-modify-save so concurrent preference writers cannot wipe
+    /// each other's fields (e.g. window geometry racing branch pins).
+    lock: Arc<Mutex<()>>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
@@ -193,10 +198,23 @@ pub struct WindowGeometry {
     pub height: f32,
 }
 
+fn preferences_lock_for(path: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = locks
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard
+        .entry(path.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
 impl RecentRepositoryStore {
     #[must_use]
     pub fn new(path: PathBuf) -> Self {
-        Self { path }
+        let lock = preferences_lock_for(&path);
+        Self { path, lock }
     }
 
     /// Moves malformed preferences aside and restores an empty versioned document.
@@ -204,7 +222,8 @@ impl RecentRepositoryStore {
     /// # Errors
     /// Returns an error for unreadable preferences, an unavailable backup location, or a newer schema.
     pub fn recover_corrupted_preferences(&self) -> Result<bool, RecentRepositoryStoreError> {
-        match self.load_document() {
+        let _guard = self.lock_preferences();
+        match Self::read_document(&self.path) {
             Ok(_) => Ok(false),
             Err(RecentRepositoryStoreError::InvalidJson(_)) => {
                 let mut backup = self.path.with_extension("corrupt");
@@ -214,7 +233,7 @@ impl RecentRepositoryStore {
                     attempt = attempt.saturating_add(1);
                 }
                 fs::rename(&self.path, backup).map_err(RecentRepositoryStoreError::Io)?;
-                self.save(&RecentRepositoryDocument::default())?;
+                Self::write_document(&self.path, &RecentRepositoryDocument::default())?;
                 Ok(true)
             }
             Err(error) => Err(error),
@@ -227,7 +246,7 @@ impl RecentRepositoryStore {
     ///
     /// Returns an error for unreadable, malformed, or newer-version stores.
     pub fn load(&self) -> Result<Vec<PathBuf>, RecentRepositoryStoreError> {
-        Ok(self.load_document()?.recent_repositories)
+        self.with_document(|document| document.recent_repositories.clone())
     }
 
     /// Moves `path` to the front of recents and persists the updated document.
@@ -236,14 +255,14 @@ impl RecentRepositoryStore {
     ///
     /// Does not overwrite a newer or malformed document.
     pub fn record(&self, path: PathBuf) -> Result<Vec<PathBuf>, RecentRepositoryStoreError> {
-        let mut document = self.load_document()?;
-        let mut recents = std::mem::take(&mut document.recent_repositories);
-        recents.retain(|recent| recent != &path);
-        recents.insert(0, path);
-        recents.truncate(MAXIMUM_RECENT_REPOSITORIES);
-        document.recent_repositories.clone_from(&recents);
-        self.save(&document)?;
-        Ok(recents)
+        self.with_mut_document(|document| {
+            let mut recents = std::mem::take(&mut document.recent_repositories);
+            recents.retain(|recent| recent != &path);
+            recents.insert(0, path);
+            recents.truncate(MAXIMUM_RECENT_REPOSITORIES);
+            document.recent_repositories.clone_from(&recents);
+            recents
+        })
     }
 
     /// Removes one path from recents and persists the updated document.
@@ -252,14 +271,13 @@ impl RecentRepositoryStore {
     ///
     /// Does not overwrite a newer or malformed document.
     pub fn remove(&self, path: &Path) -> Result<Vec<PathBuf>, RecentRepositoryStoreError> {
-        let mut document = self.load_document()?;
-        document.recent_repositories.retain(|recent| recent != path);
-        document
-            .repository_folders
-            .remove(&path.to_string_lossy().into_owned());
-        let recents = document.recent_repositories.clone();
-        self.save(&document)?;
-        Ok(recents)
+        self.with_mut_document(|document| {
+            document.recent_repositories.retain(|recent| recent != path);
+            document
+                .repository_folders
+                .remove(&path.to_string_lossy().into_owned());
+            document.recent_repositories.clone()
+        })
     }
 
     /// Returns the last saved window geometry, if any.
@@ -270,7 +288,7 @@ impl RecentRepositoryStore {
     pub fn load_window_geometry(
         &self,
     ) -> Result<Option<WindowGeometry>, RecentRepositoryStoreError> {
-        Ok(self.load_document()?.window_geometry)
+        self.with_document(|document| document.window_geometry)
     }
 
     /// Stores a window geometry while retaining existing recents.
@@ -282,9 +300,9 @@ impl RecentRepositoryStore {
         &self,
         geometry: WindowGeometry,
     ) -> Result<(), RecentRepositoryStoreError> {
-        let mut document = self.load_document()?;
-        document.window_geometry = Some(geometry);
-        self.save(&document)
+        self.with_mut_document(|document| {
+            document.window_geometry = Some(geometry);
+        })
     }
 
     /// Returns persisted ref-browser group keys.
@@ -292,7 +310,7 @@ impl RecentRepositoryStore {
     /// # Errors
     /// Returns the same schema and read errors as [`Self::load`].
     pub fn load_expanded_ref_groups(&self) -> Result<Vec<String>, RecentRepositoryStoreError> {
-        Ok(self.load_document()?.expanded_ref_groups)
+        self.with_document(|document| document.expanded_ref_groups.clone())
     }
 
     /// Stores ref-browser group keys while retaining recents and geometry.
@@ -303,9 +321,9 @@ impl RecentRepositoryStore {
         &self,
         groups: Vec<String>,
     ) -> Result<(), RecentRepositoryStoreError> {
-        let mut document = self.load_document()?;
-        document.expanded_ref_groups = groups;
-        self.save(&document)
+        self.with_mut_document(|document| {
+            document.expanded_ref_groups = groups;
+        })
     }
 
     /// Returns the last saved sidebar width, if any.
@@ -313,7 +331,7 @@ impl RecentRepositoryStore {
     /// # Errors
     /// Returns the same schema and read errors as [`Self::load`].
     pub fn load_sidebar_width(&self) -> Result<Option<f32>, RecentRepositoryStoreError> {
-        Ok(self.load_document()?.sidebar_width)
+        self.with_document(|document| document.sidebar_width)
     }
 
     /// Persists the sidebar width while retaining other preferences.
@@ -321,9 +339,9 @@ impl RecentRepositoryStore {
     /// # Errors
     /// Does not overwrite a newer or malformed document.
     pub fn save_sidebar_width(&self, width: f32) -> Result<(), RecentRepositoryStoreError> {
-        let mut document = self.load_document()?;
-        document.sidebar_width = Some(width);
-        self.save(&document)
+        self.with_mut_document(|document| {
+            document.sidebar_width = Some(width);
+        })
     }
 
     /// Returns the last saved working-copy list pane width, if any.
@@ -331,7 +349,7 @@ impl RecentRepositoryStore {
     /// # Errors
     /// Returns the same schema and read errors as [`Self::load`].
     pub fn load_list_pane_width(&self) -> Result<Option<f32>, RecentRepositoryStoreError> {
-        Ok(self.load_document()?.list_pane_width)
+        self.with_document(|document| document.list_pane_width)
     }
 
     /// Persists the list pane width while retaining other preferences.
@@ -339,9 +357,9 @@ impl RecentRepositoryStore {
     /// # Errors
     /// Does not overwrite a newer or malformed document.
     pub fn save_list_pane_width(&self, width: f32) -> Result<(), RecentRepositoryStoreError> {
-        let mut document = self.load_document()?;
-        document.list_pane_width = Some(width);
-        self.save(&document)
+        self.with_mut_document(|document| {
+            document.list_pane_width = Some(width);
+        })
     }
 
     /// Loads bookmark folders and repository→folder membership.
@@ -351,10 +369,9 @@ impl RecentRepositoryStore {
     pub fn load_bookmark_organization(
         &self,
     ) -> Result<BookmarkOrganization, RecentRepositoryStoreError> {
-        let document = self.load_document()?;
-        Ok(BookmarkOrganization {
-            folders: document.bookmark_folders,
-            repository_folders: document.repository_folders,
+        self.with_document(|document| BookmarkOrganization {
+            folders: document.bookmark_folders.clone(),
+            repository_folders: document.repository_folders.clone(),
         })
     }
 
@@ -366,12 +383,12 @@ impl RecentRepositoryStore {
         &self,
         organization: &BookmarkOrganization,
     ) -> Result<(), RecentRepositoryStoreError> {
-        let mut document = self.load_document()?;
-        document.bookmark_folders.clone_from(&organization.folders);
-        document
-            .repository_folders
-            .clone_from(&organization.repository_folders);
-        self.save(&document)
+        self.with_mut_document(|document| {
+            document.bookmark_folders.clone_from(&organization.folders);
+            document
+                .repository_folders
+                .clone_from(&organization.repository_folders);
+        })
     }
 
     /// Loads pinned and archived branch names for one repository.
@@ -382,12 +399,14 @@ impl RecentRepositoryStore {
         &self,
         repository: &Path,
     ) -> Result<BranchOrganization, RecentRepositoryStoreError> {
-        let document = self.load_document()?;
-        Ok(document
-            .branch_organization
-            .get(&repository.to_string_lossy().into_owned())
-            .cloned()
-            .unwrap_or_default())
+        let key = repository.to_string_lossy().into_owned();
+        self.with_document(|document| {
+            document
+                .branch_organization
+                .get(&key)
+                .cloned()
+                .unwrap_or_default()
+        })
     }
 
     /// Persists pinned and archived branch names for one repository.
@@ -399,20 +418,46 @@ impl RecentRepositoryStore {
         repository: &Path,
         organization: &BranchOrganization,
     ) -> Result<(), RecentRepositoryStoreError> {
-        let mut document = self.load_document()?;
         let key = repository.to_string_lossy().into_owned();
-        if organization.pinned.is_empty() && organization.archived.is_empty() {
-            document.branch_organization.remove(&key);
-        } else {
-            document
-                .branch_organization
-                .insert(key, organization.clone());
-        }
-        self.save(&document)
+        self.with_mut_document(|document| {
+            if organization.pinned.is_empty() && organization.archived.is_empty() {
+                document.branch_organization.remove(&key);
+            } else {
+                document
+                    .branch_organization
+                    .insert(key, organization.clone());
+            }
+        })
     }
 
-    fn load_document(&self) -> Result<RecentRepositoryDocument, RecentRepositoryStoreError> {
-        match fs::read(&self.path) {
+    fn lock_preferences(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn with_document<R>(
+        &self,
+        f: impl FnOnce(&RecentRepositoryDocument) -> R,
+    ) -> Result<R, RecentRepositoryStoreError> {
+        let _guard = self.lock_preferences();
+        let document = Self::read_document(&self.path)?;
+        Ok(f(&document))
+    }
+
+    fn with_mut_document<R>(
+        &self,
+        f: impl FnOnce(&mut RecentRepositoryDocument) -> R,
+    ) -> Result<R, RecentRepositoryStoreError> {
+        let _guard = self.lock_preferences();
+        let mut document = Self::read_document(&self.path)?;
+        let result = f(&mut document);
+        Self::write_document(&self.path, &document)?;
+        Ok(result)
+    }
+
+    fn read_document(path: &Path) -> Result<RecentRepositoryDocument, RecentRepositoryStoreError> {
+        match fs::read(path) {
             Ok(bytes) => {
                 let document = serde_json::from_slice::<RecentRepositoryDocument>(&bytes)
                     .map_err(RecentRepositoryStoreError::InvalidJson)?;
@@ -430,17 +475,19 @@ impl RecentRepositoryStore {
         }
     }
 
-    fn save(&self, document: &RecentRepositoryDocument) -> Result<(), RecentRepositoryStoreError> {
-        let parent = self
-            .path
+    fn write_document(
+        path: &Path,
+        document: &RecentRepositoryDocument,
+    ) -> Result<(), RecentRepositoryStoreError> {
+        let parent = path
             .parent()
             .ok_or(RecentRepositoryStoreError::MissingParent)?;
         fs::create_dir_all(parent).map_err(RecentRepositoryStoreError::Io)?;
         let bytes =
             serde_json::to_vec_pretty(document).map_err(RecentRepositoryStoreError::InvalidJson)?;
-        let temporary_path = self.path.with_extension("tmp");
+        let temporary_path = path.with_extension("tmp");
         fs::write(&temporary_path, bytes).map_err(RecentRepositoryStoreError::Io)?;
-        fs::rename(temporary_path, &self.path).map_err(RecentRepositoryStoreError::Io)
+        fs::rename(temporary_path, path).map_err(RecentRepositoryStoreError::Io)
     }
 }
 
@@ -745,6 +792,63 @@ mod tests {
                 .expect("cleared first"),
             BranchOrganization::default()
         );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn concurrent_preference_writes_keep_branch_pins() {
+        use std::thread;
+
+        let (directory, store) = temporary_store();
+        let prefs_path = directory.join("recents.json");
+        // Distinct `new` instances must still share a path lock (app code constructs
+        // fresh stores for open/record while the window keeps another handle).
+        let geometry_store = RecentRepositoryStore::new(prefs_path.clone());
+        let pin_store = RecentRepositoryStore::new(prefs_path);
+        let repository = directory.join("repo");
+        let organization = BranchOrganization {
+            pinned: vec!["feature/ui-improvements".into(), "main".into()],
+            archived: Vec::new(),
+        };
+        pin_store
+            .save_branch_organization(&repository, &organization)
+            .expect("initial pin save");
+
+        let repo_for_pins = repository.clone();
+        let geometry = thread::spawn(move || {
+            for index in 0..40 {
+                geometry_store
+                    .save_window_geometry(WindowGeometry {
+                        x: f32::from(u16::try_from(index).unwrap_or(u16::MAX)),
+                        y: 0.0,
+                        width: 1200.0,
+                        height: 800.0,
+                    })
+                    .expect("geometry save");
+            }
+        });
+        let pins = thread::spawn(move || {
+            for index in 0..40 {
+                let mut next = organization.clone();
+                if index % 2 == 0 {
+                    next.pinned.push(format!("extra-{index}"));
+                }
+                pin_store
+                    .save_branch_organization(&repo_for_pins, &next)
+                    .expect("pin save");
+            }
+        });
+        geometry.join().expect("geometry thread");
+        pins.join().expect("pin thread");
+
+        let loaded = store
+            .load_branch_organization(&repository)
+            .expect("pins should survive geometry races");
+        assert!(
+            loaded.pinned.contains(&"feature/ui-improvements".into()),
+            "expected pinned branch to survive concurrent geometry writes: {loaded:?}"
+        );
+        assert!(store.load_window_geometry().expect("geometry").is_some());
         let _ = fs::remove_dir_all(directory);
     }
 
