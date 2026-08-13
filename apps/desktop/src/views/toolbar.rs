@@ -118,7 +118,7 @@ impl GitronimoApp {
         };
         div()
             .h(px(56.0))
-            .px_3()
+            .pr_3()
             .flex()
             .items_center()
             .justify_between()
@@ -251,17 +251,11 @@ impl GitronimoApp {
         let workflow_active = (on_welcome && self.welcome_shell_view == WelcomeShellView::Workflow)
             || (!on_welcome && self.repository_view == RepositoryView::Workflow);
         div()
+            .w(px(self.sidebar_width))
+            .h(px(48.0))
             .flex()
             .items_center()
-            .gap_1()
             .flex_shrink_0()
-            .child(
-                div()
-                    .id("shell-tab-spacer")
-                    .w(px(72.0))
-                    .h(px(48.0))
-                    .flex_shrink_0(),
-            )
             .child(shell_tab_button(
                 "Bookmarks",
                 IconKind::Bookmark,
@@ -428,8 +422,9 @@ fn shell_tab_button(
         .id(gpui::ElementId::Name(
             format!("shell-tab-button:{label}").into(),
         ))
-        .w(px(72.0))
-        .h(px(48.0))
+        .flex_1()
+        .h_full()
+        .min_w(px(0.0))
         .px_2()
         .py_1()
         .flex()
