@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-08-12 — Sidebar HEAD ahead/behind badge (Tower-style)
+
+**Intent:** Match Tower’s current-branch pill: `HEAD` plus compact `↑N` / `↓N` for unpublished / unpulled commits. Approach-only from Tower; reuse porcelain ahead/behind already shown in the toolbar.
+
+**Files:** `apps/desktop/src/views/components.rs` (`format_divergence_arrows`, `head_badge`), `sidebar.rs`, `toolbar.rs`, `branches_review.rs`, `welcome.rs`, `tests.rs`, docs.
+
+**Acceptance:** HEAD row shows `HEAD ↑1` (and `↓N` when behind) in a muted pill; toolbar tracking uses the same `↑N` / `↓N` order; in-sync HEAD stays `HEAD` only; gates pass. **Done.**
+
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass. Tower guide approach-only for the combined HEAD + divergence pill.
+
 ## 2026-08-12 — Tower-style Stashes (core parity)
 
 **Intent:** Match Tower stash guide core flows: save dialog (message + untracked + path-limited), apply dialog (delete-after / restore index), stash changeset detail, branch-from-stash. Approach-only from Tower; rgitui `stashes_panel.rs` for Apply/Pop/Drop/Branch shape (MIT).

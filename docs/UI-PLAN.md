@@ -247,7 +247,7 @@ Apply `two_pane_view`, `view_panel_header`, `centered_empty_state` to:
 | `two_pane_view` | List \| detail split |
 | `centered_empty_state` | Icon + title + detail |
 | `segmented_detail_toggle` | Changeset / Tree tabs |
-| `head_badge` / `count_badge` | HEAD and WC count |
+| `head_badge` / `count_badge` | HEAD pill (`HEAD ↑N` / `↓N`) and WC count |
 | `stacked_toolbar_button` | Icon + label toolbar cluster |
 | `single_line_input` / `single_line_input_shell` | GPUI text fields (search, composer) |
 | `remote_progress_footer` | Sidebar network status |

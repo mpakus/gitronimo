@@ -13,8 +13,8 @@ use crate::app_state::{
     ChoicePromptKind, GitronimoApp, RefContext, RefKind, WelcomeRepoSnapshot, WelcomeShellView,
 };
 use crate::views::components::{
-    NAV_ROW_HEIGHT, count_badge, head_badge, remote_progress_footer, sidebar_section_label,
-    sidebar_section_label_first,
+    NAV_ROW_HEIGHT, count_badge, format_divergence_arrows, head_badge, remote_progress_footer,
+    sidebar_section_label, sidebar_section_label_first,
 };
 use crate::views::icons::{IconKind, icon};
 
@@ -389,6 +389,15 @@ impl GitronimoApp {
         (pinned_refs, active, archived_refs)
     }
 
+    /// Porcelain ahead/behind for HEAD when available; otherwise the named ref.
+    fn head_ahead_behind(&self, reference: &NamedRef) -> (u32, u32) {
+        self.working_copy
+            .as_ref()
+            .map_or((reference.ahead, reference.behind), |status| {
+                (status.branch.ahead, status.branch.behind)
+            })
+    }
+
     /// Root-level ref rows without folder nesting (used for PINNED).
     fn flat_ref_rows(
         &self,
@@ -408,6 +417,7 @@ impl GitronimoApp {
             let menu_context = context.clone();
             let is_head = matches!(kind, RefKind::LocalBranch)
                 && current_branch.is_some_and(|branch| branch == name);
+            let (head_ahead, head_behind) = self.head_ahead_behind(reference);
             let is_history_scope = self.repository_view
                 == crate::app_state::RepositoryView::History
                 && matches!(
@@ -476,7 +486,7 @@ impl GitronimoApp {
                         })
                         .child(label),
                 )
-                .children(is_head.then(|| head_badge(colors, selected)))
+                .children(is_head.then(|| head_badge(colors, head_ahead, head_behind)))
                 .into_any_element(),
             );
         }
@@ -572,6 +582,7 @@ impl GitronimoApp {
                 let pad = REF_BASE_PAD + f32::from(nest) * REF_DEPTH_STEP;
                 let is_head = matches!(kind, RefKind::LocalBranch)
                     && current_branch.is_some_and(|branch| branch == name);
+                let (head_ahead, head_behind) = self.head_ahead_behind(reference);
                 let is_history_scope = self.repository_view
                     == crate::app_state::RepositoryView::History
                     && matches!(
@@ -643,7 +654,7 @@ impl GitronimoApp {
                             })
                             .child(leaf_label),
                     )
-                    .children(is_head.then(|| head_badge(colors, selected)))
+                    .children(is_head.then(|| head_badge(colors, head_ahead, head_behind)))
                     .into_any_element(),
                 );
             }
@@ -1060,15 +1071,5 @@ fn welcome_repo_row(
 }
 
 fn welcome_upstream_badge(snapshot: &WelcomeRepoSnapshot) -> Option<String> {
-    if snapshot.ahead == 0 && snapshot.behind == 0 {
-        return None;
-    }
-    let mut parts = Vec::new();
-    if snapshot.ahead > 0 {
-        parts.push(format!("{} \u{2191}", snapshot.ahead));
-    }
-    if snapshot.behind > 0 {
-        parts.push(format!("{} \u{2193}", snapshot.behind));
-    }
-    Some(parts.join(" "))
+    format_divergence_arrows(snapshot.ahead, snapshot.behind)
 }

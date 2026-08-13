@@ -637,26 +637,47 @@ pub(crate) fn two_pane_view(
         .into_any_element()
 }
 
-/// Trailing `HEAD` label for the checked-out branch.
+/// Compact upstream divergence: `↑1`, `↓2`, or `↑1 ↓2`. `None` when in sync.
+pub(crate) fn format_divergence_arrows(ahead: u32, behind: u32) -> Option<String> {
+    if ahead == 0 && behind == 0 {
+        return None;
+    }
+    let mut parts = Vec::new();
+    if ahead > 0 {
+        parts.push(format!("\u{2191}{ahead}"));
+    }
+    if behind > 0 {
+        parts.push(format!("\u{2193}{behind}"));
+    }
+    Some(parts.join(" "))
+}
+
+/// Trailing `HEAD` pill for the checked-out branch, with optional `↑N` / `↓N`.
 ///
-/// On the accent selection ribbon: compact light text, no chrome. Otherwise a
-/// small muted label without a border (Tower: badge stays quiet when not selected).
-pub(crate) fn head_badge(colors: &ThemeColors, on_selection: bool) -> gpui::AnyElement {
-    let mut badge = div()
+/// Always a muted chip (Tower: gray pill on the current branch, independent of
+/// the History selection ribbon).
+pub(crate) fn head_badge(colors: &ThemeColors, ahead: u32, behind: u32) -> gpui::AnyElement {
+    div()
         .ml_auto()
         .flex_shrink_0()
+        .h(px(14.0))
+        .px_1()
+        .flex()
+        .items_center()
+        .rounded(px(3.0))
+        .bg(colors.raised_background)
         .text_size(px(9.0))
         .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(if on_selection {
-            colors.panel_background
-        } else {
-            colors.text_muted
-        })
-        .child("HEAD");
-    if !on_selection {
-        badge = badge.px_1().rounded(px(2.0)).bg(colors.raised_background);
+        .text_color(colors.text_secondary)
+        .child(head_badge_text(ahead, behind))
+        .into_any_element()
+}
+
+pub(crate) fn head_badge_text(ahead: u32, behind: u32) -> String {
+    match format_divergence_arrows(ahead, behind) {
+        Some(divergence) => format!("HEAD {divergence}"),
+        None => "HEAD".into(),
     }
-    badge.into_any_element()
 }
 
 pub(crate) fn count_badge(text: String, inverted: bool, colors: &ThemeColors) -> gpui::AnyElement {

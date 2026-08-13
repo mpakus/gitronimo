@@ -5,7 +5,9 @@ use ui_kit::ThemeColors;
 
 use crate::actions::{NavigateBack, NavigateForward, OpenRepository, Refresh};
 use crate::app_state::{GitronimoApp, RepositoryView, ShellState, WelcomeShellView};
-use crate::views::components::{ActionTooltip, stacked_toolbar_button, toolbar_divider};
+use crate::views::components::{
+    ActionTooltip, format_divergence_arrows, stacked_toolbar_button, toolbar_divider,
+};
 use crate::views::icons::{IconKind, icon};
 use crate::views::single_line_input::toolbar_search_shell;
 use git_domain::HeadStatus;
@@ -81,16 +83,9 @@ impl GitronimoApp {
                         let ahead = status.branch.ahead;
                         let behind = status.branch.behind;
                         let mut info = format!("{branch} \u{203A} {tracking}");
-                        if ahead > 0 || behind > 0 {
+                        if let Some(divergence) = format_divergence_arrows(ahead, behind) {
                             info.push_str(" (");
-                            let mut parts = Vec::new();
-                            if ahead > 0 {
-                                parts.push(format!("{ahead} \u{2191}"));
-                            }
-                            if behind > 0 {
-                                parts.push(format!("{behind} \u{2193}"));
-                            }
-                            info.push_str(&parts.join(", "));
+                            info.push_str(&divergence);
                             info.push(')');
                         }
                         (branch, info)

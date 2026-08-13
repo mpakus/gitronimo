@@ -239,6 +239,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Stashes list shows date; selection loads paths + diff; Branch… from stash
 - [x] Toolbar / palette / `Command-Shift-S` open save dialog; Apply opens apply dialog
 - [x] Mutations refresh Working Copy and stash list (auto-stash / Snapshots / DnD deferred)
+- [x] Sidebar HEAD pill includes `↑N` / `↓N` (toolbar tracking uses the same arrow-then-count order)
 
 **Done (2026-08-11 — Tower interior pass):**
 

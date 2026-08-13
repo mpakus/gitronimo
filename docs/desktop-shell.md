@@ -56,6 +56,7 @@ Chrome matches the sidebar ref menu (cursor-anchored overlay).
 - Pin / Unpin and Archive / Unarchive live on the local-branch context menu.
 - State is per repository under `branch_organization` in preferences (`BranchOrganization { pinned, archived }`).
 - **Pinned** branches render **flat at the top of BRANCHES** (bookmark icon, pin order). No separate “PINNED” section label.
+- The checked-out branch shows a muted **HEAD** pill; when the branch is ahead or behind its upstream, the same pill includes `↑N` and/or `↓N` (toolbar tracking uses the same order).
 - **Archived** branches move under an **ARCHIVED** section.
 - Preference load-modify-save is serialized with a **path-keyed lock** so window-geometry / width writers cannot wipe pins (multiple `RecentRepositoryStore::new` handles share one lock per prefs path).
 

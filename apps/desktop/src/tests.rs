@@ -17,7 +17,9 @@ use crate::app_state::{
 };
 use crate::keymap;
 use crate::views::commit_composer::commit_unavailable_reason;
-use crate::views::components::{activity_label, empty_status_message};
+use crate::views::components::{
+    activity_label, empty_status_message, format_divergence_arrows, head_badge_text,
+};
 use crate::views::working_copy::operation_conflict_overview;
 
 #[test]
@@ -196,6 +198,20 @@ fn window_titles_distinguish_welcome_loading_and_drafts() {
         "Opening repository — Gitronimo"
     );
     assert_eq!(keymap::bindings().len(), 15);
+}
+
+#[test]
+fn divergence_arrows_match_tower_order() {
+    assert_eq!(format_divergence_arrows(0, 0), None);
+    assert_eq!(format_divergence_arrows(1, 0).as_deref(), Some("\u{2191}1"));
+    assert_eq!(format_divergence_arrows(0, 2).as_deref(), Some("\u{2193}2"));
+    assert_eq!(
+        format_divergence_arrows(1, 3).as_deref(),
+        Some("\u{2191}1 \u{2193}3")
+    );
+    assert_eq!(head_badge_text(0, 0), "HEAD");
+    assert_eq!(head_badge_text(1, 0), "HEAD \u{2191}1");
+    assert_eq!(head_badge_text(1, 2), "HEAD \u{2191}1 \u{2193}2");
 }
 
 #[test]

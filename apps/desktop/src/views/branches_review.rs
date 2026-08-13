@@ -6,8 +6,8 @@ use ui_kit::ThemeColors;
 
 use crate::app_state::GitronimoApp;
 use crate::views::components::{
-    LIST_ROW_HEIGHT, centered_empty_state, count_badge, detail_row, file_action_button, head_badge,
-    two_pane_view, view_panel_header,
+    LIST_ROW_HEIGHT, centered_empty_state, count_badge, detail_row, file_action_button,
+    format_divergence_arrows, head_badge, two_pane_view, view_panel_header,
 };
 
 impl GitronimoApp {
@@ -51,17 +51,7 @@ impl GitronimoApp {
         if branch.upstream.is_none() {
             return Some("unpublished".into());
         }
-        if branch.ahead == 0 && branch.behind == 0 {
-            return None;
-        }
-        let mut parts = Vec::new();
-        if branch.ahead > 0 {
-            parts.push(format!("{} \u{2191}", branch.ahead));
-        }
-        if branch.behind > 0 {
-            parts.push(format!("{} \u{2193}", branch.behind));
-        }
-        Some(parts.join(" "))
+        format_divergence_arrows(branch.ahead, branch.behind)
     }
 
     fn format_branch_tracking(branch: &NamedRef) -> String {
@@ -148,7 +138,7 @@ impl GitronimoApp {
                             })
                             .child(name.clone()),
                     )
-                    .children(is_head.then(|| head_badge(colors, active)))
+                    .children(is_head.then(|| head_badge(colors, branch.ahead, branch.behind)))
                     .children(badge.map(|text| count_badge(text, active, colors)))
                     .into_any_element(),
             );
@@ -210,7 +200,10 @@ impl GitronimoApp {
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
                                         .child(name.clone()),
                                 )
-                                .children(is_head.then(|| head_badge(colors, false))),
+                                .children(
+                                    is_head
+                                        .then(|| head_badge(colors, branch.ahead, branch.behind)),
+                                ),
                         )
                         .child(detail_row("Commit", &short_oid, colors))
                         .child(detail_row(
