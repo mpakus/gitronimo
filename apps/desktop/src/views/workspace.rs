@@ -52,6 +52,7 @@ impl Render for GitronimoApp {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::refresh))
             .on_action(cx.listener(Self::focus_composer))
+            .on_action(cx.listener(Self::focus_search))
             .on_action(cx.listener(Self::show_command_palette))
             .on_action(cx.listener(Self::toggle_shortcut_reference))
             .on_action(cx.listener(Self::history_previous))
@@ -189,6 +190,8 @@ impl GitronimoApp {
                 .child("Command-/  Show or hide this reference")
                 .child("Command-[ / Command-]  Back / Forward")
                 .child("Up / Down  Move through loaded history")
+                .child("Command-F  Focus search")
+                .child("Command-H  Hide Gitronimo")
                 .child("Command-Q  Quit Gitronimo")
                 .child(file_action_button(
                     "Hide shortcut reference",

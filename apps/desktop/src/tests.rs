@@ -197,7 +197,7 @@ fn window_titles_distinguish_welcome_loading_and_drafts() {
         window_title(&ShellState::Loading("/tmp/example".into()), false),
         "Opening repository — Gitronimo"
     );
-    assert_eq!(keymap::bindings().len(), 15);
+    assert_eq!(keymap::bindings().len(), 17);
 }
 
 #[test]
@@ -225,6 +225,35 @@ fn command_q_is_bound_to_quit() {
     };
     assert_eq!(keystroke.key(), "q");
     assert!(keystroke.modifiers().platform, "Quit needs the Command key");
+}
+
+#[test]
+fn command_h_is_bound_to_hide() {
+    let hide = keymap::bindings()
+        .into_iter()
+        .find(|binding| binding.action().partial_eq(&crate::actions::Hide))
+        .expect("Command-H should be bound");
+    let [keystroke] = hide.keystrokes() else {
+        panic!("Hide should use a single keystroke");
+    };
+    assert_eq!(keystroke.key(), "h");
+    assert!(keystroke.modifiers().platform, "Hide needs the Command key");
+}
+
+#[test]
+fn command_f_is_bound_to_focus_search() {
+    let find = keymap::bindings()
+        .into_iter()
+        .find(|binding| binding.action().partial_eq(&crate::actions::FocusSearch))
+        .expect("Command-F should be bound");
+    let [keystroke] = find.keystrokes() else {
+        panic!("FocusSearch should use a single keystroke");
+    };
+    assert_eq!(keystroke.key(), "f");
+    assert!(
+        keystroke.modifiers().platform,
+        "FocusSearch needs the Command key"
+    );
 }
 
 #[test]

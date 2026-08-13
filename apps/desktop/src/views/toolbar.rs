@@ -217,11 +217,11 @@ impl GitronimoApp {
                     .flex_shrink_0()
                     .children(self.repository_actions(colors, cx))
                     .children(self.working_copy_toolbar_actions(colors, cx))
-                    .child(div().w(px(220.0)).child(toolbar_search_shell(
-                        search_input,
-                        colors,
-                        matches!(self.state, ShellState::Welcome),
-                    )))
+                    .child(
+                        div()
+                            .w(px(220.0))
+                            .child(toolbar_search_shell(search_input, colors)),
+                    )
                     .child(toolbar_divider(colors))
                     .child(icon_toolbar_button(
                         "Palette",

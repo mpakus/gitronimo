@@ -33,6 +33,8 @@ See [PLAN.md](PLAN.md) for the full implementation contract and [CHANGELOG.md](C
 | Command-/ | Shortcut reference overlay |
 | Command-[ / Command-] | Back / Forward |
 | Command-Q | Quit Gitronimo |
+| Command-H | Hide Gitronimo |
+| Command-F | Focus toolbar search |
 
 Working Copy selection and batch checkbox staging: [`docs/keyboard-shortcuts.md`](docs/keyboard-shortcuts.md).
 

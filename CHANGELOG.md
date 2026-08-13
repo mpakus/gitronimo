@@ -14,6 +14,8 @@
 - Current branch sidebar pill shows `HEAD ↑N` / `↓N` (same arrow order as the toolbar tracking line).
 - Removed the Services welcome tab, in-repo destination, and palette command. GitHub account connect/sign-out lives in Settings.
 - Workflow tab (welcome + in-repo): GitHub Flow / GitLab Flow / git-flow templates, auto-detect from local branches, Start / Finish / Sync topic branches; config persists per repository. Approach-only from Tower Workflows.
+- Command-H hides Gitronimo (`Hide Gitronimo` in the application menu), matching Command-Q quit.
+- Command-F focuses the toolbar search field (welcome repository filter or in-repo file search).
 
 ## 0.1.0 beta
 

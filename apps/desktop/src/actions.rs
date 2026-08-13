@@ -6,6 +6,7 @@ actions!(
         OpenRepository,
         Refresh,
         FocusComposer,
+        FocusSearch,
         HistoryPrevious,
         HistoryNext,
         NavigateBack,
@@ -17,6 +18,7 @@ actions!(
         WidenInspector,
         SelectAllStatusFiles,
         SaveStash,
+        Hide,
         Quit
     ]
 );

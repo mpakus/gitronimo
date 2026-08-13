@@ -7,6 +7,8 @@ Press **Command-/** in the app to toggle the in-app shortcut reference overlay. 
 | Shortcut | Action |
 |----------|--------|
 | Command-Q | Quit Gitronimo |
+| Command-H | Hide Gitronimo |
+| Command-F | Focus toolbar search |
 | Command-O | Open repository |
 | Command-R | Refresh working copy |
 | Command-Shift-C | Focus commit subject |

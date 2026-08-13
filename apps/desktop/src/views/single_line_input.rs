@@ -920,11 +920,10 @@ pub(crate) fn composer_multiline_shell(
         )
 }
 
-/// Toolbar search field with leading magnifier and optional shortcut hint.
+/// Toolbar search field with leading magnifier and Command-F hint.
 pub(crate) fn toolbar_search_shell(
     input: Entity<SingleLineInput>,
     colors: &ThemeColors,
-    show_shortcut: bool,
 ) -> impl IntoElement {
     use crate::views::icons::{IconKind, icon};
 
@@ -950,14 +949,13 @@ pub(crate) fn toolbar_search_shell(
                 .items_center()
                 .child(stretch_input(input)),
         )
-        .children(show_shortcut.then(|| {
+        .child(
             div()
                 .flex_shrink_0()
                 .text_xs()
                 .text_color(colors.text_muted)
-                .child("\u{2318}F")
-                .into_any_element()
-        }))
+                .child("\u{2318}F"),
+        )
 }
 
 pub(crate) type TextInputBundle = (

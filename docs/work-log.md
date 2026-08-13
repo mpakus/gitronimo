@@ -1,5 +1,25 @@
 # Implementation work log
 
+## 2026-08-13 — Command-F focuses toolbar search
+
+**Intent:** The toolbar search field shows ⌘F but the shortcut was not bound, so it did nothing. Focus the visible search input (welcome repositories or in-repo files).
+
+**Files:** `actions.rs` (`FocusSearch`), `keymap.rs` (`cmd-f`), `menus.rs`, `main.rs`, `workspace.rs`, `toolbar.rs` (hint on both shells), `tests.rs`, docs.
+
+**Acceptance:** Command-F focuses the toolbar search from welcome and from an open repository; binding test asserts the keystroke.
+
+**Verification:** `cargo fmt --check`, clippy `-D warnings` on gitronimo-desktop, `command_f_is_bound_to_focus_search` test passes.
+
+## 2026-08-13 — Command-H hides the app
+
+**Intent:** Match Command-Q: standard macOS hide shortcut and an application menu entry.
+
+**Files:** `actions.rs` (`Hide`), `keymap.rs` (`cmd-h`), `menus.rs` (Gitronimo → Hide Gitronimo), `main.rs` (`cx.on_action(… cx.hide())`), `workspace.rs` (shortcut overlay), `tests.rs`, `README.md`, `docs/keyboard-shortcuts.md`.
+
+**Acceptance:** Command-H hides from any window state; the menu item shows ⌘H; binding test asserts the keystroke.
+
+**Verification:** `cargo fmt --check`, clippy `-D warnings` on gitronimo-desktop, `command_h_is_bound_to_hide` / `command_q_is_bound_to_quit` tests pass.
+
 ## 2026-08-13 — Workflow tab (Tower-inspired core)
 
 **Intent:** Replace the Workflow placeholder with a functional page inspired by Tower’s Workflows overview: choose GitHub Flow / GitLab Flow / git-flow or auto-detect from existing branches; start topic branches with prefixes; finish with merge/squash/rebase; sync a topic onto its parent. Approach-only from Tower. Deferred: Graphite CLI, git-flow CLI, restack stacks, auto-archive protection.

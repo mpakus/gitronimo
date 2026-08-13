@@ -49,9 +49,9 @@ use platform_macos::MacKeychainStore;
 use ui_kit::Appearance;
 
 use crate::actions::{
-    CommandPalette, FocusComposer, HistoryNext, HistoryPrevious, NavigateBack, NavigateForward,
-    OpenRepository, Quit, Refresh, SaveStash, SelectAllStatusFiles, ShortcutReference,
-    ToggleAppearance, WidenSidebar,
+    CommandPalette, FocusComposer, FocusSearch, Hide, HistoryNext, HistoryPrevious, NavigateBack,
+    NavigateForward, OpenRepository, Quit, Refresh, SaveStash, SelectAllStatusFiles,
+    ShortcutReference, ToggleAppearance, WidenSidebar,
 };
 use crate::app_state::{
     ACTIVITY_LOG_CAPACITY, ActivityLogEntry, AppConfirmDialog, ChoicePromptKind, CommitContext,
@@ -84,6 +84,7 @@ fn main() {
             cx.bind_keys(keymap::bindings());
             cx.set_menus(menus::application_menus());
             cx.on_action(|_: &Quit, cx: &mut App| cx.quit());
+            cx.on_action(|_: &Hide, cx: &mut App| cx.hide());
             register_input_bindings(cx);
 
             let store = RecentRepositoryStore::new(preferences_path());
@@ -1473,6 +1474,23 @@ return remote_url & linefeed & parent_path"#;
 
     fn focus_composer(&mut self, _: &FocusComposer, window: &mut Window, cx: &mut Context<Self>) {
         self.edit_commit_subject(window, cx);
+    }
+
+    fn focus_search(&mut self, _: &FocusSearch, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pending_text_prompt.is_some()
+            || self.pending_choice_prompt.is_some()
+            || self.show_command_palette
+            || self.show_quick_open
+        {
+            return;
+        }
+        let handle = match &self.state {
+            ShellState::Welcome => self.welcome_search_input.focus_handle(cx),
+            ShellState::Repository(_) => self.worktree_search_input.focus_handle(cx),
+            ShellState::Loading(_) | ShellState::Error(_) => return,
+        };
+        window.focus(&handle);
+        cx.notify();
     }
 
     fn select_all_status_files(
