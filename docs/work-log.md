@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-12 — Extend command palette coverage + scroll
+
+**Intent:** Command palette only showed the first ~9 items (list clipped, not scrollable). Expose toolbar and common Git/shell actions in the searchable list and make the list scroll.
+
+**Files:** `app_state.rs` (`PaletteCommand` / `PALETTE_COMMANDS`), `main.rs` (`run_palette_command`), `workspace.rs` (scrollable list), `docs/work-log.md`.
+
+**Acceptance:** Palette lists Fetch/Pull/Push/Sync, stash, stage, settings, create branch, etc.; typing filters; mouse wheel scrolls past the viewport; Enter still runs the selection.
+
 ## 2026-08-12 — Message history: successes, errors, scroll
 
 **Intent:** The Message history popup should retain success notices (e.g. push complete), errors, and confirmations—not only refresh chatter—and the list must scroll when it exceeds the popup height.

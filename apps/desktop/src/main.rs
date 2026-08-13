@@ -1298,16 +1298,53 @@ return remote_url & linefeed & parent_path"#;
         self.run_palette_command(command, cx);
     }
 
-    fn run_palette_command(&mut self, command: PaletteCommand, cx: &mut Context<Self>) {
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn run_palette_command(&mut self, command: PaletteCommand, cx: &mut Context<Self>) {
         self.close_command_palette(cx);
         match command {
+            PaletteCommand::OpenRepository => self.add_repository_from_picker(cx),
+            PaletteCommand::Fetch => self.fetch_default_remote(cx),
+            PaletteCommand::Pull => self.pull_current(cx),
+            PaletteCommand::Push => self.push_current(cx),
+            PaletteCommand::Sync => self.sync_current(cx),
             PaletteCommand::RefreshWorkingCopy => {
                 if let ShellState::Repository(repository) = &self.state {
                     self.load_working_copy(repository.clone(), cx);
                 } else {
                     self.set_activity("Open a repository before refreshing its working copy.");
+                    cx.notify();
                 }
+            }
+            PaletteCommand::ShowWorkingCopy => {
+                self.navigate_to(RepositoryView::WorkingCopy, cx);
+            }
+            PaletteCommand::StageAll => {
+                if matches!(self.state, ShellState::Repository(_)) {
+                    self.run_mutation(Mutation::StageAll, Vec::new(), false, cx);
+                } else {
+                    self.set_activity("Open a repository before staging.");
+                    cx.notify();
+                }
+            }
+            PaletteCommand::UnstageAll => {
+                if matches!(self.state, ShellState::Repository(_)) {
+                    self.run_mutation(Mutation::UnstageAll, Vec::new(), false, cx);
+                } else {
+                    self.set_activity("Open a repository before unstaging.");
+                    cx.notify();
+                }
+            }
+            PaletteCommand::FocusCommitComposer => {
+                self.navigate_to(RepositoryView::WorkingCopy, cx);
+                self.commit_subject_focused = true;
+                self.commit_composer_expanded = true;
+                self.set_activity("Commit composer ready — type a subject.");
                 cx.notify();
+            }
+            PaletteCommand::SaveStash => self.create_stash(false, cx),
+            PaletteCommand::ApplyLatestStash => self.apply_latest_stash(cx),
+            PaletteCommand::CreateBranch => {
+                self.begin_text_prompt(TextPromptKind::CreateBranch { start: None }, "", cx);
             }
             PaletteCommand::ShowHistory => {
                 if let ShellState::Repository(repository) = &self.state {
@@ -1332,6 +1369,9 @@ return remote_url & linefeed & parent_path"#;
             }
             PaletteCommand::ShowRemotes => {
                 self.show_remotes(cx);
+            }
+            PaletteCommand::ShowSettings => {
+                self.navigate_to(RepositoryView::Settings, cx);
             }
             PaletteCommand::GitLfsStatus => {
                 if let ShellState::Repository(repository) = &self.state {
@@ -1377,12 +1417,44 @@ return remote_url & linefeed & parent_path"#;
             PaletteCommand::SetMergeTool => self.prompt_set_merge_tool(cx),
             PaletteCommand::OpenInMergeTool => self.prompt_run_merge_tool(cx),
             PaletteCommand::CheckCommitSignature => Self::prompt_check_commit_signature(cx),
-            PaletteCommand::ShowWorkingCopy => {
-                self.navigate_to(RepositoryView::WorkingCopy, cx);
+            PaletteCommand::QuickOpenFile => {
+                self.show_quick_open = true;
+                self.pending_overlay_focus = None;
+                cx.notify();
+            }
+            PaletteCommand::ToggleMessageHistory => self.toggle_activity_log(cx),
+            PaletteCommand::ToggleAppearance => {
+                self.theme_mode = match self.theme_mode {
+                    ThemeMode::System => ThemeMode::Light,
+                    ThemeMode::Light => ThemeMode::Dark,
+                    ThemeMode::Dark => ThemeMode::System,
+                };
+                self.apply_theme_mode(None, cx);
             }
             PaletteCommand::ShowKeyboardShortcuts => {
                 self.shortcut_reference_state = ShortcutReferenceState::Visible;
                 cx.notify();
+            }
+            PaletteCommand::NavigateBack => {
+                if self.came_from_welcome {
+                    self.came_from_welcome = false;
+                    self.navigation_forward.clear();
+                    self.state = ShellState::Welcome;
+                    self.working_copy = None;
+                    self.refs = RefSnapshot::default();
+                    cx.notify();
+                } else if let Some(view) = self.navigation_back.pop() {
+                    self.navigation_forward.push(self.repository_view);
+                    self.repository_view = view;
+                    cx.notify();
+                }
+            }
+            PaletteCommand::NavigateForward => {
+                if let Some(view) = self.navigation_forward.pop() {
+                    self.navigation_back.push(self.repository_view);
+                    self.repository_view = view;
+                    cx.notify();
+                }
             }
         }
     }

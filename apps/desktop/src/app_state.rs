@@ -339,11 +339,24 @@ impl ChoicePromptKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PaletteCommand {
+    OpenRepository,
+    Fetch,
+    Pull,
+    Push,
+    Sync,
     RefreshWorkingCopy,
+    ShowWorkingCopy,
+    StageAll,
+    UnstageAll,
+    FocusCommitComposer,
+    SaveStash,
+    ApplyLatestStash,
+    CreateBranch,
     ShowHistory,
     CommitDetail,
     ShowStashes,
     ShowRemotes,
+    ShowSettings,
     GitLfsStatus,
     Services,
     ShowReflog,
@@ -362,8 +375,12 @@ pub(crate) enum PaletteCommand {
     SetMergeTool,
     OpenInMergeTool,
     CheckCommitSignature,
-    ShowWorkingCopy,
+    QuickOpenFile,
+    ToggleMessageHistory,
+    ToggleAppearance,
     ShowKeyboardShortcuts,
+    NavigateBack,
+    NavigateForward,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -487,11 +504,24 @@ impl PushDialogState {
 }
 
 pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
+    ("Open repository…", PaletteCommand::OpenRepository),
+    ("Fetch", PaletteCommand::Fetch),
+    ("Pull…", PaletteCommand::Pull),
+    ("Push…", PaletteCommand::Push),
+    ("Sync", PaletteCommand::Sync),
     ("Refresh working copy", PaletteCommand::RefreshWorkingCopy),
+    ("Show working copy", PaletteCommand::ShowWorkingCopy),
+    ("Stage all", PaletteCommand::StageAll),
+    ("Unstage all", PaletteCommand::UnstageAll),
+    ("Focus commit composer", PaletteCommand::FocusCommitComposer),
+    ("Save stash", PaletteCommand::SaveStash),
+    ("Apply latest stash", PaletteCommand::ApplyLatestStash),
+    ("Create branch…", PaletteCommand::CreateBranch),
     ("Show history", PaletteCommand::ShowHistory),
     ("Commit detail…", PaletteCommand::CommitDetail),
     ("Show stashes", PaletteCommand::ShowStashes),
     ("Show remotes", PaletteCommand::ShowRemotes),
+    ("Show settings", PaletteCommand::ShowSettings),
     ("Git LFS status", PaletteCommand::GitLfsStatus),
     ("Services", PaletteCommand::Services),
     ("Show reflog", PaletteCommand::ShowReflog),
@@ -513,11 +543,15 @@ pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
         "Check commit signature…",
         PaletteCommand::CheckCommitSignature,
     ),
-    ("Show working copy", PaletteCommand::ShowWorkingCopy),
+    ("Quick open file…", PaletteCommand::QuickOpenFile),
+    ("Message history", PaletteCommand::ToggleMessageHistory),
+    ("Toggle appearance", PaletteCommand::ToggleAppearance),
     (
         "Show keyboard shortcuts",
         PaletteCommand::ShowKeyboardShortcuts,
     ),
+    ("Navigate back", PaletteCommand::NavigateBack),
+    ("Navigate forward", PaletteCommand::NavigateForward),
 ];
 
 impl PaletteCommand {
@@ -529,6 +563,43 @@ impl PaletteCommand {
             .filter(|(_, (label, _))| needle.is_empty() || label.to_lowercase().contains(&needle))
             .map(|(index, (label, command))| (index, *label, *command))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::{PALETTE_COMMANDS, PaletteCommand};
+
+    #[test]
+    fn palette_includes_toolbar_and_shell_commands() {
+        let labels: Vec<&str> = PALETTE_COMMANDS.iter().map(|(label, _)| *label).collect();
+        for expected in [
+            "Fetch",
+            "Pull…",
+            "Push…",
+            "Sync",
+            "Stage all",
+            "Save stash",
+            "Create branch…",
+            "Show settings",
+            "Quick open file…",
+            "Message history",
+        ] {
+            assert!(
+                labels.contains(&expected),
+                "missing palette command: {expected}"
+            );
+        }
+        assert!(
+            PaletteCommand::filtered("push")
+                .iter()
+                .any(|(_, label, _)| { *label == "Push…" })
+        );
+        assert!(
+            PaletteCommand::filtered("").len() >= 40,
+            "expected expanded palette, got {}",
+            PaletteCommand::filtered("").len()
+        );
     }
 }
 

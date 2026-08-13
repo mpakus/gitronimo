@@ -10,7 +10,7 @@ Press **Command-/** in the app to toggle the in-app shortcut reference overlay. 
 | Command-O | Open repository |
 | Command-R | Refresh working copy |
 | Command-Shift-C | Focus commit subject |
-| Command-Shift-P | Command palette |
+| Command-Shift-P | Command palette (Fetch/Pull/Push/Sync, staging, views, …) |
 | Command-/ | Show or hide shortcut reference |
 | Command-[ | Navigate back |
 | Command-] | Navigate forward |

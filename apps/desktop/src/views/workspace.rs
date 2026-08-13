@@ -272,6 +272,7 @@ impl GitronimoApp {
             .into_any_element()
     }
 
+    #[allow(clippy::too_many_lines)]
     pub(crate) fn command_palette_overlay(
         &self,
         colors: &ui_kit::ThemeColors,
@@ -334,31 +335,48 @@ impl GitronimoApp {
                         ),
                     ))
                     .child(
-                        div().flex_1().overflow_hidden().children(
-                            commands
-                                .into_iter()
-                                .enumerate()
-                                .map(|(row, (_, label, command))| {
-                                    let selected_row = row == selected;
+                        div()
+                            .id("command-palette-scroll")
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .max_h(px(320.0))
+                            .overflow_y_scroll()
+                            .children(if commands.is_empty() {
+                                vec![
                                     div()
-                                        .id(row)
                                         .px_3()
                                         .py_2()
                                         .text_sm()
-                                        .cursor_pointer()
-                                        .bg(if selected_row {
-                                            colors.selection
-                                        } else {
-                                            colors.panel_background
-                                        })
-                                        .hover(|row| row.bg(colors.selection))
-                                        .on_click(cx.listener(move |app, _, _, cx| {
-                                            app.run_palette_command(command, cx);
-                                        }))
-                                        .child(label)
-                                        .into_any_element()
-                                }),
-                        ),
+                                        .text_color(colors.text_muted)
+                                        .child("No matching commands.")
+                                        .into_any_element(),
+                                ]
+                            } else {
+                                commands
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(row, (_, label, command))| {
+                                        let selected_row = row == selected;
+                                        div()
+                                            .id(("command-palette-row", row))
+                                            .px_3()
+                                            .py_2()
+                                            .text_sm()
+                                            .cursor_pointer()
+                                            .bg(if selected_row {
+                                                colors.selection
+                                            } else {
+                                                colors.panel_background
+                                            })
+                                            .hover(|row| row.bg(colors.selection))
+                                            .on_click(cx.listener(move |app, _, _, cx| {
+                                                app.run_palette_command(command, cx);
+                                            }))
+                                            .child(label)
+                                            .into_any_element()
+                                    })
+                                    .collect()
+                            }),
                     ),
             )
             .into_any_element()
