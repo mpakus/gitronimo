@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.9 — 2026-08-13
+
+Product version **0.9** (About GitRonimo / `APP_VERSION`). Unsigned Apple Silicon and Intel `.app` bundles; signed notarized distribution still requires the protected tag workflow.
 
 ### Shell and workflow
 
@@ -14,10 +16,17 @@
 - Current branch sidebar pill shows `HEAD ↑N` / `↓N` (same arrow order as the toolbar tracking line).
 - Removed the Services welcome tab, in-repo destination, and palette command. GitHub account connect/sign-out lives in Settings.
 - Workflow tab (welcome + in-repo): GitHub Flow / GitLab Flow / git-flow templates, auto-detect from local branches, Start / Finish / Sync topic branches; config persists per repository. Approach-only from Tower Workflows.
-- Command-H hides Gitronimo (`Hide Gitronimo` in the application menu), matching Command-Q quit.
+- Command-H hides GitRonimo (`Hide GitRonimo` in the application menu), matching Command-Q quit.
 - Command-F focuses the toolbar search field (welcome repository filter or in-repo file search).
 - macOS application menu is **GitRonimo** (binary / bundle name). **About GitRonimo** opens a black two-column overlay with `assets/gitronimo-icon.png`, product version **0.9** (`APP_VERSION` in `apps/desktop/src/views/about.rs`), “Made in Austin ✩ Texas”, and https://aomega.co.
 - Crash-report panics: branch context-menu render no longer re-reads `GitronimoApp` (GPUI double-lease); pane resize / bookmark drag no longer copy a cursor style onto `on_drag` (GPUI `set_window_cursor_style` debug assert).
+
+### Known limitations
+
+- Merge and rebase wizards, OAuth/enterprise GitHub, and notarized distribution are not complete.
+- Remote progress is partly indeterminate (no full Git stderr byte/object parsing everywhere).
+- VoiceOver parity is limited by the pinned GPUI framework; see the [accessibility note](docs/troubleshooting.md#keyboard-and-assistive-technology).
+- Secondary views (Reflog, Blame, Compare, Branches Review, etc.) remain reachable from the command palette rather than the primary sidebar.
 
 ## 0.1.0 beta
 

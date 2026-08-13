@@ -1,13 +1,15 @@
 # Initial workspace boundaries
 
-The current crates are the boundaries required for the Phase 0 spikes and the first vertical slice:
+The current crates are the boundaries required for the desktop app:
 
-- `git_domain`: pure types;
+- `git_domain`: pure types (no GPUI);
 - `app_core`: application use cases and ports;
-- `git_cli`: installed-Git adapter;
-- `ui_kit`: sole GPUI and `gpui-component` boundary;
-- `gitronimo-desktop`: macOS composition root;
+- `git_cli`: installed-Git adapter (typed `Command` arguments only);
+- `ui_kit`: project-owned GPUI primitives and theme (no `gpui-component`; see ADR 0001);
+- `platform_macos`: Keychain-backed secret store;
+- `hosting_github`: GitHub HTTP/JSON adapter (no UI, no Git);
+- `gitronimo-desktop`: macOS composition root (binary **GitRonimo**);
 - `test_support`: deterministic Git fixtures.
 
-The planned `git_diff`, `git_graph`, `repo_watch`, `persistence`, and `platform_macos` crates are intentionally deferred until their corresponding checklist items require a stable boundary. This prevents unused placeholder crates while preserving the dependency direction in `PLAN.md`.
+Do not import GPUI in `git_domain`. Do not run Git or filesystem work inside GPUI `Render` implementations. GitHub tokens stay in Keychain via `platform_macos`; they are never written to preferences, activity, or crash reports.
 

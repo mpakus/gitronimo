@@ -44,9 +44,20 @@ GPUI 0.2.2 does not expose macOS accessibility roles or programmatic labels for 
 
 ## Build toolchain
 
-Gitronimo requires **Rust 1.97+** (`edition2024`). If `cargo build` fails with an edition error, install the pinned toolchain:
+GitRonimo requires **Rust 1.97+** (`edition2024`). If `cargo build` fails with an edition error, install the pinned toolchain:
 
 ```bash
 rustup toolchain install 1.97.1-aarch64-apple-darwin
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
 export PATH="$HOME/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin:$PATH"
 ```
+
+The debug/release binary is `target/debug/GitRonimo` (crate `gitronimo-desktop`). Packaging both architectures: [packaging.md](packaging.md).
+
+## Unsigned app / Gatekeeper
+
+Local and CI development bundles are unsigned `GitRonimo.app`. macOS Gatekeeper may block first launch. That is expected until a Developer ID signed, notarized tag release. Do not disable Gatekeeper globally; use the signing handoff in packaging.md for distribution.
+
+## About GitRonimo
+
+**GitRonimo → About GitRonimo** (or palette **About GitRonimo**) shows product version **0.9**. After a release, bump `APP_VERSION` in `apps/desktop/src/views/about.rs`. Click outside the overlay to dismiss it.

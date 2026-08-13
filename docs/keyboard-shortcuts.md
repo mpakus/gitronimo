@@ -6,8 +6,8 @@ Press **Command-/** in the app to toggle the in-app shortcut reference overlay. 
 
 | Shortcut | Action |
 |----------|--------|
-| Command-Q | Quit Gitronimo |
-| Command-H | Hide Gitronimo |
+| Command-Q | Quit GitRonimo |
+| Command-H | Hide GitRonimo |
 | Command-F | Focus toolbar search |
 | Command-O | Open repository |
 | Command-R | Refresh working copy |
@@ -34,7 +34,7 @@ Palette command **Message history** toggles the same popup. See [desktop-shell.m
 
 ## Command palette
 
-`Command-Shift-P` opens a filterable, **scrollable** command list. Besides secondary views (Reflog, Blame, Compare, Workflow, …), it includes toolbar actions: Open repository, Fetch, Pull…, Push…, Sync, Stage/Unstage all, stash Save/Apply (dialogs), Apply/Branch/Pop/Drop selected stash, Create branch…, Show settings, Show workflow, Quick open file, Message history, Toggle appearance, Navigate back/forward.
+`Command-Shift-P` opens a filterable, **scrollable** command list. Besides secondary views (Reflog, Blame, Compare, Workflow, …), it includes toolbar actions: Open repository, Fetch, Pull…, Push…, Sync, Stage/Unstage all, stash Save/Apply (dialogs), Apply/Branch/Pop/Drop selected stash, Create branch…, Show settings, Show workflow, Quick open file, Message history, Toggle appearance, Navigate back/forward, **About GitRonimo**.
 
 ## Working Copy
 

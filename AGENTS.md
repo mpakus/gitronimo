@@ -34,16 +34,16 @@ System `cargo` older than 1.97 will fail on this workspace.
 | `PLAN.md` | Product roadmap and checklist — source of truth for scope |
 | `docs/README.md` | Documentation index |
 | `docs/work-log.md` | Per-task intent, files, acceptance checks (write **before** coding) |
-| `docs/desktop-shell.md` | Activity bar, message history, confirms, pins, command palette |
+| `docs/desktop-shell.md` | Activity bar, message history, confirms, pins, command palette, About |
 | `docs/UI-PLAN.md` | Tower parity phases and screenshot regression matrix |
-| `docs/UI-IMPROVE.md` | Tower guide patterns mapped to Gitronimo views |
+| `docs/UI-IMPROVE.md` | Tower guide patterns mapped to GitRonimo views |
 | `docs/architecture.md` | Crate layers and mutation flow |
 | `docs/implementation-boundaries.md` | Layering constraints |
 | `docs/troubleshooting.md` | User-facing recovery and keyboard reference |
 | `docs/keyboard-shortcuts.md` | Global shortcuts and Working Copy selection rules |
 | `docs/screens/README.md` | Screenshot inventory and attribution rules |
 | `docs/dependency-policy.md` | `cargo deny` policy |
-| `docs/packaging.md` | macOS bundle notes |
+| `docs/packaging.md` | macOS Apple Silicon / Intel bundles, signing |
 | `docs/adr/` | Architecture decision records |
 
 Tower reference screenshots live under `docs/screens/` (attributed, internal study only).
@@ -79,4 +79,6 @@ Read `docs/desktop-shell.md` before changing activity bar, overlays, pins, or th
 - **Confirms:** blocked/destructive Git outcomes that users must acknowledge belong in `AppConfirmDialog` (or the branch-delete pending modal), not only a flashing status line. Example: unmerged delete → Cancel / Delete force.
 - **Pins / archives:** persist via `RecentRepositoryStore::save_branch_organization`; sidebar shows pins flat atop BRANCHES (no “PINNED” label). Preference RMW is path-locked — do not reintroduce unlocked load-modify-save on that JSON.
 - **Command palette:** new user-facing commands that already have handlers should get a `PaletteCommand` + `PALETTE_COMMANDS` label + `run_palette_command` arm; keep the overlay list scrollable.
-- **Overlays:** Git/domain work stays in `main.rs`; `views/workspace.rs` only renders and dispatches.
+- **Overlays:** Git/domain work stays in `main.rs`; `views/workspace.rs` only renders and dispatches. About GitRonimo is `views/about.rs` (click outside to dismiss).
+- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs`. Bump that string after each release. It is independent of the Cargo workspace version.
+- **Binary / menu name:** crate remains `gitronimo-desktop`; the macOS executable and bundle name is `GitRonimo` so the application menu title is GitRonimo (`GitRonimo.app`).

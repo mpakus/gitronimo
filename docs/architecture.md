@@ -1,12 +1,14 @@
 # Architecture overview
 
-Gitronimo uses a deliberately small layered workspace:
+GitRonimo uses a deliberately small layered workspace:
 
-- `apps/desktop`: GPUI application state, native menus, dialogs, background tasks, and repository watching.
+- `apps/desktop`: GPUI application state, native menus, dialogs, background tasks, and repository watching. The shipped binary is **GitRonimo**.
 - `crates/app_core`: repository-opening and preference-store use cases.
 - `crates/git_domain`: UI-independent Git data models.
 - `crates/git_cli`: typed, shell-free adapter for the installed Git executable.
 - `crates/ui_kit`: project-owned colors and GPUI presentation primitives.
+- `crates/platform_macos`: Keychain `SecretStore` for the optional GitHub personal access token.
+- `crates/hosting_github`: GitHub API adapter used by Settings / Pull Requests.
 
 Repository mutations run through `git_cli`; GPUI rendering does not invoke Git or filesystem work. The desktop app runs loading, status, history, and network work off the UI thread and refreshes state after mutations.
 
@@ -14,7 +16,7 @@ Working Copy file selection (`selected_paths`) is UI state in `GitronimoApp`; st
 
 ## Preference store
 
-`RecentRepositoryStore` (`app_core`) owns `~/Library/Application Support/Gitronimo/recent-repositories.json`: recents, window geometry, sidebar/list widths, expanded ref groups, bookmark folders, and per-repository `branch_organization` (pinned / archived branch names).
+`RecentRepositoryStore` (`app_core`) owns `~/Library/Application Support/Gitronimo/recent-repositories.json`: recents, window geometry, sidebar/list widths, expanded ref groups, bookmark folders, per-repository `branch_organization` (pinned / archived branch names), and per-repository workflow config.
 
 Every load-modify-save path takes a **path-keyed mutex** so concurrent writers (geometry vs pins, multiple `RecentRepositoryStore::new` handles) cannot drop each other's fields. Callers must keep using the typed `save_*` / `load_*` APIs rather than hand-editing the JSON document without that lock.
 

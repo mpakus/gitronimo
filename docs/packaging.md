@@ -1,26 +1,75 @@
 # macOS packaging
 
-The development bundle is intentionally unsigned. Build it on macOS with:
+The product name is **GitRonimo**. The crate is still `gitronimo-desktop`; the binary and `.app` executable are `GitRonimo` so the macOS application menu title matches.
+
+Product version **0.9** is the string shown in About GitRonimo (`APP_VERSION` in `apps/desktop/src/views/about.rs`) and in the bundle (`[package.metadata.packager] version` in `apps/desktop/Cargo.toml`). Bump **both** after each release. They are independent of the Cargo workspace crate version.
+
+Local `.app` bundles are unsigned. Gatekeeper will not treat them as a distributable release.
+
+The app identifier is `com.gitronimo.desktop`. Keep certificate material, team IDs, and notary credentials in the release environment or CI secrets; never in this repository.
+
+## Apple Silicon (arm64)
 
 ```bash
+export PATH="$HOME/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin:$PATH"
 cargo build --release -p gitronimo-desktop
 cargo install cargo-packager --version 0.11.8 --locked
-cargo packager --release --formats app --manifest-path apps/desktop/Cargo.toml --out-dir target/release
-open target/release/GitRonimo.app
+cargo packager --release --formats app \
+  --manifest-path apps/desktop/Cargo.toml \
+  --out-dir "$(pwd)/target/release-arm" \
+  --binaries-dir "$(pwd)/target/release"
+open target/release-arm/GitRonimo.app
 ```
 
-The app identifier is `com.gitronimo.desktop`. The generated `GitRonimo.app` is suitable for local technical validation only; Gatekeeper will not treat it as a distributable release.
+Use absolute `--out-dir` / `--binaries-dir` values. cargo-packager resolves relative paths from `apps/desktop/Cargo.toml`.
 
-For a release, import an Apple Developer ID Application certificate into a dedicated keychain, then sign the bundle with hardened runtime and timestamping:
+Confirm the executable architecture:
 
 ```bash
-codesign --force --deep --options runtime --timestamp --sign "Developer ID Application: YOUR NAME (TEAMID)" target/release/GitRonimo.app
-codesign --verify --deep --strict --verbose=2 target/release/GitRonimo.app
-xcrun notarytool submit YOUR_DMG_OR_ZIP --keychain-profile "notary-profile" --wait
-xcrun stapler staple target/release/GitRonimo.app
+lipo -archs target/release-arm/GitRonimo.app/Contents/MacOS/GitRonimo
+# arm64
 ```
 
-Keep certificate material, team IDs, and notary credentials in the release environment or CI secrets; never in this repository.
+## Intel (x86_64)
+
+Cross-compile from Apple Silicon (or build natively on Intel):
+
+```bash
+rustup target add x86_64-apple-darwin
+cargo build --release -p gitronimo-desktop --target x86_64-apple-darwin
+cargo packager --release --formats app --target x86_64-apple-darwin \
+  --manifest-path apps/desktop/Cargo.toml \
+  --out-dir "$(pwd)/target/release-intel" \
+  --binaries-dir "$(pwd)/target/x86_64-apple-darwin/release"
+lipo -archs target/release-intel/GitRonimo.app/Contents/MacOS/GitRonimo
+# x86_64
+```
+
+## Zip artifacts
+
+```bash
+mkdir -p target/dist
+ditto -c -k --sequesterRsrc --keepParent \
+  target/release-arm/GitRonimo.app \
+  target/dist/GitRonimo-0.9-macos-arm64.zip
+ditto -c -k --sequesterRsrc --keepParent \
+  target/release-intel/GitRonimo.app \
+  target/dist/GitRonimo-0.9-macos-x86_64.zip
+(cd target/dist && shasum -a 256 GitRonimo-0.9-macos-*.zip > SHA256SUMS.txt)
+```
+
+A universal binary (lipo of both executables into one `GitRonimo.app`) is produced by `.github/workflows/release.yml` on a `v*` tag, then signed and notarized.
+
+## Signing and notarization
+
+For a distributable release, import an Apple Developer ID Application certificate into a dedicated keychain, then sign with hardened runtime and timestamping:
+
+```bash
+codesign --force --deep --options runtime --timestamp --sign "Developer ID Application: YOUR NAME (TEAMID)" target/release-arm/GitRonimo.app
+codesign --verify --deep --strict --verbose=2 target/release-arm/GitRonimo.app
+xcrun notarytool submit YOUR_DMG_OR_ZIP --keychain-profile "notary-profile" --wait
+xcrun stapler staple target/release-arm/GitRonimo.app
+```
 
 ## Protected CI release
 
@@ -34,3 +83,5 @@ Pushing a `v*` tag starts `.github/workflows/release.yml`. Configure these repos
 - `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`: the corresponding App Store Connect API key identifiers.
 
 The workflow builds arm64 and x86_64 bundles, creates a universal app, signs it with hardened runtime and a timestamp, notarizes and staples it, runs Gatekeeper assessment, writes `SHA256SUMS.txt`, and publishes the ZIP with `CHANGELOG.md` as the release notes.
+
+Unsigned per-architecture CI artifacts are also uploaded from `.github/workflows/ci.yml` (`GitRonimo-unsigned-macos-arm64` and `GitRonimo-unsigned-macos-x86_64`).

@@ -154,8 +154,8 @@ The MVP is considered successful when all of the following are true:
 - [ ] Staging, unstaging, committing, fetching, pulling, and pushing have integration tests.
 - [ ] Destructive actions display the affected repository and paths.
 - [ ] Every failure shows the Git command category, exit status, and useful stderr without exposing secrets.
-- [ ] The application can be built as a universal or separate `arm64` and `x86_64` macOS app.
-- [ ] A signed and notarized release workflow is documented.
+- [x] The application can be built as a universal or separate `arm64` and `x86_64` macOS app.
+- [x] A signed and notarized release workflow is documented.
 - [ ] No Tower copyrighted assets or trademarks are packaged with the application.
 
 ---
@@ -2201,13 +2201,13 @@ A phase is done only when all checklist items and exit criteria in that phase pa
 
 ### Code quality
 
-- [ ] Clean release build.
-- [ ] No Clippy warnings.
-- [ ] All tests pass.
-- [ ] Dependency audit passes.
-- [ ] License audit passes.
-- [ ] Version updated.
-- [ ] Changelog updated.
+- [x] Clean release build.
+- [x] No Clippy warnings.
+- [x] All tests pass.
+- [x] Dependency audit passes.
+- [x] License audit passes.
+- [x] Version updated.
+- [x] Changelog updated.
 
 ### Functional smoke test
 

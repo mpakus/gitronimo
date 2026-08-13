@@ -85,7 +85,7 @@ Searchable list (`PALETTE_COMMANDS` in `app_state.rs`); list viewport scrolls. I
 - Show working copy / history / stashes / remotes / settings / **workflow** / pull requests / branches review / reflog / LFS / worktrees / submodules / rebase / conflicts…
 - History filter, Reveal HEAD, selected-commit copy / checkout / reset / revert / patch / export / compare / new branch
 - History tools (file history, blame, compare refs, browse tree, rebase onto, merge revision, squash/fixup/drop/reword, merge tool, signature check)
-- Quick open file, Message history, Toggle appearance, Keyboard shortcuts, Navigate back/forward
+- Quick open file, Message history, Toggle appearance, Keyboard shortcuts, Navigate back/forward, **About GitRonimo**
 
 Dispatch is `run_palette_command` in `main.rs`. Adding a user-facing action that already has a handler should usually add a `PaletteCommand` variant + label + match arm. Selected-commit actions require a History selection; Reset/Revert also require History scoped to the HEAD branch.
 

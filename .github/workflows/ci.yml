@@ -16,6 +16,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: clippy,rustfmt
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -28,11 +29,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - run: cargo install cargo-packager --version 0.11.8 --locked
-      - run: cargo build --release -p gitronimo-desktop
-      - run: cargo packager --release --formats app --manifest-path apps/desktop/Cargo.toml --out-dir target/release
+      - name: Package Apple Silicon
+        run: |
+          cargo build --release -p gitronimo-desktop
+          cargo packager --release --formats app --manifest-path apps/desktop/Cargo.toml --out-dir "$GITHUB_WORKSPACE/target/release-arm" --binaries-dir "$GITHUB_WORKSPACE/target/release"
+      - name: Package Intel
+        run: |
+          cargo build --release -p gitronimo-desktop --target x86_64-apple-darwin
+          cargo packager --release --formats app --target x86_64-apple-darwin --manifest-path apps/desktop/Cargo.toml --out-dir "$GITHUB_WORKSPACE/target/release-intel" --binaries-dir "$GITHUB_WORKSPACE/target/x86_64-apple-darwin/release"
       - uses: actions/upload-artifact@v7
         with:
-          name: GitRonimo-unsigned-macos
-          path: target/release/GitRonimo.app
+          name: GitRonimo-unsigned-macos-arm64
+          path: target/release-arm/GitRonimo.app
+      - uses: actions/upload-artifact@v7
+        with:
+          name: GitRonimo-unsigned-macos-x86_64
+          path: target/release-intel/GitRonimo.app

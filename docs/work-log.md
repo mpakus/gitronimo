@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-08-13 — 0.9 release prep (docs + dual-arch builds)
+
+**Intent:** Align README, AGENTS.md, and docs with shipped 0.9 product (GitRonimo menu/bundle, About overlay, Workflow, Services removed, `APP_VERSION`). Promote CHANGELOG to **0.9**. Document and produce unsigned Apple Silicon and Intel `.app` zips.
+
+**Files:** `README.md`, `AGENTS.md`, `CHANGELOG.md`, `docs/*`, `.github/workflows/ci.yml`, `rust-toolchain.toml`.
+
+**Acceptance:** Docs match current UX and packaging paths (`GitRonimo.app`); `APP_VERSION` documented as the bump site; arm64 and x86_64 bundles exist under `target/` with SHA-256 sums. Signing/notarization remain CI-secret / tag workflow.
+
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check`. `lipo -archs` reports `arm64` and `x86_64` on the two `GitRonimo.app` executables; Info.plist `CFBundleShortVersionString` is `0.9`. Zips: `target/dist/GitRonimo-0.9-macos-arm64.zip` and `target/dist/GitRonimo-0.9-macos-x86_64.zip`.
+
 ## 2026-08-13 — About overlay black + release version 0.9
 
 **Intent:** About panel uses a black card. Show product version **0.9** from a dedicated constant (not Cargo `0.1.0`) so it can be bumped after each release.
