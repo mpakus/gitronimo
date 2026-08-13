@@ -22,7 +22,6 @@ pub(crate) mod rebase;
 pub(crate) mod ref_context_menu;
 pub(crate) mod reflog;
 pub(crate) mod remotes;
-pub(crate) mod services;
 pub(crate) mod settings;
 pub(crate) mod sidebar;
 pub(crate) mod single_line_input;

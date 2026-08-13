@@ -259,7 +259,7 @@ impl GitronimoApp {
             format!("Create New Pull Request from {}…", named.quoted()),
             self.can_create_pull_request(),
             (!self.can_create_pull_request())
-                .then_some("Connect a GitHub account in Services first."),
+                .then_some("Connect a GitHub account in Settings first."),
             colors,
             cx,
             move |app, _, cx| app.prompt_create_pull_request_from_branch(&pr_head, cx),

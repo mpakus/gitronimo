@@ -24,7 +24,6 @@ impl GitronimoApp {
             ShellState::Welcome => {
                 let title = match self.welcome_shell_view {
                     WelcomeShellView::Repositories => "Repositories",
-                    WelcomeShellView::Services => "Services",
                     WelcomeShellView::Workflow => "Workflow",
                 };
                 (
@@ -54,7 +53,6 @@ impl GitronimoApp {
                     RepositoryView::History => "History",
                     RepositoryView::PullRequests => "Pull Requests",
                     RepositoryView::BranchesReview => "Branches Review",
-                    RepositoryView::Services => "Services",
                     RepositoryView::Settings => "Settings",
                     RepositoryView::Stashes => "Stashes",
                     RepositoryView::Remotes => "Remotes",
@@ -254,14 +252,13 @@ impl GitronimoApp {
             .items_center()
             .gap_1()
             .flex_shrink_0()
-            .child(shell_tab_button(
-                "Services",
-                IconKind::Cloud,
-                on_welcome && self.welcome_shell_view == WelcomeShellView::Services,
-                colors,
-                cx,
-                |app, cx| app.set_welcome_shell_view(WelcomeShellView::Services, cx),
-            ))
+            .child(
+                div()
+                    .id("shell-tab-spacer")
+                    .w(px(72.0))
+                    .h(px(48.0))
+                    .flex_shrink_0(),
+            )
             .child(shell_tab_button(
                 "Bookmarks",
                 IconKind::Bookmark,

@@ -478,8 +478,7 @@ impl GitronimoApp {
             service_auth_state: git_domain::ServiceAuthState::SignedOut,
             service_account: None,
             hosted_repositories: Vec::new(),
-            selected_hosted_repository: None,
-            services_load_token: 0,
+            github_load_token: 0,
             pull_requests: Vec::new(),
             selected_pull_request: None,
             pull_request_detail: None,
@@ -725,8 +724,7 @@ impl GitronimoApp {
             service_auth_state: git_domain::ServiceAuthState::SignedOut,
             service_account: None,
             hosted_repositories: Vec::new(),
-            selected_hosted_repository: None,
-            services_load_token: 0,
+            github_load_token: 0,
             pull_requests: Vec::new(),
             selected_pull_request: None,
             pull_request_detail: None,
@@ -986,8 +984,7 @@ impl GitronimoApp {
                 self.service_auth_state = git_domain::ServiceAuthState::SignedOut;
                 self.service_account = None;
                 self.hosted_repositories.clear();
-                self.selected_hosted_repository = None;
-                self.services_load_token = self.services_load_token.wrapping_add(1);
+                self.github_load_token = self.github_load_token.wrapping_add(1);
                 self.pull_requests.clear();
                 self.selected_pull_request = None;
                 self.pull_request_detail = None;
@@ -1036,9 +1033,6 @@ impl GitronimoApp {
             return;
         }
         self.welcome_shell_view = view;
-        if view == WelcomeShellView::Services {
-            self.load_services(cx);
-        }
         cx.notify();
     }
 
@@ -1430,6 +1424,7 @@ return remote_url & linefeed & parent_path"#;
             PaletteCommand::ShowSettings => {
                 self.navigate_to(RepositoryView::Settings, cx);
             }
+            PaletteCommand::ShowPullRequests => self.open_pull_requests(cx),
             PaletteCommand::ShowBranchesReview => {
                 self.navigate_to(RepositoryView::BranchesReview, cx);
             }
@@ -1437,9 +1432,6 @@ return remote_url & linefeed & parent_path"#;
                 if let ShellState::Repository(repository) = &self.state {
                     self.show_lfs(repository.clone(), cx);
                 }
-            }
-            PaletteCommand::Services => {
-                self.show_services(cx);
             }
             PaletteCommand::ShowReflog => {
                 if let ShellState::Repository(repository) = &self.state {
@@ -2578,7 +2570,7 @@ return remote_url & linefeed & parent_path"#;
             self.pull_request_repository = Some(hosted);
         }
         let Some(repository) = self.pull_request_repository.clone() else {
-            self.set_activity("Select a hosted repository from Services first.");
+            self.set_activity("Connect a GitHub account in Settings first.");
             cx.notify();
             return;
         };
@@ -3504,14 +3496,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         .detach();
     }
 
-    fn show_services(&mut self, cx: &mut Context<Self>) {
-        self.navigate_to(RepositoryView::Services, cx);
-        self.load_services(cx);
-    }
-
-    fn load_services(&mut self, cx: &mut Context<Self>) {
-        self.services_load_token = self.services_load_token.wrapping_add(1);
-        let load_token = self.services_load_token;
+    pub(crate) fn load_github_account(&mut self, cx: &mut Context<Self>) {
+        self.github_load_token = self.github_load_token.wrapping_add(1);
+        let load_token = self.github_load_token;
         self.service_auth_state = git_domain::ServiceAuthState::Loading;
         self.set_activity("Loading GitHub account…");
         cx.spawn(async move |this, cx| {
@@ -3530,7 +3517,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
-                if app.services_load_token != load_token {
+                if app.github_load_token != load_token {
                     return;
                 }
                 match result {
@@ -3538,7 +3525,6 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.service_auth_state = git_domain::ServiceAuthState::Connected;
                         app.service_account = Some(account);
                         app.hosted_repositories = repositories;
-                        app.selected_hosted_repository = None;
                         app.set_activity(format!(
                             "Loaded {} GitHub repositories.",
                             app.hosted_repositories.len()
@@ -3548,11 +3534,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.service_auth_state = git_domain::ServiceAuthState::SignedOut;
                         app.service_account = None;
                         app.hosted_repositories.clear();
-                        app.set_activity("Connect a GitHub account to list repositories.");
+                        app.set_activity("Connect a GitHub account in Settings.");
                     }
                     Err(error) => {
                         app.service_auth_state = service_auth_state(&error);
-                        app.set_activity(format!("GitHub service failed: {error:?}"));
+                        app.set_activity(format!("GitHub account failed: {error:?}"));
                     }
                 }
                 cx.notify();
@@ -3561,7 +3547,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         .detach();
     }
 
-    fn prompt_connect_github(cx: &mut Context<Self>) {
+    pub(crate) fn prompt_connect_github(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let token = cx
                 .background_spawn(async {
@@ -3612,12 +3598,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         .detach();
     }
 
-    fn sign_out_github(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn sign_out_github(&mut self, cx: &mut Context<Self>) {
         let result = MacKeychainStore.delete(&MacKeychainStore::github_key("default"));
         self.service_auth_state = git_domain::ServiceAuthState::SignedOut;
         self.service_account = None;
         self.hosted_repositories.clear();
-        self.selected_hosted_repository = None;
         self.set_activity(if result.is_ok() {
             "GitHub account disconnected."
         } else {
@@ -3626,42 +3611,17 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         cx.notify();
     }
 
-    fn prompt_clone_hosted_repository(&mut self, cx: &mut Context<Self>) {
-        let Some(index) = self.selected_hosted_repository else {
-            self.set_activity("Select a hosted repository first.");
-            cx.notify();
+    fn open_pull_requests(&mut self, cx: &mut Context<Self>) {
+        if let Some(repository) = self.pull_request_repository.clone() {
+            self.show_pull_requests(repository, cx);
             return;
-        };
-        let Some(repository) = self.hosted_repositories.get(index).cloned() else {
+        }
+        if let Some(repository) = self.hosted_repositories.first().cloned() {
+            self.show_pull_requests(repository, cx);
             return;
-        };
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Choose the clone destination parent folder".into()),
-        });
-        let store = self.store.clone();
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
-            };
-            let Some(parent) = paths.into_iter().next() else {
-                return;
-            };
-            let destination = parent.join(&repository.name);
-            let outcome = cx
-                .background_spawn(async move {
-                    let git = GitExecutable::discover()
-                        .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
-                    git.clone_repository(&repository.clone_url, &destination)
-                        .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
-                    discover_and_record(&destination, &store)
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| app.apply_open_outcome(outcome, cx));
-        })
-        .detach();
+        }
+        self.set_activity("Connect a GitHub account in Settings first.");
+        self.navigate_to(RepositoryView::Settings, cx);
     }
 
     fn show_pull_requests(
@@ -3764,7 +3724,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     #[allow(clippy::too_many_lines)]
     fn prompt_create_pull_request(&mut self, cx: &mut Context<Self>) {
         let Some(repository) = self.pull_request_repository.clone() else {
-            self.set_activity("Select a hosted repository from Services first.");
+            self.set_activity("Connect a GitHub account in Settings first.");
             cx.notify();
             return;
         };

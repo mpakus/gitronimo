@@ -16,11 +16,11 @@ Bring Gitronimo to **~99% Tower parity** — same information architecture, work
 
 | In scope | Out of scope (the remaining 1%) |
 |----------|----------------------------------|
-| Welcome rail (Services / Bookmarks / Workflow), repo detail panel | Pixel-identical layout or Tower trademark assets |
+| Welcome rail (Bookmarks / Workflow), repo detail panel | Pixel-identical layout or Tower trademark assets |
 | In-repo sidebar: WORKSPACE / BRANCHES / TAGS / REMOTES | OAuth device flow, enterprise GitHub, Bitbucket/Azure |
 | Working Copy: composer + file list + diff two-pane | Branches Review, AI commit messages |
 | Toolbar: Fetch/Pull/Push/Sync, Apply/Save, Refresh, search | Built-in terminal or text editor |
-| History, Stashes, Remotes, PRs, Services: list + detail | Cloud settings sync |
+| History, Stashes, Remotes, PRs: list + detail | Cloud settings sync |
 | 22px list rows, 28px panel headers, 52px toolbar, full-width accent selection | |
 
 **Reference screenshots** (internal study only, per `AGENTS.md`):
@@ -42,7 +42,7 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 - Branch/ref actions via sidebar right-click context menu (Tower pattern)
 - Toolbar: labeled Fetch/Pull/Push/Sync, Apply/Save/Refresh, Prev/Next, search field
 - History: Changeset/Tree toggle, full-width flat rows, multi-lane graph, plain ref labels, scope header
-- Stashes, Remotes, Services, PRs: two-pane layouts
+- Stashes, Remotes, PRs: two-pane layouts
 - GPUI `single_line_input` for search, commit subject/body (paste, caret, IME)
 - GPUI `single_line_input` for welcome repo description (no osascript dialog)
 - Quick Open overlay, Settings view, workflow hub, file +/- line counts
@@ -59,7 +59,6 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 | Gitronimo surface | Tower reference | Primary files |
 |-------------------|-----------------|---------------|
 | Welcome / Repositories | `overview-02`, `workflow-01` | `welcome.rs`, `sidebar.rs` |
-| Services | `overview-01` | `services.rs`, `welcome.rs` |
 | Working Copy | `overview-06`, `workflow-03/04/05` | `working_copy.rs`, `commit_composer.rs`, `diff_viewer.rs` |
 | Sidebar | `overview-05` | `sidebar.rs` |
 | Toolbar | Tower WC screenshot | `toolbar.rs` |
@@ -150,7 +149,7 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 
 **Work:**
 - `RepositoryView::Settings` + `settings.rs`
-- Sections: Appearance, Git identity, Default editor, Shortcuts, Accounts → Services
+- Sections: Appearance, Git identity, Shortcuts, GitHub account
 - `detail_section` / `detail_row` pattern
 
 | Status | |
@@ -261,7 +260,6 @@ Manual QA — compare each row to Tower screenshot (optional follow-up):
 | View | IA match | Density | Selection | Empty state | Toolbar | Pass |
 |------|----------|---------|-----------|-------------|---------|------|
 | Welcome / Repositories | yes | yes | yes | yes | yes | auto |
-| Services | yes | yes | yes | yes | yes | auto |
 | Working Copy | yes | yes | yes | yes | yes | auto |
 | History | yes | yes | yes | yes | yes | auto |
 | Commit Detail | yes | yes | yes | yes | n/a | auto |

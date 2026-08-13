@@ -12,6 +12,7 @@
 - History commit context menu (right-click): copy, detached checkout, reset/revert/rebase with confirms, amend/reword on HEAD, branch/tag/patch/export/compare.
 - Stashes Tower-style core: save dialog (message + untracked + path-limited from WC), apply dialog (pop / restore index), stash changeset detail, branch-from-stash; `Command-Shift-S` opens Save stash.
 - Current branch sidebar pill shows `HEAD ↑N` / `↓N` (same arrow order as the toolbar tracking line).
+- Removed the Services welcome tab, in-repo destination, and palette command. GitHub account connect/sign-out lives in Settings.
 
 ## 0.1.0 beta
 
@@ -22,8 +23,8 @@
 - Partial line and hunk staging in the diff viewer.
 - Working Copy multi-select: Command-A, Shift-click, toggle deselect/reselect; batch stage/unstage via checkboxes on multi-selection.
 - Browse bounded history with graph, scope filter, Changeset/Tree detail, and Commit Detail navigation.
-- Stashes, remotes, services (GitHub token), pull requests, and settings surfaces (two-pane layouts).
-- Welcome/Repositories: bookmarks, grouped recents, add/create/clone, Services rail.
+- Stashes, remotes, pull requests, and settings surfaces (two-pane layouts).
+- Welcome/Repositories: bookmarks, grouped recents, add/create/clone.
 - Branch/ref context menu on sidebar right-click; trimmed workspace sidebar (Working Copy, History, Stashes, Settings).
 - Fetch, pull, publish, and push with cancellation for network work.
 - Pull and Push HEAD dialogs: remote branch/destination pickers, rebase option, push all tags, force-with-lease, recurse submodules, skip hooks.

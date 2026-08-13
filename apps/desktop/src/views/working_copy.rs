@@ -34,9 +34,6 @@ impl GitronimoApp {
         if self.repository_view == RepositoryView::Remotes {
             return self.remotes_view(colors, cx).into_any_element();
         }
-        if self.repository_view == RepositoryView::Services {
-            return self.services_view(colors, cx).into_any_element();
-        }
         if self.repository_view == RepositoryView::Settings {
             return self.settings_view(colors, cx).into_any_element();
         }

@@ -90,9 +90,6 @@ impl GitronimoApp {
         let actions = div()
             .flex()
             .gap_1()
-            .child(file_action_button("Services", colors, cx, |app, cx| {
-                app.show_services(cx);
-            }))
             .child(file_action_button("Refresh", colors, cx, |app, cx| {
                 if let Some(repository) = app.pull_request_repository.clone() {
                     app.load_pull_requests(repository, cx);

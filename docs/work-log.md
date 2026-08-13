@@ -1,5 +1,17 @@
 # Implementation work log
 
+## 2026-08-13 — Remove Services navigation and view
+
+**Intent:** Drop the Services welcome tab, in-repo destination, palette command, and hosted-repo browser. GitHub token connect/sign-out moves to Settings so Pull Requests still have an account path.
+
+**Files:** `views/services.rs` (delete), toolbar/welcome/sidebar/working_copy/settings/pull_requests, `app_state.rs`, `main.rs`, docs.
+
+**Acceptance:** No Services tab or palette entry; Bookmarks/Workflow remain; Settings connects GitHub; PRs no longer link to Services; gates pass. **Done.**
+
+**Follow-up:** Keep a 72×48 empty slot in the toolbar where Services was so Bookmarks/Workflow stay aligned.
+
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass. GitHub Keychain connect remains in Settings for Pull Requests.
+
 ## 2026-08-12 — Sidebar HEAD ahead/behind badge (Tower-style)
 
 **Intent:** Match Tower’s current-branch pill: `HEAD` plus compact `↑N` / `↓N` for unpublished / unpulled commits. Approach-only from Tower; reuse porcelain ahead/behind already shown in the toolbar.

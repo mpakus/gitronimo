@@ -106,7 +106,6 @@ pub(crate) struct OpenedRepository {
 pub(crate) enum WelcomeShellView {
     /// Bookmarks tab — saved/local repositories.
     Repositories,
-    Services,
     Workflow,
 }
 
@@ -147,7 +146,6 @@ pub(crate) enum RepositoryView {
     CommitDetail,
     Stashes,
     Remotes,
-    Services,
     Settings,
     PullRequests,
     BranchesReview,
@@ -458,9 +456,9 @@ pub(crate) enum PaletteCommand {
     DropSelectedStash,
     ShowRemotes,
     ShowSettings,
+    ShowPullRequests,
     ShowBranchesReview,
     GitLfsStatus,
-    Services,
     ShowReflog,
     FileHistory,
     Blame,
@@ -673,9 +671,9 @@ pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
     ("Show stashes", PaletteCommand::ShowStashes),
     ("Show remotes", PaletteCommand::ShowRemotes),
     ("Show settings", PaletteCommand::ShowSettings),
+    ("Show pull requests", PaletteCommand::ShowPullRequests),
     ("Branches review", PaletteCommand::ShowBranchesReview),
     ("Git LFS status", PaletteCommand::GitLfsStatus),
-    ("Services", PaletteCommand::Services),
     ("Show reflog", PaletteCommand::ShowReflog),
     ("File history…", PaletteCommand::FileHistory),
     ("Blame…", PaletteCommand::Blame),
@@ -958,8 +956,7 @@ pub(crate) struct GitronimoApp {
     pub service_auth_state: ServiceAuthState,
     pub service_account: Option<ServiceAccount>,
     pub hosted_repositories: Vec<HostedRepository>,
-    pub selected_hosted_repository: Option<usize>,
-    pub services_load_token: u64,
+    pub github_load_token: u64,
     pub pull_requests: Vec<PullRequestSummary>,
     pub selected_pull_request: Option<usize>,
     pub pull_request_detail: Option<PullRequestDetail>,

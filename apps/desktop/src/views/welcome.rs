@@ -20,15 +20,6 @@ impl GitronimoApp {
         colors: &ThemeColors,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        if self.welcome_shell_view == WelcomeShellView::Services {
-            return div()
-                .flex_1()
-                .h_full()
-                .overflow_hidden()
-                .bg(colors.window_background)
-                .child(self.services_view(colors, cx))
-                .into_any_element();
-        }
         if self.welcome_shell_view == WelcomeShellView::Workflow {
             return welcome_workflow_hub(self, colors, cx).into_any_element();
         }

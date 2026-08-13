@@ -283,65 +283,6 @@ impl GitronimoApp {
         })
     }
 
-    #[allow(dead_code, clippy::unused_self)]
-    fn repositories_section(
-        &self,
-        colors: &ThemeColors,
-        _cx: &mut gpui::Context<Self>,
-    ) -> AnyElement {
-        div()
-            .px_3()
-            .pt_3()
-            .pb_2()
-            .text_xs()
-            .text_color(colors.text_muted)
-            .child("Repositories")
-            .into_any_element()
-    }
-
-    #[allow(dead_code)]
-    fn services_section(&self, colors: &ThemeColors, _cx: &mut gpui::Context<Self>) -> AnyElement {
-        let mut children = Vec::new();
-        if let Some(account) = &self.service_account {
-            children.push(
-                div()
-                    .px_3()
-                    .py_2()
-                    .h(px(24.0))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .text_sm()
-                    .cursor_pointer()
-                    .child(account.login.clone())
-                    .into_any_element(),
-            );
-        }
-        if children.is_empty() {
-            children.push(
-                div()
-                    .px_3()
-                    .py_2()
-                    .h(px(24.0))
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .text_sm()
-                    .text_color(colors.text_muted)
-                    .child("Add Service")
-                    .into_any_element(),
-            );
-        }
-        div()
-            .px_3()
-            .pt_4()
-            .pb_2()
-            .text_xs()
-            .text_color(colors.text_muted)
-            .child("Services")
-            .into_any_element()
-    }
-
     /// Pinned (pin order), remaining active, and archived local branches.
     fn partition_local_branches(&self) -> (Vec<NamedRef>, Vec<NamedRef>, Vec<NamedRef>) {
         let pinned_names: std::collections::HashSet<&str> = self
@@ -720,9 +661,6 @@ fn welcome_sidebar_view(
     colors: &ThemeColors,
     cx: &mut gpui::Context<GitronimoApp>,
 ) -> AnyElement {
-    if app.welcome_shell_view == WelcomeShellView::Services {
-        return welcome_services_sidebar(app, width, colors);
-    }
     if app.welcome_shell_view == WelcomeShellView::Workflow {
         return welcome_workflow_sidebar(width, colors);
     }
@@ -938,39 +876,6 @@ fn welcome_workflow_sidebar(width: f32, colors: &ThemeColors) -> AnyElement {
                 .text_sm()
                 .text_color(colors.text_muted)
                 .child("No workflow items yet."),
-        )
-        .into_any_element()
-}
-
-fn welcome_services_sidebar(app: &GitronimoApp, width: f32, colors: &ThemeColors) -> AnyElement {
-    let account = app.service_account.as_ref().map_or_else(
-        || "No account connected".to_owned(),
-        |account| account.login.clone(),
-    );
-    div()
-        .w(px(width))
-        .h_full()
-        .flex_shrink_0()
-        .overflow_hidden()
-        .flex()
-        .flex_col()
-        .bg(colors.sidebar_background)
-        .child(
-            div()
-                .px_3()
-                .pt_3()
-                .pb_2()
-                .text_xs()
-                .text_color(colors.text_muted)
-                .child("Services"),
-        )
-        .child(
-            div()
-                .px_3()
-                .py_2()
-                .text_sm()
-                .text_color(colors.text_secondary)
-                .child(account),
         )
         .into_any_element()
 }

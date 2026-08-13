@@ -41,12 +41,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 **Guide text:** the Services view manages GitHub/Bitbucket/Beanstalk accounts right from within Tower; you can create and clone remote repositories or manage SSH public keys without leaving Tower.
 
-**Adopt in Gitronimo:** this is the Phase 9 hosting-services surface. A Services view (or welcome-screen section) that:
-
-- lists connected hosting accounts with provider name and login;
-- sign-in and sign-out per provider;
-- shows the auth state (connected / expired token / rate-limited);
-- seeds "Clone repository…" with the account's repositories.
+**Adopt in Gitronimo:** not shipped. Gitronimo has no Services tab. GitHub personal-access-token connect/sign-out lives in **Settings**; Pull Requests remain a palette destination. Hosted-repo browse/clone from a Services pane is out of product.
 
 ### 1.2 Repositories — bookmarks and organization
 
@@ -217,9 +212,9 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Commit Detail view with Changeset/Tree modes (double-click from History)
 - [x] Stashes, Remotes, and Git LFS sidebar destinations
 - [x] Repositories welcome view: grouped/flat recents, detail panel, Add/Create/Clone actions
-- [x] Services view: GitHub token auth, repository listing, clone handoff (Phase 9 baseline)
 - [x] Pull Requests list/detail workflow (Phase 9 baseline)
-- [x] Welcome vertical Services/Bookmarks/Workflow rail (Workflow placeholder)
+- [x] Welcome toolbar Bookmarks / Workflow tabs (Workflow placeholder)
+- [x] Services tab and view removed; GitHub connect lives in Settings
 - [x] Always-visible inline toolbar/sidebar search filtering repos and files
 - [x] Sidebar remote-activity progress bar during fetch/pull/push + last-result footer when idle
 - [x] Visual polish pass: welcome detail headers, commit focus border, diff tabs/hunk headers, HEAD badge, activity bar
@@ -255,13 +250,13 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Shared layout constants (`LIST_ROW_HEIGHT`, `NAV_ROW_HEIGHT`, `PANEL_HEADER_HEIGHT`, etc.) in `components.rs`
 - [x] Shared helpers: `section_header`, `detail_section`, `detail_row`, `view_panel_header`, `two_pane_view`, `head_badge`, `count_badge`
 - [x] Full-width accent selection in sidebar nav (no rounded inset) and welcome repo list
-- [x] Unified empty states (`centered_empty_state`) across Welcome, WC, History, Services, PRs
-- [x] Services + Pull Requests two-pane layouts matching Stashes/Remotes
-- [x] Panel headers standardized to 28px across Stashes, Remotes, Services, PRs
+- [x] Unified empty states (`centered_empty_state`) across Welcome, WC, History, PRs
+- [x] Pull Requests two-pane layouts matching Stashes/Remotes
+- [x] Panel headers standardized to 28px across Stashes, Remotes, Settings, PRs
 
 **Partially done (works but visually or structurally short of Tower):**
 
-- [~] §1.1 Services — hosting view exists; welcome now has vertical Services/Bookmarks/Workflow rail; Workflow tab is placeholder-only
+- [~] §1.1 Welcome tabs — Bookmarks + Workflow; Services surface removed (GitHub in Settings); Workflow still placeholder
 - [~] §1.4 Back/Forward — Prev/Next labels added; toolbar groups Fetch/Pull/Push/Sync, stash Apply/Save, Refresh, and inline search fields Tower-style
 - [x] §1.5 Remote activity — in-flight progress bar in the bottom activity strip (left) and sidebar footer; Cancel available while running; last-result text when idle; Message history for past statuses/errors
 
@@ -287,15 +282,14 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 | Deterministic remote progress | §1.5           | Strip + Cancel exist; finer Git stderr byte/object parsing still partial |
 
 | IME-rich search/composer      | §4             | Inline search uses key-down capture; full EntityInputHandler fields deferred        |
-| Settings dedicated view       | §1.3           | Settings sidebar item routes to Services; no separate preferences panel yet         |
+| Settings dedicated view       | §1.3           | Settings view exists (appearance, identity, GitHub account, shortcuts)              |
 | History ref label density     | §1.8           | Plain text labels; long ref names still truncate on narrow panes                    |
 
 See also [`keyboard-shortcuts.md`](keyboard-shortcuts.md) for Working Copy selection behavior and [`desktop-shell.md`](desktop-shell.md) for activity bar, palette, pins, and confirms.
 
 ### Delivery notes
 
-- Services currently targets GitHub Cloud with a personal access token entered through an obscured macOS dialog and stored only in Keychain.
-- Hosted repository cloning uses the provider's clone URL and the user's configured Git credential helper or SSH setup.
+- GitHub Cloud uses a personal access token entered through an obscured macOS dialog and stored only in Keychain (Settings).
 - Enterprise/self-hosted GitHub endpoint configuration and OAuth device flow remain separate product hardening work in `PLAN.md`.
 - Pull Request mutations require the selected hosted repository and use explicit merge-method confirmation.
 - The `t-vs-g.png` reference informed density, grouping, and two-pane hierarchy only; Gitronimo does not ship its screenshots, icons, copy, or branding.

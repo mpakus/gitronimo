@@ -14,7 +14,7 @@ use crate::app_state::{GitronimoApp, Mutation, clamp_list_pane_width, clamp_side
 pub(crate) const LIST_ROW_HEIGHT: f32 = 22.0;
 /// Sidebar navigation row height (Working Copy, History, etc.).
 pub(crate) const NAV_ROW_HEIGHT: f32 = 24.0;
-/// View panel header bar height (Stashes, Remotes, Services, PRs).
+/// View panel header bar height (Stashes, Remotes, Settings, PRs).
 pub(crate) const PANEL_HEADER_HEIGHT: f32 = 28.0;
 /// Primary/secondary action button height.
 pub(crate) const ACTION_BUTTON_HEIGHT: f32 = 26.0;
@@ -260,7 +260,7 @@ fn action_button(
 }
 
 /// Action buttons live in the same id namespace as toolbar and sidebar buttons, so
-/// a bare label (`Pull`, `Fetch`, `Services`) would share interactive state with the
+/// a bare label (`Pull`, `Fetch`, `Refresh`) would share interactive state with the
 /// toolbar button of the same name and lose its clicks.
 fn action_button_id(label: &'static str) -> gpui::ElementId {
     gpui::ElementId::Name(format!("action-button:{label}").into())

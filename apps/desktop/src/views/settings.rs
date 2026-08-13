@@ -4,8 +4,9 @@ use gpui::{div, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use crate::actions::ShortcutReference;
-use crate::app_state::{GitronimoApp, RepositoryView, ThemeMode};
+use crate::app_state::{GitronimoApp, ThemeMode};
 use crate::views::components::{detail_row, detail_section, file_action_button, view_panel_header};
+use git_domain::ServiceAuthState;
 
 impl GitronimoApp {
     pub(crate) fn settings_view(
@@ -18,6 +19,11 @@ impl GitronimoApp {
             ThemeMode::Light => "Light",
             ThemeMode::Dark => "Dark",
         };
+        let github_account = self
+            .service_account
+            .as_ref()
+            .map_or_else(|| "Not connected".into(), |account| account.login.clone());
+        let connected = self.service_auth_state == ServiceAuthState::Connected;
         div()
             .flex()
             .flex_col()
@@ -53,24 +59,25 @@ impl GitronimoApp {
                     )
                     .child(detail_section("GIT IDENTITY", colors))
                     .child(detail_row("Committer", &self.author_identity, colors))
-                    .child(detail_section("ACCOUNTS", colors))
-                    .child(detail_row(
-                        "Hosting",
-                        if self.service_account.is_some() {
-                            "Connected"
-                        } else {
-                            "Not connected"
-                        },
-                        colors,
-                    ))
-                    .child(file_action_button(
-                        "Manage Services…",
-                        colors,
-                        cx,
-                        |app, cx| {
-                            app.navigate_to(RepositoryView::Services, cx);
-                        },
-                    ))
+                    .child(detail_section("GITHUB", colors))
+                    .child(detail_row("Account", &github_account, colors))
+                    .child(if connected {
+                        div()
+                            .flex()
+                            .gap_1()
+                            .child(file_action_button("Refresh", colors, cx, |app, cx| {
+                                app.load_github_account(cx);
+                            }))
+                            .child(file_action_button("Sign out", colors, cx, |app, cx| {
+                                app.sign_out_github(cx);
+                            }))
+                            .into_any_element()
+                    } else {
+                        file_action_button("Connect GitHub…", colors, cx, |_, cx| {
+                            GitronimoApp::prompt_connect_github(cx);
+                        })
+                        .into_any_element()
+                    })
                     .child(detail_section("KEYBOARD", colors))
                     .child(file_action_button(
                         "Show Shortcuts…",
