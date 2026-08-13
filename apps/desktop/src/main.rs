@@ -51,14 +51,14 @@ use crate::actions::{
     WidenSidebar,
 };
 use crate::app_state::{
-    ChoicePromptKind, DEFAULT_LIST_PANE_WIDTH, DEFAULT_SIDEBAR_WIDTH, ForcePushState, GitronimoApp,
-    HistoryDetailMode, LastAction, Mutation, NetworkOperation, OpenedRepository, OperationAction,
-    OverlayFocus, PR_MERGE_METHOD_CHOICES, PaletteCommand, PullDialogState, PushDialogState,
-    PushOption, RefContext, RefContextSubmenu, RepositoryView, ShellState, ShortcutReferenceState,
-    StashAction, SubmodulePushMode, TextPromptKind, ThemeMode, WelcomeRepoSnapshot,
-    WelcomeShellView, appearance_from_window, clamp_list_pane_width, clamp_sidebar_width,
-    discard_selected, git_failure_message, network_failure_message, repository_is_available,
-    repository_unavailable_message, resize_width,
+    ACTIVITY_LOG_CAPACITY, ActivityLogEntry, ChoicePromptKind, DEFAULT_LIST_PANE_WIDTH,
+    DEFAULT_SIDEBAR_WIDTH, ForcePushState, GitronimoApp, HistoryDetailMode, LastAction, Mutation,
+    NetworkOperation, OpenedRepository, OperationAction, OverlayFocus, PR_MERGE_METHOD_CHOICES,
+    PaletteCommand, PullDialogState, PushDialogState, PushOption, RefContext, RefContextSubmenu,
+    RepositoryView, ShellState, ShortcutReferenceState, StashAction, SubmodulePushMode,
+    TextPromptKind, ThemeMode, WelcomeRepoSnapshot, WelcomeShellView, appearance_from_window,
+    clamp_list_pane_width, clamp_sidebar_width, discard_selected, git_failure_message,
+    network_failure_message, repository_is_available, repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
 use crate::views::single_line_input::register_input_bindings;
@@ -366,6 +366,11 @@ impl GitronimoApp {
             network_progress: 0.0,
             last_network_result: None,
             activity: "Choose a repository to begin.".into(),
+            activity_log: std::collections::VecDeque::from([ActivityLogEntry {
+                message: "Choose a repository to begin.".into(),
+                at: SystemTime::now(),
+            }]),
+            show_activity_log: false,
             working_copy: None,
             worktree_show_all_files: false,
             tracked_files: Vec::new(),
@@ -600,7 +605,12 @@ impl GitronimoApp {
             commit_composer_expanded: false,
             network_progress: 0.0,
             last_network_result: None,
-            activity,
+            activity: activity.clone(),
+            activity_log: std::collections::VecDeque::from([ActivityLogEntry {
+                message: activity,
+                at: SystemTime::now(),
+            }]),
+            show_activity_log: false,
             working_copy: None,
             worktree_show_all_files: false,
             tracked_files: Vec::new(),
@@ -766,6 +776,37 @@ impl GitronimoApp {
             }));
     }
 
+    /// Update the status line and append to the capped activity history (skipping duplicates).
+    pub(crate) fn set_activity(&mut self, message: impl AsRef<str>) {
+        let message = message.as_ref().to_owned();
+        if self
+            .activity_log
+            .front()
+            .is_none_or(|entry| entry.message != message)
+        {
+            self.activity_log.push_front(ActivityLogEntry {
+                message: message.clone(),
+                at: SystemTime::now(),
+            });
+            while self.activity_log.len() > ACTIVITY_LOG_CAPACITY {
+                self.activity_log.pop_back();
+            }
+        }
+        self.activity = message;
+    }
+
+    pub(crate) fn toggle_activity_log(&mut self, cx: &mut Context<Self>) {
+        self.show_activity_log = !self.show_activity_log;
+        cx.notify();
+    }
+
+    pub(crate) fn close_activity_log(&mut self, cx: &mut Context<Self>) {
+        if self.show_activity_log {
+            self.show_activity_log = false;
+            cx.notify();
+        }
+    }
+
     fn observe_commit_composer_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let subject = self.commit_subject_input.focus_handle(cx);
         let body = self.commit_body_input.focus_handle(cx);
@@ -838,7 +879,7 @@ impl GitronimoApp {
                 self.state = ShellState::Repository(opened.repository);
                 self.recents = opened.recents;
                 self.selected_recent = None;
-                self.activity = "Repository opened.".into();
+                self.set_activity("Repository opened.");
                 self.working_copy = None;
                 self.refs = RefSnapshot::default();
                 self.ref_context = None;
@@ -922,7 +963,7 @@ impl GitronimoApp {
             }
             Err(error) => {
                 self.state = ShellState::Error(error.to_string());
-                self.activity = "Repository could not be opened.".into();
+                self.set_activity("Repository could not be opened.");
             }
         }
         cx.notify();
@@ -934,7 +975,7 @@ impl GitronimoApp {
         if let ShellState::Repository(repository) = &self.state {
             self.load_working_copy(repository.clone(), cx);
         } else {
-            self.activity = "Open a repository before refreshing its working copy.".into();
+            self.set_activity("Open a repository before refreshing its working copy.");
         }
         cx.notify();
     }
@@ -974,7 +1015,7 @@ impl GitronimoApp {
     fn create_bookmark_folder(&mut self, name: &str, cx: &mut Context<Self>) {
         let name = name.trim().to_owned();
         if name.is_empty() {
-            self.activity = "Enter a folder name.".into();
+            self.set_activity("Enter a folder name.");
             cx.notify();
             return;
         }
@@ -990,14 +1031,14 @@ impl GitronimoApp {
             expanded: true,
         });
         self.persist_bookmark_organization();
-        self.activity = "Folder created.".into();
+        self.set_activity("Folder created.");
         cx.notify();
     }
 
     fn rename_bookmark_folder(&mut self, id: &str, name: &str, cx: &mut Context<Self>) {
         let name = name.trim().to_owned();
         if name.is_empty() {
-            self.activity = "Enter a folder name.".into();
+            self.set_activity("Enter a folder name.");
             cx.notify();
             return;
         }
@@ -1010,7 +1051,7 @@ impl GitronimoApp {
         };
         folder.name = name;
         self.persist_bookmark_organization();
-        self.activity = "Folder renamed.".into();
+        self.set_activity("Folder renamed.");
         cx.notify();
     }
 
@@ -1019,7 +1060,7 @@ impl GitronimoApp {
         self.repository_folders
             .retain(|_, folder_id| folder_id.as_str() != id);
         self.persist_bookmark_organization();
-        self.activity = "Folder deleted. Repositories are now at the root.".into();
+        self.set_activity("Folder deleted. Repositories are now at the root.");
         cx.notify();
     }
 
@@ -1191,7 +1232,7 @@ return remote_url & linefeed & parent_path"#;
         self.command_palette_query.clear();
         self.command_palette_selected = 0;
         self.pending_overlay_focus = Some(OverlayFocus::CommandPalette);
-        self.activity = "Choose a command from the palette.".into();
+        self.set_activity("Choose a command from the palette.");
         cx.notify();
     }
 
@@ -1240,7 +1281,7 @@ return remote_url & linefeed & parent_path"#;
                 if let ShellState::Repository(repository) = &self.state {
                     self.load_working_copy(repository.clone(), cx);
                 } else {
-                    self.activity = "Open a repository before refreshing its working copy.".into();
+                    self.set_activity("Open a repository before refreshing its working copy.");
                 }
                 cx.notify();
             }
@@ -1255,7 +1296,7 @@ return remote_url & linefeed & parent_path"#;
                         let repository = repository.clone();
                         self.show_commit_detail(&repository, index, cx);
                     } else {
-                        self.activity = "Select a history commit first.".into();
+                        self.set_activity("Select a history commit first.");
                         cx.notify();
                     }
                 }
@@ -1416,14 +1457,14 @@ return remote_url & linefeed & parent_path"#;
 
     fn request_branch_delete(&mut self, branch: String, cx: &mut Context<Self>) {
         self.close_ref_context_menu(cx);
-        self.activity = format!("Confirm deletion of branch {branch}.");
+        self.set_activity(format!("Confirm deletion of branch {branch}."));
         self.pending_branch_delete = Some(branch);
         cx.notify();
     }
 
     pub(crate) fn cancel_branch_delete(&mut self, cx: &mut Context<Self>) {
         self.pending_branch_delete = None;
-        self.activity = "Branch deletion cancelled.".into();
+        self.set_activity("Branch deletion cancelled.");
         cx.notify();
     }
 
@@ -1460,7 +1501,7 @@ return remote_url & linefeed & parent_path"#;
         match kind {
             TextPromptKind::BranchRename { current } => {
                 if value.is_empty() || value == current {
-                    self.activity = "Enter a new branch name to rename.".into();
+                    self.set_activity("Enter a new branch name to rename.");
                     cx.notify();
                     return;
                 }
@@ -1474,7 +1515,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::CreateBranch { start } => {
                 if value.is_empty() {
-                    self.activity = "Enter a branch name.".into();
+                    self.set_activity("Enter a branch name.");
                     cx.notify();
                     return;
                 }
@@ -1484,7 +1525,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::CreateTag { start } => {
                 if value.is_empty() {
-                    self.activity = "Enter a tag name.".into();
+                    self.set_activity("Enter a tag name.");
                     cx.notify();
                     return;
                 }
@@ -1498,7 +1539,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::FileHistoryPath => {
                 if value.is_empty() {
-                    self.activity = "Enter a repository path.".into();
+                    self.set_activity("Enter a repository path.");
                     cx.notify();
                     return;
                 }
@@ -1514,7 +1555,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::BlamePath => {
                 if value.is_empty() {
-                    self.activity = "Enter a repository path.".into();
+                    self.set_activity("Enter a repository path.");
                     cx.notify();
                     return;
                 }
@@ -1530,7 +1571,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::CompareFrom => {
                 if value.is_empty() {
-                    self.activity = "Enter a ref to compare from.".into();
+                    self.set_activity("Enter a ref to compare from.");
                     cx.notify();
                     return;
                 }
@@ -1541,7 +1582,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::CompareTo { left } => {
                 if value.is_empty() {
-                    self.activity = "Enter a ref to compare to.".into();
+                    self.set_activity("Enter a ref to compare to.");
                     cx.notify();
                     return;
                 }
@@ -1558,7 +1599,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::DropCommit => {
                 if value.is_empty() {
-                    self.activity = "Enter a commit to drop (e.g. HEAD~1).".into();
+                    self.set_activity("Enter a commit to drop (e.g. HEAD~1).");
                     cx.notify();
                     return;
                 }
@@ -1572,7 +1613,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::BrowseTree => {
                 if value.is_empty() {
-                    self.activity = "Enter a commit or ref to browse.".into();
+                    self.set_activity("Enter a commit or ref to browse.");
                     cx.notify();
                     return;
                 }
@@ -1597,7 +1638,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::HistoryReference => {
                 if value.is_empty() {
-                    self.activity = "Enter a branch or tag name.".into();
+                    self.set_activity("Enter a branch or tag name.");
                     cx.notify();
                     return;
                 }
@@ -1614,7 +1655,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::RebaseOnto => {
                 if value.is_empty() {
-                    self.activity = "Enter a rebase base (e.g. main).".into();
+                    self.set_activity("Enter a rebase base (e.g. main).");
                     cx.notify();
                     return;
                 }
@@ -1628,7 +1669,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::MergeRevision => {
                 if value.is_empty() {
-                    self.activity = "Enter a revision to merge.".into();
+                    self.set_activity("Enter a revision to merge.");
                     cx.notify();
                     return;
                 }
@@ -1638,7 +1679,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::AutosquashTarget { squash } => {
                 if value.is_empty() {
-                    self.activity = "Enter a commit to fold into (e.g. HEAD).".into();
+                    self.set_activity("Enter a commit to fold into (e.g. HEAD).");
                     cx.notify();
                     return;
                 }
@@ -1660,7 +1701,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::AutosquashMessage { target } => {
                 if value.is_empty() {
-                    self.activity = "Enter a squash message.".into();
+                    self.set_activity("Enter a squash message.");
                     cx.notify();
                     return;
                 }
@@ -1674,7 +1715,7 @@ return remote_url & linefeed & parent_path"#;
             }
             TextPromptKind::RewordSubject => {
                 if value.is_empty() {
-                    self.activity = "Enter a commit subject.".into();
+                    self.set_activity("Enter a commit subject.");
                     cx.notify();
                     return;
                 }
@@ -1947,7 +1988,7 @@ return remote_url & linefeed & parent_path"#;
         cx: &mut Context<Self>,
     ) {
         let Some(repository) = self.pull_request_repository.clone() else {
-            self.activity = "Open pull requests before merging.".into();
+            self.set_activity("Open pull requests before merging.");
             cx.notify();
             return;
         };
@@ -1971,10 +2012,10 @@ return remote_url & linefeed & parent_path"#;
             let _ = this.update(cx, |app, cx| {
                 match result {
                     Ok(()) => {
-                        app.activity = format!("Merged pull request #{number}.");
+                        app.set_activity(format!("Merged pull request #{number}."));
                         app.load_pull_requests(repository, cx);
                     }
-                    Err(error) => app.activity = format!("Merge failed: {error:?}"),
+                    Err(error) => app.set_activity(format!("Merge failed: {error:?}")),
                 }
                 cx.notify();
             });
@@ -1984,14 +2025,14 @@ return remote_url & linefeed & parent_path"#;
 
     fn run_merge_tool_for_path(&mut self, path: Option<String>, cx: &mut Context<Self>) {
         let ShellState::Repository(repository) = &self.state else {
-            self.activity = "Open a repository before using the merge tool.".into();
+            self.set_activity("Open a repository before using the merge tool.");
             cx.notify();
             return;
         };
         let repository = repository.clone();
         let worker_repository = repository.clone();
         let path_arg = path.map(|path| GitPath(path.as_bytes().to_vec()));
-        self.activity = "Opening merge tool…".into();
+        self.set_activity("Opening merge tool…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -2002,10 +2043,10 @@ return remote_url & linefeed & parent_path"#;
                 .await;
             let _ = this.update(cx, |app, cx| match result {
                 Ok(()) => {
-                    app.activity = "Merge tool finished.".into();
+                    app.set_activity("Merge tool finished.");
                     app.load_working_copy(repository, cx);
                 }
-                Err(error) => app.activity = format!("Merge tool failed: {error}"),
+                Err(error) => app.set_activity(format!("Merge tool failed: {error}")),
             });
         })
         .detach();
@@ -2041,7 +2082,7 @@ return remote_url & linefeed & parent_path"#;
 
     pub(crate) fn copy_text_to_clipboard(&mut self, text: &str, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(text.to_owned()));
-        self.activity = format!("Copied {text} to the clipboard.");
+        self.set_activity(format!("Copied {text} to the clipboard."));
         cx.notify();
     }
 
@@ -2053,13 +2094,13 @@ return remote_url & linefeed & parent_path"#;
             .position(|name| name == branch)
         {
             self.branch_organization.pinned.remove(index);
-            self.activity = format!("Unpinned {branch}.");
+            self.set_activity(format!("Unpinned {branch}."));
         } else {
             self.branch_organization.pinned.push(branch.to_owned());
             self.branch_organization
                 .archived
                 .retain(|name| name != branch);
-            self.activity = format!("Pinned {branch}.");
+            self.set_activity(format!("Pinned {branch}."));
         }
         self.persist_branch_organization();
         cx.notify();
@@ -2073,13 +2114,13 @@ return remote_url & linefeed & parent_path"#;
             .position(|name| name == branch)
         {
             self.branch_organization.archived.remove(index);
-            self.activity = format!("Unarchived {branch}.");
+            self.set_activity(format!("Unarchived {branch}."));
         } else {
             self.branch_organization.archived.push(branch.to_owned());
             self.branch_organization
                 .pinned
                 .retain(|name| name != branch);
-            self.activity = format!("Archived {branch}.");
+            self.set_activity(format!("Archived {branch}."));
         }
         self.persist_branch_organization();
         cx.notify();
@@ -2094,13 +2135,13 @@ return remote_url & linefeed & parent_path"#;
             .save_branch_organization(&repository.worktree_root, &self.branch_organization)
             .is_err()
         {
-            self.activity = "Branch organization could not be saved.".into();
+            self.set_activity("Branch organization could not be saved.");
         }
     }
 
     pub(crate) fn publish_branch(&mut self, branch: &str, cx: &mut Context<Self>) {
         let Some(remote) = self.default_remote() else {
-            self.activity = "No configured remote to publish to.".into();
+            self.set_activity("No configured remote to publish to.");
             cx.notify();
             return;
         };
@@ -2156,7 +2197,9 @@ return remote_url & linefeed & parent_path"#;
 
     pub(crate) fn request_remote_branch_delete(&mut self, branch: &str, cx: &mut Context<Self>) {
         let Some((remote, name)) = branch.split_once('/') else {
-            self.activity = format!("Remote branch {branch} is missing a remote prefix.");
+            self.set_activity(format!(
+                "Remote branch {branch} is missing a remote prefix."
+            ));
             cx.notify();
             return;
         };
@@ -2221,12 +2264,12 @@ return remote_url & linefeed & parent_path"#;
             let _ = this.update(cx, |app, cx| {
                 match result {
                     Ok(()) => {
-                        app.activity = format!(
+                        app.set_activity(format!(
                             "Exported {reference} to {}.",
                             destination.display()
-                        );
+                        ));
                     }
-                    Err(error) => app.activity = format!("Export failed: {error}"),
+                    Err(error) => app.set_activity(format!("Export failed: {error}")),
                 }
                 cx.notify();
             });
@@ -2245,7 +2288,7 @@ return remote_url & linefeed & parent_path"#;
             self.pull_request_repository = Some(hosted);
         }
         let Some(repository) = self.pull_request_repository.clone() else {
-            self.activity = "Select a hosted repository from Services first.".into();
+            self.set_activity("Select a hosted repository from Services first.");
             cx.notify();
             return;
         };
@@ -2307,10 +2350,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             let _ = this.update(cx, |app, cx| {
                 match result {
                     Ok(request) => {
-                        app.activity = format!("Created pull request #{}.", request.number);
+                        app.set_activity(format!("Created pull request #{}.", request.number));
                         app.load_pull_requests(repository, cx);
                     }
-                    Err(error) => app.activity = format!("Create pull request failed: {error:?}"),
+                    Err(error) => app.set_activity(format!("Create pull request failed: {error:?}")),
                 }
                 cx.notify();
             });
@@ -2324,7 +2367,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             .and_then(|index| self.history.get(index))
             .map(|commit| commit.oid.clone())
         else {
-            self.activity = "Select a history commit first.".into();
+            self.set_activity("Select a history commit first.");
             cx.notify();
             return;
         };
@@ -2446,7 +2489,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let reference = self.history_reference.clone();
         let load_token = self.history_load_token;
         let initial_page = before.is_none();
-        self.activity = "Loading history…".into();
+        self.set_activity("Loading history…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -2480,7 +2523,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.history_rows.extend(rows);
                         app.history_next = next_before;
                         app.history_decorations = decorations;
-                        app.activity = format!("Loaded {} history commits.", app.history.len());
+                        app.set_activity(format!("Loaded {} history commits.", app.history.len()));
                         app.history_list_state.reset(app.history_row_count());
                         let reveal_index = app
                             .history_reveal_oid
@@ -2498,7 +2541,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             app.select_history_commit(index, select_repository, cx);
                         }
                     }
-                    Err(error) => app.activity = format!("History load failed: {error}"),
+                    Err(error) => app.set_activity(format!("History load failed: {error}")),
                 }
                 cx.notify();
             });
@@ -2517,7 +2560,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     fn load_reflog(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
         let root = repository.worktree_root.clone();
         let load_token = self.reflog_load_token;
-        self.activity = "Loading reflog…".into();
+        self.set_activity("Loading reflog…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -2544,9 +2587,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok(entries) => {
                         app.reflog = entries;
                         app.selected_reflog = None;
-                        app.activity = format!("Loaded {} reflog entries.", app.reflog.len());
+                        app.set_activity(format!("Loaded {} reflog entries.", app.reflog.len()));
                     }
-                    Err(error) => app.activity = format!("Reflog load failed: {error}"),
+                    Err(error) => app.set_activity(format!("Reflog load failed: {error}")),
                 }
                 cx.notify();
             });
@@ -2610,7 +2653,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_repository = repository.clone();
         let worker_branch = branch.clone();
         self.mutation_in_flight = true;
-        self.activity = format!("Restoring branch {branch}…");
+        self.set_activity(format!("Restoring branch {branch}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -2623,13 +2666,15 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = format!("Restored branch {branch}.");
+                        app.set_activity(format!("Restored branch {branch}."));
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_refs(repository, cx);
                     }
                     Err(error) => {
-                        app.activity =
-                            git_failure_message(&format!("Restore branch {branch}"), &error);
+                        app.set_activity(git_failure_message(
+                            &format!("Restore branch {branch}"),
+                            &error,
+                        ));
                     }
                 }
                 cx.notify();
@@ -2642,7 +2687,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let root = repository.worktree_root.clone();
         let load_token = self.file_history_load_token;
         let path = self.file_history_path.clone();
-        self.activity = format!("Loading history for {path}…");
+        self.set_activity(format!("Loading history for {path}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -2668,13 +2713,13 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(commits) => {
                         app.file_history = commits;
-                        app.activity = format!(
+                        app.set_activity(format!(
                             "Loaded {} commits for {}.",
                             app.file_history.len(),
                             app.file_history_path
-                        );
+                        ));
                     }
-                    Err(error) => app.activity = format!("File history failed: {error}"),
+                    Err(error) => app.set_activity(format!("File history failed: {error}")),
                 }
                 cx.notify();
             });
@@ -2686,7 +2731,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let root = repository.worktree_root.clone();
         let load_token = self.blame_load_token;
         let path = self.blame_path.clone();
-        self.activity = format!("Loading blame for {path}…");
+        self.set_activity(format!("Loading blame for {path}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -2706,13 +2751,13 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(lines) => {
                         app.blame = lines;
-                        app.activity = format!(
+                        app.set_activity(format!(
                             "Loaded blame for {} ({} lines).",
                             app.blame_path,
                             app.blame.len()
-                        );
+                        ));
                     }
-                    Err(error) => app.activity = format!("Blame failed: {error}"),
+                    Err(error) => app.set_activity(format!("Blame failed: {error}")),
                 }
                 cx.notify();
             });
@@ -2725,7 +2770,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let load_token = self.compare_load_token;
         let left = self.compare_left.clone();
         let right = self.compare_right.clone();
-        self.activity = format!("Comparing {left}…{right}…");
+        self.set_activity(format!("Comparing {left}…{right}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -2745,16 +2790,16 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(loaded) => {
                         app.compare_diff = Some(loaded);
-                        app.activity = format!(
+                        app.set_activity(format!(
                             "Compared {}…{} ({} file(s)).",
                             app.compare_left,
                             app.compare_right,
                             app.compare_diff
                                 .as_ref()
                                 .map_or(0, |loaded| loaded.diff.files.len())
-                        );
+                        ));
                     }
-                    Err(error) => app.activity = format!("Compare failed: {error}"),
+                    Err(error) => app.set_activity(format!("Compare failed: {error}")),
                 }
                 cx.notify();
             });
@@ -2771,7 +2816,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let load_token = self.tree_load_token;
         let oid = self.tree_oid.clone();
         let path = joined_tree_path(&self.tree_path);
-        self.activity = format!("Loading tree {}…", self.tree_path_label());
+        self.set_activity(format!("Loading tree {}…", self.tree_path_label()));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -2791,9 +2836,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(entries) => {
                         app.tree = entries;
-                        app.activity = format!("Listed {} entries.", app.tree.len());
+                        app.set_activity(format!("Listed {} entries.", app.tree.len()));
                     }
-                    Err(error) => app.activity = format!("Tree load failed: {error}"),
+                    Err(error) => app.set_activity(format!("Tree load failed: {error}")),
                 }
                 cx.notify();
             });
@@ -2835,7 +2880,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 let root = repository.worktree_root.clone();
                 let load_token = self.tree_load_token;
                 let oid = self.tree_oid.clone();
-                self.activity = format!("Reading {}", String::from_utf8_lossy(&full_path.0));
+                self.set_activity(format!("Reading {}", String::from_utf8_lossy(&full_path.0)));
                 cx.spawn(async move |this, cx| {
                     let result = cx
                         .background_spawn(async move {
@@ -2855,9 +2900,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         match result {
                             Ok(bytes) => {
                                 app.tree_blob = Some(bytes);
-                                app.activity = String::new();
+                                app.set_activity(String::new());
                             }
-                            Err(error) => app.activity = format!("Blob read failed: {error}"),
+                            Err(error) => app.set_activity(format!("Blob read failed: {error}")),
                         }
                         cx.notify();
                     });
@@ -2900,7 +2945,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     return;
                 };
                 let Some(blob) = app.tree_blob.as_ref() else {
-                    app.activity = "Select a file in the tree before exporting.".into();
+                    app.set_activity("Select a file in the tree before exporting.");
                     cx.notify();
                     return;
                 };
@@ -2912,17 +2957,17 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         .map_or(&path.0[..], |separator| &path.0[separator + 1..]);
                     String::from_utf8_lossy(name).into_owned()
                 }) else {
-                    app.activity = "The selected blob has no file name.".into();
+                    app.set_activity("The selected blob has no file name.");
                     cx.notify();
                     return;
                 };
                 let path = std::path::Path::new(&destination).join(file_name);
                 match std::fs::write(&path, blob) {
                     Ok(()) => {
-                        app.activity = format!("Exported to {}.", path.display());
+                        app.set_activity(format!("Exported to {}.", path.display()));
                     }
                     Err(error) => {
-                        app.activity = format!("Export failed: {error}");
+                        app.set_activity(format!("Export failed: {error}"));
                     }
                 }
                 cx.notify();
@@ -2942,7 +2987,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     fn load_worktrees(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
         let root = repository.worktree_root.clone();
         let load_token = self.worktrees_load_token;
-        self.activity = "Loading worktrees…".into();
+        self.set_activity("Loading worktrees…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -2962,9 +3007,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(entries) => {
                         app.worktrees = entries;
-                        app.activity = format!("Loaded {} worktree(s).", app.worktrees.len());
+                        app.set_activity(format!("Loaded {} worktree(s).", app.worktrees.len()));
                     }
-                    Err(error) => app.activity = format!("Worktree load failed: {error}"),
+                    Err(error) => app.set_activity(format!("Worktree load failed: {error}")),
                 }
                 cx.notify();
             });
@@ -2989,7 +3034,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let repository = repository.clone();
         let worker_repository = repository.clone();
         self.mutation_in_flight = true;
-        self.activity = format!("{label}…");
+        self.set_activity(format!("{label}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -3001,7 +3046,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = format!("{label} complete.");
+                        app.set_activity(format!("{label} complete."));
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_refs(repository.clone(), cx);
                         if app.repository_view == RepositoryView::Worktrees {
@@ -3016,7 +3061,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             app.reload_rebase_plan(&repository, cx);
                         }
                     }
-                    Err(error) => app.activity = git_failure_message(&label, &error),
+                    Err(error) => app.set_activity(git_failure_message(&label, &error)),
                 }
                 cx.notify();
             });
@@ -3100,7 +3145,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     fn load_submodules(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
         let root = repository.worktree_root.clone();
         let load_token = self.submodules_load_token;
-        self.activity = "Loading submodules…".into();
+        self.set_activity("Loading submodules…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -3120,9 +3165,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(entries) => {
                         app.submodules = entries;
-                        app.activity = format!("Loaded {} submodule(s).", app.submodules.len());
+                        app.set_activity(format!("Loaded {} submodule(s).", app.submodules.len()));
                     }
-                    Err(error) => app.activity = format!("Submodule load failed: {error}"),
+                    Err(error) => app.set_activity(format!("Submodule load failed: {error}")),
                 }
                 cx.notify();
             });
@@ -3139,7 +3184,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let root = repository.worktree_root.clone();
         self.lfs_load_token = self.lfs_load_token.wrapping_add(1);
         let load_token = self.lfs_load_token;
-        self.activity = "Loading Git LFS status…".into();
+        self.set_activity("Loading Git LFS status…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -3159,9 +3204,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(entries) => {
                         app.lfs = entries;
-                        app.activity = format!("Loaded {} Git LFS change(s).", app.lfs.len());
+                        app.set_activity(format!("Loaded {} Git LFS change(s).", app.lfs.len()));
                     }
-                    Err(error) => app.activity = git_failure_message("Git LFS status", &error),
+                    Err(error) => app.set_activity(git_failure_message("Git LFS status", &error)),
                 }
                 cx.notify();
             });
@@ -3178,7 +3223,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         self.services_load_token = self.services_load_token.wrapping_add(1);
         let load_token = self.services_load_token;
         self.service_auth_state = git_domain::ServiceAuthState::Loading;
-        self.activity = "Loading GitHub account…".into();
+        self.set_activity("Loading GitHub account…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async {
@@ -3204,20 +3249,20 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.service_account = Some(account);
                         app.hosted_repositories = repositories;
                         app.selected_hosted_repository = None;
-                        app.activity = format!(
+                        app.set_activity(format!(
                             "Loaded {} GitHub repositories.",
                             app.hosted_repositories.len()
-                        );
+                        ));
                     }
                     Ok(None) => {
                         app.service_auth_state = git_domain::ServiceAuthState::SignedOut;
                         app.service_account = None;
                         app.hosted_repositories.clear();
-                        app.activity = "Connect a GitHub account to list repositories.".into();
+                        app.set_activity("Connect a GitHub account to list repositories.");
                     }
                     Err(error) => {
                         app.service_auth_state = service_auth_state(&error);
-                        app.activity = format!("GitHub service failed: {error:?}");
+                        app.set_activity(format!("GitHub service failed: {error:?}"));
                     }
                 }
                 cx.notify();
@@ -3261,14 +3306,14 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.service_auth_state = git_domain::ServiceAuthState::Connected;
                         app.service_account = Some(account);
                         app.hosted_repositories = repositories;
-                        app.activity = format!(
+                        app.set_activity(format!(
                             "Connected GitHub and loaded {} repositories.",
                             app.hosted_repositories.len()
-                        );
+                        ));
                     }
                     Err(error) => {
                         app.service_auth_state = service_auth_state(&error);
-                        app.activity = format!("GitHub connection failed: {error:?}");
+                        app.set_activity(format!("GitHub connection failed: {error:?}"));
                     }
                 }
                 cx.notify();
@@ -3283,17 +3328,17 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         self.service_account = None;
         self.hosted_repositories.clear();
         self.selected_hosted_repository = None;
-        self.activity = if result.is_ok() {
-            "GitHub account disconnected.".into()
+        self.set_activity(if result.is_ok() {
+            "GitHub account disconnected."
         } else {
-            "GitHub account cleared from this session; Keychain removal failed.".into()
-        };
+            "GitHub account cleared from this session; Keychain removal failed."
+        });
         cx.notify();
     }
 
     fn prompt_clone_hosted_repository(&mut self, cx: &mut Context<Self>) {
         let Some(index) = self.selected_hosted_repository else {
-            self.activity = "Select a hosted repository first.".into();
+            self.set_activity("Select a hosted repository first.");
             cx.notify();
             return;
         };
@@ -3349,7 +3394,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     ) {
         self.pull_requests_load_token = self.pull_requests_load_token.wrapping_add(1);
         let load_token = self.pull_requests_load_token;
-        self.activity = "Loading pull requests…".into();
+        self.set_activity("Loading pull requests…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -3370,10 +3415,12 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.pull_requests = entries;
                         app.selected_pull_request = None;
                         app.pull_request_detail = None;
-                        app.activity =
-                            format!("Loaded {} open pull request(s).", app.pull_requests.len());
+                        app.set_activity(format!(
+                            "Loaded {} open pull request(s).",
+                            app.pull_requests.len()
+                        ));
                     }
-                    Err(error) => app.activity = format!("Pull request load failed: {error:?}"),
+                    Err(error) => app.set_activity(format!("Pull request load failed: {error:?}")),
                 }
                 cx.notify();
             });
@@ -3393,7 +3440,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         self.pull_request_detail_token = self.pull_request_detail_token.wrapping_add(1);
         let detail_token = self.pull_request_detail_token;
         let number = request.number;
-        self.activity = format!("Loading pull request #{number}…");
+        self.set_activity(format!("Loading pull request #{number}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -3412,9 +3459,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(detail) => {
                         app.pull_request_detail = Some(detail);
-                        app.activity = format!("Loaded pull request #{number}.");
+                        app.set_activity(format!("Loaded pull request #{number}."));
                     }
-                    Err(error) => app.activity = format!("Pull request detail failed: {error:?}"),
+                    Err(error) => {
+                        app.set_activity(format!("Pull request detail failed: {error:?}"));
+                    }
                 }
                 cx.notify();
             });
@@ -3425,7 +3474,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     #[allow(clippy::too_many_lines)]
     fn prompt_create_pull_request(&mut self, cx: &mut Context<Self>) {
         let Some(repository) = self.pull_request_repository.clone() else {
-            self.activity = "Select a hosted repository from Services first.".into();
+            self.set_activity("Select a hosted repository from Services first.");
             cx.notify();
             return;
         };
@@ -3472,10 +3521,12 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             let _ = this.update(cx, |app, cx| {
                 match result {
                     Ok(request) => {
-                        app.activity = format!("Created pull request #{}.", request.number);
+                        app.set_activity(format!("Created pull request #{}.", request.number));
                         app.load_pull_requests(repository, cx);
                     }
-                    Err(error) => app.activity = format!("Create pull request failed: {error:?}"),
+                    Err(error) => {
+                        app.set_activity(format!("Create pull request failed: {error:?}"));
+                    }
                 }
                 cx.notify();
             });
@@ -3485,7 +3536,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
 
     fn prompt_comment_pull_request(&mut self, cx: &mut Context<Self>) {
         let Some(index) = self.selected_pull_request else {
-            self.activity = "Select a pull request first.".into();
+            self.set_activity("Select a pull request first.");
             cx.notify();
             return;
         };
@@ -3526,10 +3577,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             let _ = this.update(cx, |app, cx| {
                 match result {
                     Ok(_) => {
-                        app.activity = format!("Commented on pull request #{number}.");
+                        app.set_activity(format!("Commented on pull request #{number}."));
                         app.load_pull_requests(repository, cx);
                     }
-                    Err(error) => app.activity = format!("Comment failed: {error:?}"),
+                    Err(error) => app.set_activity(format!("Comment failed: {error:?}")),
                 }
                 cx.notify();
             });
@@ -3540,7 +3591,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     #[allow(clippy::too_many_lines)]
     fn prompt_merge_pull_request(&mut self, cx: &mut Context<Self>) {
         let Some(index) = self.selected_pull_request else {
-            self.activity = "Select a pull request first.".into();
+            self.set_activity("Select a pull request first.");
             cx.notify();
             return;
         };
@@ -3553,7 +3604,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
 
     fn checkout_pull_request(&mut self, cx: &mut Context<Self>) {
         let Some(index) = self.selected_pull_request else {
-            self.activity = "Select a pull request first.".into();
+            self.set_activity("Select a pull request first.");
             cx.notify();
             return;
         };
@@ -3563,7 +3614,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let number = request.number;
         let branch = format!("pr/{number}");
         let Some(remote) = self.default_remote() else {
-            self.activity = "Add a Git remote before checking out a pull request.".into();
+            self.set_activity("Add a Git remote before checking out a pull request.");
             cx.notify();
             return;
         };
@@ -3574,7 +3625,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_repository = repository.clone();
         let worker_branch = branch.clone();
         self.mutation_in_flight = true;
-        self.activity = format!("Checking out pull request #{number}…");
+        self.set_activity(format!("Checking out pull request #{number}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -3590,11 +3641,13 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = format!("Checked out pull request #{number} as {branch}.");
+                        app.set_activity(format!(
+                            "Checked out pull request #{number} as {branch}."
+                        ));
                         app.load_working_copy(repository.clone(), cx);
                         GitronimoApp::load_refs(repository, cx);
                     }
-                    Err(error) => app.activity = format!("Checkout failed: {error}"),
+                    Err(error) => app.set_activity(format!("Checkout failed: {error}")),
                 }
                 cx.notify();
             });
@@ -3652,7 +3705,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     fn load_rebase_plan(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
         let root = repository.worktree_root.clone();
         let load_token = self.rebase_plan_load_token;
-        self.activity = "Loading rebase plan…".into();
+        self.set_activity("Loading rebase plan…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -3672,11 +3725,14 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(plan) => {
                         app.rebase_plan = plan;
-                        app.activity = format!("Loaded {} rebase step(s).", app.rebase_plan.len());
+                        app.set_activity(format!(
+                            "Loaded {} rebase step(s).",
+                            app.rebase_plan.len()
+                        ));
                     }
                     Err(error) => {
                         app.rebase_plan = Vec::new();
-                        app.activity = format!("Rebase plan load failed: {error}");
+                        app.set_activity(format!("Rebase plan load failed: {error}"));
                     }
                 }
                 cx.notify();
@@ -3751,7 +3807,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok(content) => app.conflict_content = Some(content),
                     Err(error) => {
                         app.conflict_content = None;
-                        app.activity = format!("Conflict read failed: {error}");
+                        app.set_activity(format!("Conflict read failed: {error}"));
                     }
                 }
                 cx.notify();
@@ -3821,13 +3877,13 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     return;
                 };
                 let ShellState::Repository(repository) = &app.state else {
-                    app.activity = "Open a repository before verifying a commit.".into();
+                    app.set_activity("Open a repository before verifying a commit.");
                     return;
                 };
                 let repository = repository.clone();
                 let worker_repository = repository.clone();
                 let worker_oid = oid.clone();
-                app.activity = format!("Checking signature of {oid}…");
+                app.set_activity(format!("Checking signature of {oid}…"));
                 cx.spawn(async move |this, cx| {
                     let result = cx
                         .background_spawn(async move {
@@ -3841,18 +3897,17 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         match result {
                             Ok(signature) => {
                                 let label = signature.status.label();
-                                app.activity = if signature.signer.is_empty() {
+                                app.set_activity(if signature.signer.is_empty() {
                                     format!("Commit {oid} signature: {label}.")
                                 } else {
                                     format!(
                                         "Commit {oid} signature: {label} (signed by {}).",
                                         signature.signer
                                     )
-                                };
+                                });
                             }
                             Err(error) => {
-                                app.activity =
-                                    git_failure_message(&format!("Verify commit {oid}"), &error);
+                                app.set_activity(git_failure_message(&format!("Verify commit {oid}"), &error));
                             }
                         }
                         cx.notify();
@@ -4004,7 +4059,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             .unwrap_or("this repository")
             .to_owned();
         let dialog_name = name.clone();
-        self.activity = format!("Remove {name} from recents?");
+        self.set_activity(format!("Remove {name} from recents?"));
         let store = self.store.clone();
         cx.spawn(async move |this, cx| {
             let confirmed = cx
@@ -4023,7 +4078,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 .await;
             let _ = this.update(cx, |app, cx| {
                 if !confirmed {
-                    app.activity = "Kept the repository in recents.".into();
+                    app.set_activity("Kept the repository in recents.");
                     cx.notify();
                     return;
                 }
@@ -4038,7 +4093,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 };
                 app.welcome_snapshot = None;
                 app.welcome_snapshot_path = None;
-                app.activity = format!("Removed {name} from recents.");
+                app.set_activity(format!("Removed {name} from recents."));
                 if app.selected_recent.is_some() {
                     app.refresh_welcome_snapshot(cx);
                 }
@@ -4063,8 +4118,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.activity =
-            "Discard the unsaved commit draft before opening another repository?".into();
+        self.set_activity("Discard the unsaved commit draft before opening another repository?");
         cx.spawn_in(window, async move |this, cx| {
             let confirmed = cx
                 .background_spawn(async {
@@ -4082,7 +4136,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     app.refresh_commit_inputs(cx);
                     app.begin_open_path(path, window, cx);
                 } else {
-                    app.activity = "Kept the unsaved commit draft.".into();
+                    app.set_activity("Kept the unsaved commit draft.");
                     cx.notify();
                 }
             });
@@ -4096,7 +4150,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         }
         self.state = ShellState::Loading(path.clone());
         self.stop_watcher();
-        self.activity = "Opening repository…".into();
+        self.set_activity("Opening repository…");
         let store = RecentRepositoryStore::new(preferences_path());
         cx.spawn_in(window, async move |this, cx| {
             let outcome = cx
@@ -4112,13 +4166,14 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         if !repository_is_available(&repository) {
             self.stop_watcher();
             self.state = ShellState::Error(repository_unavailable_message(&repository));
-            self.activity =
-                "Repository is no longer available. Choose it again when it returns.".into();
+            self.set_activity(
+                "Repository is no longer available. Choose it again when it returns.",
+            );
             cx.notify();
             return;
         }
         let root = repository.worktree_root.clone();
-        self.activity = "Refreshing working copy…".into();
+        self.set_activity("Refreshing working copy…");
         cx.spawn(async move |this, cx| {
             let refresh = cx
                 .background_spawn(async move {
@@ -4151,10 +4206,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 }
                 match refresh {
                     Ok((status, numstat, last_commit)) => {
-                        app.activity = format!(
+                        app.set_activity(format!(
                             "Working copy refreshed: {} change(s).",
                             status.entries.len()
-                        );
+                        ));
                         app.working_copy = Some(status);
                         if let Some(stats) = numstat {
                             app.file_diff_stats = stats
@@ -4170,7 +4225,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             app.last_commit_summary = Some(summary);
                         }
                     }
-                    Err(error) => app.activity = format!("Working copy refresh failed: {error}"),
+                    Err(error) => app.set_activity(format!("Working copy refresh failed: {error}")),
                 }
                 cx.notify();
             });
@@ -4203,7 +4258,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             }
                             app.refs = refs;
                         }
-                        Err(error) => app.activity = format!("Ref load failed: {error}"),
+                        Err(error) => app.set_activity(format!("Ref load failed: {error}")),
                     }
                     cx.notify();
                 }
@@ -4287,7 +4342,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     HeadStatus::Branch(branch) => String::from_utf8(branch.0.clone()).ok(),
                     _ => None,
                 }) else {
-                    app.activity = "Checkout a local branch before renaming it.".into();
+                    app.set_activity("Checkout a local branch before renaming it.");
                     cx.notify();
                     return;
                 };
@@ -4320,12 +4375,12 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     .iter()
                     .any(|entry| entry.name.0 == branch.as_bytes())
                 {
-                    app.activity = format!("Unknown local branch: {branch}");
+                    app.set_activity(format!("Unknown local branch: {branch}"));
                     cx.notify();
                     return;
                 }
                 app.pending_branch_delete = Some(branch.clone());
-                app.activity = format!("Review deletion choices for local branch {branch}.");
+                app.set_activity(format!("Review deletion choices for local branch {branch}."));
                 cx.notify();
             });
         }).detach();
@@ -4376,7 +4431,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
 
     fn fetch_default_remote(&mut self, cx: &mut Context<Self>) {
         let Some(remote) = self.default_remote() else {
-            self.activity = "No configured remote to fetch.".into();
+            self.set_activity("No configured remote to fetch.");
             cx.notify();
             return;
         };
@@ -4400,7 +4455,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             let _ = this.update(cx, |app, cx| {
                 let Some(remote) = remote else { return; };
                 if !app.refs.remotes.iter().any(|entry| entry.name.0 == remote.as_bytes()) {
-                    app.activity = format!("Unknown configured remote: {remote}");
+                    app.set_activity(format!("Unknown configured remote: {remote}"));
                     cx.notify();
                     return;
                 }
@@ -4747,7 +4802,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     #[allow(dead_code)]
     fn publish_current(&mut self, cx: &mut Context<Self>) {
         let Some(remote) = self.default_remote() else {
-            self.activity = "No configured remote to publish to.".into();
+            self.set_activity("No configured remote to publish to.");
             cx.notify();
             return;
         };
@@ -4759,7 +4814,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     _ => None,
                 })
         else {
-            self.activity = "Checkout a local branch before publishing.".into();
+            self.set_activity("Checkout a local branch before publishing.");
             cx.notify();
             return;
         };
@@ -4778,8 +4833,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
 
     pub(crate) fn request_force_with_lease(&mut self, cx: &mut Context<Self>) {
         self.force_push_state = ForcePushState::AwaitingConfirmation;
-        self.activity =
-            "Force-with-lease can rewrite the remote branch. Review and confirm.".into();
+        self.set_activity("Force-with-lease can rewrite the remote branch. Review and confirm.");
         cx.notify();
     }
 
@@ -4815,7 +4869,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         self.mutation_in_flight = true;
         self.network_operation = Some(operation.clone());
         self.network_progress = 0.45;
-        self.activity = format!("{label} in progress. You can cancel it.");
+        self.set_activity(format!("{label} in progress. You can cancel it."));
         cx.spawn(async move |this, cx| {
             let (progress_tx, progress_rx) = mpsc::channel::<f32>();
             let progress_this = this.clone();
@@ -4894,18 +4948,18 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(()) => {
                         app.last_network_result = Some(format!("{label} complete."));
-                        app.activity = app.last_network_result.clone().unwrap_or_default();
+                        app.set_activity(app.last_network_result.clone().unwrap_or_default());
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_refs(repository, cx);
                     }
                     Err(error) if error == "cancelled" => {
                         app.last_network_result = Some(format!("{label} cancelled."));
-                        app.activity = app.last_network_result.clone().unwrap_or_default();
+                        app.set_activity(app.last_network_result.clone().unwrap_or_default());
                     }
                     Err(error) => {
                         let message = network_failure_message(&label, &error);
                         app.last_network_result = Some(message.clone());
-                        app.activity = message;
+                        app.set_activity(message);
                     }
                 }
                 cx.notify();
@@ -4925,11 +4979,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 .as_mut()
                 .is_none_or(|child| child.cancel().is_ok())
         });
-        self.activity = if cancelled {
-            "Cancelling network operation…".into()
+        self.set_activity(if cancelled {
+            "Cancelling network operation…"
         } else {
-            "Unable to cancel the network operation.".into()
-        };
+            "Unable to cancel the network operation."
+        });
         cx.notify();
     }
 
@@ -4950,7 +5004,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let repository = repository.clone();
         let worker_repository = repository.clone();
         self.mutation_in_flight = true;
-        self.activity = format!("{label}…");
+        self.set_activity(format!("{label}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -4962,11 +5016,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = format!("{label} complete.");
+                        app.set_activity(format!("{label} complete."));
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_refs(repository, cx);
                     }
-                    Err(error) => app.activity = git_failure_message(&label, &error),
+                    Err(error) => app.set_activity(git_failure_message(&label, &error)),
                 }
                 cx.notify();
             });
@@ -4983,7 +5037,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             .save_expanded_ref_groups(self.expanded_ref_groups.iter().cloned().collect())
             .is_err()
         {
-            self.activity = "Ref group expansion could not be saved.".into();
+            self.set_activity("Ref group expansion could not be saved.");
         }
         cx.notify();
     }
@@ -5012,7 +5066,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         match context {
             RefContext::LocalBranch(name) => {
                 if self.head_branch_name().as_deref() == Some(name.as_str()) {
-                    self.activity = format!("{name} is already checked out.");
+                    self.set_activity(format!("{name} is already checked out."));
                     cx.notify();
                     return;
                 }
@@ -5023,7 +5077,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             }
             RefContext::Tag(name) => {
                 self.show_ref_history(name.clone(), cx);
-                self.activity = "Tags open History; check out a branch to switch.".into();
+                self.set_activity("Tags open History; check out a branch to switch.");
                 cx.notify();
             }
             RefContext::Remote(_) => {
@@ -5034,7 +5088,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
 
     fn checkout_remote_tracking_branch(&mut self, remote_branch: String, cx: &mut Context<Self>) {
         let Some((_remote, short)) = remote_branch.split_once('/') else {
-            self.activity = format!("Remote branch {remote_branch} is missing a remote prefix.");
+            self.set_activity(format!(
+                "Remote branch {remote_branch} is missing a remote prefix."
+            ));
             cx.notify();
             return;
         };
@@ -5046,7 +5102,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             .any(|branch| String::from_utf8_lossy(&branch.name.0) == short);
         if local_exists {
             if self.head_branch_name().as_deref() == Some(short.as_str()) {
-                self.activity = format!("{short} is already checked out.");
+                self.set_activity(format!("{short} is already checked out."));
                 cx.notify();
                 return;
             }
@@ -5121,7 +5177,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             .and_then(|index| self.history.get(index))
         {
             cx.write_to_clipboard(ClipboardItem::new_string(commit.oid.clone()));
-            self.activity = "Commit OID copied.".into();
+            self.set_activity("Commit OID copied.");
             cx.notify();
         }
     }
@@ -5227,9 +5283,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     if !repository_is_available(&repository) {
                         app.stop_watcher();
                         app.state = ShellState::Error(repository_unavailable_message(&repository));
-                        app.activity =
-                            "Repository is no longer available. Choose it again when it returns."
-                                .into();
+                        app.set_activity(
+                            "Repository is no longer available. Choose it again when it returns.",
+                        );
                         cx.notify();
                         return;
                     }
@@ -5415,7 +5471,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         cx: &mut Context<Self>,
     ) {
         if self.mutation_in_flight {
-            self.activity = "Another Git operation is still running. Try again in a moment.".into();
+            self.set_activity("Another Git operation is still running. Try again in a moment.");
             cx.notify();
             return;
         }
@@ -5463,7 +5519,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         match files {
                             Ok(files) => app.tracked_files = files,
                             Err(error) => {
-                                app.activity = git_failure_message("List all files", &error);
+                                app.set_activity(git_failure_message("List all files", &error));
                             }
                         }
                     }
@@ -5484,8 +5540,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let ShellState::Repository(repository) = &self.state else {
             return;
         };
-        self.activity = "Loading full diff…".into();
-        Self::load_diff(repository.clone(), path, staged, usize::MAX, cx);
+        let repository = repository.clone();
+        self.set_activity("Loading full diff…");
+        Self::load_diff(repository, path, staged, usize::MAX, cx);
         cx.notify();
     }
 
@@ -5503,7 +5560,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_repository = repository.clone();
         let worker_path = path.clone();
         self.mutation_in_flight = true;
-        self.activity = "Staging hunk…".into();
+        self.set_activity("Staging hunk…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -5517,7 +5574,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = "Hunk staged.".into();
+                        app.set_activity("Hunk staged.");
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_diff(
                             repository,
@@ -5527,7 +5584,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             cx,
                         );
                     }
-                    Err(error) => app.activity = git_failure_message("Stage hunk", &error),
+                    Err(error) => app.set_activity(git_failure_message("Stage hunk", &error)),
                 }
                 cx.notify();
             });
@@ -5549,7 +5606,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_repository = repository.clone();
         let worker_path = path.clone();
         self.mutation_in_flight = true;
-        self.activity = "Unstaging hunk…".into();
+        self.set_activity("Unstaging hunk…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -5563,7 +5620,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = "Hunk unstaged.".into();
+                        app.set_activity("Hunk unstaged.");
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_diff(
                             repository,
@@ -5573,7 +5630,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             cx,
                         );
                     }
-                    Err(error) => app.activity = git_failure_message("Unstage hunk", &error),
+                    Err(error) => app.set_activity(git_failure_message("Unstage hunk", &error)),
                 }
                 cx.notify();
             });
@@ -5589,7 +5646,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             .worktree_root
             .join(OsString::from_vec(path.0.clone()));
         cx.write_to_clipboard(ClipboardItem::new_string(path.display().to_string()));
-        self.activity = "Path copied.".into();
+        self.set_activity("Path copied.");
         cx.notify();
     }
 
@@ -5605,12 +5662,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let path = repository
             .worktree_root
             .join(OsString::from_vec(path.0.clone()));
-        self.activity = if reveal {
+        self.set_activity(if reveal {
             "Revealing file in Finder…"
         } else {
             "Opening file…"
-        }
-        .into();
+        });
         cx.background_spawn(async move {
             let mut command = Command::new("open");
             if reveal {
@@ -5631,13 +5687,13 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         };
         let paths = self.selected_paths.clone();
         if operation.needs_paths() && paths.is_empty() {
-            self.activity = "Select at least one file first.".into();
+            self.set_activity("Select at least one file first.");
             cx.notify();
             return;
         }
         if operation == Mutation::DiscardSelected && self.pending_discard.as_ref() != Some(&paths) {
             self.pending_discard = Some(paths);
-            self.activity = "Review the discard consequences, then confirm.".into();
+            self.set_activity("Review the discard consequences, then confirm.");
             cx.notify();
             return;
         }
@@ -5698,7 +5754,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_path = path.clone();
         let selection = self.selected_diff_lines.clone();
         self.mutation_in_flight = true;
-        self.activity = "Staging selected lines…".into();
+        self.set_activity("Staging selected lines…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -5712,7 +5768,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = "Selected lines staged.".into();
+                        app.set_activity("Selected lines staged.");
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_diff(
                             repository,
@@ -5723,7 +5779,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         );
                     }
                     Err(error) => {
-                        app.activity = git_failure_message("Stage selected lines", &error);
+                        app.set_activity(git_failure_message("Stage selected lines", &error));
                     }
                 }
                 cx.notify();
@@ -5740,13 +5796,13 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             return;
         };
         self.pending_line_discard = Some((path, self.selected_diff_lines.clone()));
-        self.activity = "Review the line discard consequences, then confirm.".into();
+        self.set_activity("Review the line discard consequences, then confirm.");
         cx.notify();
     }
 
     fn cancel_line_discard(&mut self, cx: &mut Context<Self>) {
         self.pending_line_discard = None;
-        self.activity = "Line discard cancelled.".into();
+        self.set_activity("Line discard cancelled.");
         cx.notify();
     }
 
@@ -5764,7 +5820,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_repository = repository.clone();
         let worker_path = path.clone();
         self.mutation_in_flight = true;
-        self.activity = "Discarding selected lines…".into();
+        self.set_activity("Discarding selected lines…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -5779,7 +5835,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.selected_diff_lines.clear();
                 match result {
                     Ok(()) => {
-                        app.activity = "Selected lines discarded.".into();
+                        app.set_activity("Selected lines discarded.");
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_diff(
                             repository,
@@ -5790,7 +5846,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         );
                     }
                     Err(error) => {
-                        app.activity = git_failure_message("Discard selected lines", &error);
+                        app.set_activity(git_failure_message("Discard selected lines", &error));
                     }
                 }
                 cx.notify();
@@ -5807,13 +5863,13 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             return;
         };
         self.pending_hunk_discard = Some((path, hunk_index));
-        self.activity = "Review the hunk discard consequences, then confirm.".into();
+        self.set_activity("Review the hunk discard consequences, then confirm.");
         cx.notify();
     }
 
     fn cancel_hunk_discard(&mut self, cx: &mut Context<Self>) {
         self.pending_hunk_discard = None;
-        self.activity = "Hunk discard cancelled.".into();
+        self.set_activity("Hunk discard cancelled.");
         cx.notify();
     }
 
@@ -5831,7 +5887,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_repository = repository.clone();
         let worker_path = path.clone();
         self.mutation_in_flight = true;
-        self.activity = "Discarding hunk…".into();
+        self.set_activity("Discarding hunk…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -5845,7 +5901,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = "Hunk discarded.".into();
+                        app.set_activity("Hunk discarded.");
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_diff(
                             repository,
@@ -5855,7 +5911,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             cx,
                         );
                     }
-                    Err(error) => app.activity = git_failure_message("Discard hunk", &error),
+                    Err(error) => app.set_activity(git_failure_message("Discard hunk", &error)),
                 }
                 cx.notify();
             });
@@ -5878,8 +5934,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             return;
         }
         self.pending_operation_action = Some(OperationAction::Abort);
-        self.activity =
-            "Aborting discards the paused operation and returns to its start state.".into();
+        self.set_activity("Aborting discards the paused operation and returns to its start state.");
         cx.notify();
     }
 
@@ -5898,15 +5953,15 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             return;
         }
         self.pending_operation_action = Some(OperationAction::Continue);
-        self.activity =
-            "Resolve conflicts, stage the resolved files, then confirm to continue the operation."
-                .into();
+        self.set_activity(
+            "Resolve conflicts, stage the resolved files, then confirm to continue the operation.",
+        );
         cx.notify();
     }
 
     fn cancel_operation_action(&mut self, cx: &mut Context<Self>) {
         self.pending_operation_action = None;
-        self.activity = "Operation action cancelled.".into();
+        self.set_activity("Operation action cancelled.");
         cx.notify();
     }
 
@@ -5932,10 +5987,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let repository_path = repository.worktree_root.clone();
         let journal = RecoveryJournalStore::new(recovery_journal_path());
         self.mutation_in_flight = true;
-        self.activity = match action {
-            OperationAction::Abort => "Aborting operation…".into(),
-            OperationAction::Continue => "Continuing operation…".into(),
-        };
+        self.set_activity(match action {
+            OperationAction::Abort => "Aborting operation…",
+            OperationAction::Continue => "Continuing operation…",
+        });
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -5982,10 +6037,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             OperationAction::Abort => "Operation aborted.",
                             OperationAction::Continue => "Operation continued.",
                         };
-                        app.activity = match journal_warning {
+                        app.set_activity(match journal_warning {
                             Some(warning) => format!("{base} {warning}"),
                             None => base.into(),
-                        };
+                        });
                         app.load_working_copy(repository, cx);
                     }
                     Err(error) => {
@@ -5993,7 +6048,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             OperationAction::Abort => "Abort operation",
                             OperationAction::Continue => "Continue operation",
                         };
-                        app.activity = git_failure_message(label, &error);
+                        app.set_activity(git_failure_message(label, &error));
                     }
                 }
                 cx.notify();
@@ -6011,7 +6066,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let root = repository.worktree_root.clone();
         self.stashes_load_token = self.stashes_load_token.wrapping_add(1);
         let load_token = self.stashes_load_token;
-        self.activity = "Loading stashes…".into();
+        self.set_activity("Loading stashes…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -6031,9 +6086,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok(stashes) => {
                         app.stashes = stashes;
                         app.selected_stash = None;
-                        app.activity = format!("Loaded {} stash entr(ies).", app.stashes.len());
+                        app.set_activity(format!("Loaded {} stash entr(ies).", app.stashes.len()));
                     }
-                    Err(error) => app.activity = git_failure_message("List stashes", &error),
+                    Err(error) => app.set_activity(git_failure_message("List stashes", &error)),
                 }
                 cx.notify();
             });
@@ -6073,7 +6128,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             return;
         }
         let Some((reference, _)) = self.selected_stash() else {
-            self.activity = "Select a stash first.".into();
+            self.set_activity("Select a stash first.");
             cx.notify();
             return;
         };
@@ -6084,7 +6139,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_repository = repository.clone();
         let worker_reference = reference.clone();
         self.mutation_in_flight = true;
-        self.activity = format!("Applying {reference}…");
+        self.set_activity(format!("Applying {reference}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -6098,11 +6153,13 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = format!("{reference} applied; its recovery entry remains.");
+                        app.set_activity(format!(
+                            "{reference} applied; its recovery entry remains."
+                        ));
                         app.load_working_copy(repository.clone(), cx);
                         app.load_stashes(repository, cx);
                     }
-                    Err(error) => app.activity = git_failure_message("Apply stash", &error),
+                    Err(error) => app.set_activity(git_failure_message("Apply stash", &error)),
                 }
                 cx.notify();
             });
@@ -6112,15 +6169,15 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
 
     fn request_stash_action(&mut self, action: StashAction, cx: &mut Context<Self>) {
         let Some((reference, subject)) = self.selected_stash() else {
-            self.activity = "Select a stash first.".into();
+            self.set_activity("Select a stash first.");
             cx.notify();
             return;
         };
         self.pending_stash_action_ref = Some((action, reference, subject));
-        self.activity = match action {
-            StashAction::Pop => "Confirm before removing the stash recovery entry.".into(),
-            StashAction::Drop => "Confirm before permanently removing the stash.".into(),
-        };
+        self.set_activity(match action {
+            StashAction::Pop => "Confirm before removing the stash recovery entry.",
+            StashAction::Drop => "Confirm before permanently removing the stash.",
+        });
         cx.notify();
     }
 
@@ -6147,7 +6204,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             StashAction::Pop => "Pop stash",
             StashAction::Drop => "Drop stash",
         };
-        self.activity = format!("{action_label} {reference}…");
+        self.set_activity(format!("{action_label} {reference}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -6163,11 +6220,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = format!("{action_label} {reference} complete.");
+                        app.set_activity(format!("{action_label} {reference} complete."));
                         app.load_working_copy(repository.clone(), cx);
                         app.load_stashes(repository, cx);
                     }
-                    Err(error) => app.activity = git_failure_message(action_label, &error),
+                    Err(error) => app.set_activity(git_failure_message(action_label, &error)),
                 }
                 cx.notify();
             });
@@ -6198,7 +6255,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let repository = repository.clone();
         let worker_repository = repository.clone();
         self.mutation_in_flight = true;
-        self.activity = "Creating stash…".into();
+        self.set_activity("Creating stash…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -6212,10 +6269,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = "Stash created.".into();
+                        app.set_activity("Stash created.");
                         app.load_working_copy(repository, cx);
                     }
-                    Err(error) => app.activity = git_failure_message("Create stash", &error),
+                    Err(error) => app.set_activity(git_failure_message("Create stash", &error)),
                 }
                 cx.notify();
             });
@@ -6233,7 +6290,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let repository = repository.clone();
         let worker_repository = repository.clone();
         self.mutation_in_flight = true;
-        self.activity = "Applying latest stash…".into();
+        self.set_activity("Applying latest stash…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -6247,11 +6304,14 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity =
-                            "Latest stash applied; it remains available for recovery.".into();
+                        app.set_activity(
+                            "Latest stash applied; it remains available for recovery.",
+                        );
                         app.load_working_copy(repository, cx);
                     }
-                    Err(error) => app.activity = git_failure_message("Apply latest stash", &error),
+                    Err(error) => {
+                        app.set_activity(git_failure_message("Apply latest stash", &error));
+                    }
                 }
                 cx.notify();
             });
@@ -6280,10 +6340,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = "Latest stash applied and removed.".into();
+                        app.set_activity("Latest stash applied and removed.");
                         app.load_working_copy(repository, cx);
                     }
-                    Err(error) => app.activity = git_failure_message("Pop latest stash", &error),
+                    Err(error) => app.set_activity(git_failure_message("Pop latest stash", &error)),
                 }
                 cx.notify();
             });
@@ -6312,10 +6372,12 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.activity = "Latest stash removed.".into();
+                        app.set_activity("Latest stash removed.");
                         app.load_working_copy(repository, cx);
                     }
-                    Err(error) => app.activity = git_failure_message("Drop latest stash", &error),
+                    Err(error) => {
+                        app.set_activity(git_failure_message("Drop latest stash", &error));
+                    }
                 }
                 cx.notify();
             });
@@ -6344,7 +6406,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         }
 
         let ShellState::Repository(repository) = &self.state else {
-            self.activity = "Open a repository before amending.".into();
+            self.set_activity("Open a repository before amending.");
             cx.notify();
             return;
         };
@@ -6352,7 +6414,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         self.commit_pre_amend_draft = Some((self.commit_subject.clone(), self.commit_body.clone()));
         self.commit_amend = true;
         self.commit_composer_expanded = true;
-        self.activity = "Loading last commit for amend…".into();
+        self.set_activity("Loading last commit for amend…");
         cx.notify();
         cx.spawn(async move |this, cx| {
             let summary = cx
@@ -6373,7 +6435,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.commit_body = summary.body;
                         app.refresh_commit_inputs(cx);
                         app.commit_composer_expanded = true;
-                        app.activity = "Amend armed — edit message or stage more changes.".into();
+                        app.set_activity("Amend armed — edit message or stage more changes.");
                     }
                     Err(error) => {
                         app.commit_amend = false;
@@ -6383,7 +6445,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             app.commit_body = body;
                             app.refresh_commit_inputs(cx);
                         }
-                        app.activity = git_failure_message("Amend", &error);
+                        app.set_activity(git_failure_message("Amend", &error));
                     }
                 }
                 app.sync_commit_composer_expanded(cx);
@@ -6423,11 +6485,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             sign_off: self.commit_sign_off,
         };
         self.mutation_in_flight = true;
-        self.activity = if amending {
-            "Amending…".into()
+        self.set_activity(if amending {
+            "Amending…"
         } else {
-            "Committing…".into()
-        };
+            "Committing…"
+        });
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -6453,11 +6515,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.commit_subject_focused = false;
                         app.commit_body_focused = false;
                         app.sync_commit_composer_expanded(cx);
-                        app.activity = if amending {
-                            "Amend complete.".into()
+                        app.set_activity(if amending {
+                            "Amend complete."
                         } else {
-                            "Commit complete.".into()
-                        };
+                            "Commit complete."
+                        });
                         app.selected_paths.clear();
                         app.selected_diff = None;
                         app.loaded_diff = None;
@@ -6470,8 +6532,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.load_working_copy(repository, cx);
                     }
                     Err(error) => {
-                        app.activity =
-                            git_failure_message(if amending { "Amend" } else { "Commit" }, &error);
+                        app.set_activity(git_failure_message(
+                            if amending { "Amend" } else { "Commit" },
+                            &error,
+                        ));
                     }
                 }
                 cx.notify();
@@ -6502,7 +6566,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             None
         };
         self.mutation_in_flight = true;
-        self.activity = format!("{}…", operation.label());
+        self.set_activity(format!("{}…", operation.label()));
         let worker_repository = repository.clone();
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -6534,7 +6598,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             app.selected_diff = None;
                             app.selected_diff_lines.clear();
                         }
-                        app.activity = format!("{} complete.", operation.label());
+                        app.set_activity(format!("{} complete.", operation.label()));
                         app.load_working_copy(repository.clone(), cx);
                         if preserve_selection
                             && let Some((path, staged)) = app.selected_diff.clone()
@@ -6548,7 +6612,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             );
                         }
                     }
-                    Err(error) => app.activity = git_failure_message(operation.label(), &error),
+                    Err(error) => app.set_activity(git_failure_message(operation.label(), &error)),
                 }
                 cx.notify();
             });

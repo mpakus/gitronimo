@@ -5,10 +5,11 @@
 //! reference them without a circular dependency on `main.rs`.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, VecDeque},
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex, mpsc::Receiver},
+    time::SystemTime,
 };
 
 use git_cli::LoadedDiff;
@@ -28,6 +29,14 @@ pub(crate) const DEFAULT_SIDEBAR_WIDTH: f32 = 220.0;
 pub(crate) const MINIMUM_LIST_PANE_WIDTH: f32 = 200.0;
 pub(crate) const MAXIMUM_LIST_PANE_WIDTH: f32 = 600.0;
 pub(crate) const DEFAULT_LIST_PANE_WIDTH: f32 = 400.0;
+pub(crate) const ACTIVITY_LOG_CAPACITY: usize = 50;
+
+/// One status / error / notification line retained for the activity history popup.
+#[derive(Clone, Debug)]
+pub(crate) struct ActivityLogEntry {
+    pub message: String,
+    pub at: SystemTime,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LastAction {
@@ -522,6 +531,9 @@ pub(crate) struct GitronimoApp {
     pub network_progress: f32,
     pub last_network_result: Option<String>,
     pub activity: String,
+    /// Newest-first ring of recent activity messages (cap [`ACTIVITY_LOG_CAPACITY`]).
+    pub activity_log: VecDeque<ActivityLogEntry>,
+    pub show_activity_log: bool,
     pub working_copy: Option<git_domain::WorktreeStatus>,
     pub worktree_show_all_files: bool,
     pub tracked_files: Vec<git_domain::GitPath>,

@@ -11,10 +11,11 @@ use crate::app_state::{
     ShortcutReferenceState, SubmodulePushMode, TextPromptKind, window_title,
 };
 
-use super::components::{
+use crate::views::components::{
     activity_color, activity_label, error_view, file_action_button, loading_view,
     primary_action_button, sidebar_resize_handle,
 };
+use crate::views::icons::{IconKind, icon};
 
 impl Render for GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -82,15 +83,16 @@ impl Render for GitronimoApp {
             .child(
                 div()
                     .min_h(px(26.0))
-                    .px_4()
+                    .px_3()
                     .flex()
                     .items_center()
-                    .gap_3()
+                    .gap_2()
                     .bg(colors.panel_background)
                     .border_t_1()
                     .border_color(colors.border)
                     .text_xs()
                     .text_color(activity_color(&self.activity, &colors))
+                    .child(self.activity_log_button(&colors, cx))
                     .children(self.network_activity_progress(&colors, cx))
                     .child(
                         div()
@@ -141,6 +143,10 @@ impl Render for GitronimoApp {
                 self.branch_delete_confirm_overlay(&colors, cx)
                     .into_any_element()
             }))
+            .children(
+                self.show_activity_log
+                    .then(|| self.activity_log_overlay(&colors, cx).into_any_element()),
+            )
     }
 }
 
@@ -1276,6 +1282,164 @@ impl GitronimoApp {
             .into_any_element()
     }
 
+    fn activity_log_button(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let active = self.show_activity_log;
+        div()
+            .id("activity-log-button")
+            .flex_shrink_0()
+            .w(px(22.0))
+            .h(px(20.0))
+            .rounded(px(4.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .bg(if active {
+                colors.selection
+            } else {
+                colors.panel_background
+            })
+            .hover(|style| style.bg(colors.selection))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.toggle_activity_log(cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(icon(
+                IconKind::History,
+                12.0,
+                if active {
+                    colors.accent
+                } else {
+                    colors.text_muted
+                },
+            ))
+            .into_any_element()
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn activity_log_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let entries = self.activity_log.iter().cloned().collect::<Vec<_>>();
+        div()
+            .absolute()
+            .inset_0()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.close_activity_log(cx);
+                }),
+            )
+            .child(
+                div()
+                    .id("activity-log-popup")
+                    .absolute()
+                    .bottom(px(30.0))
+                    .left(px(8.0))
+                    .w(px(420.0))
+                    .max_h(px(320.0))
+                    .flex()
+                    .flex_col()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(8.0))
+                    .shadow_lg()
+                    .overflow_hidden()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(colors.border)
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(colors.text_primary)
+                                    .child("Message history"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(colors.text_muted)
+                                    .child(format!("{} recent", entries.len())),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("activity-log-scroll")
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .overflow_y_scroll()
+                            .py_1()
+                            .children(if entries.is_empty() {
+                                vec![
+                                    div()
+                                        .px_3()
+                                        .py_2()
+                                        .text_xs()
+                                        .text_color(colors.text_muted)
+                                        .child("No messages yet.")
+                                        .into_any_element(),
+                                ]
+                            } else {
+                                entries
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(index, entry)| {
+                                        let color = activity_color(&entry.message, colors);
+                                        div()
+                                            .id(("activity-log-row", index))
+                                            .px_3()
+                                            .py_1p5()
+                                            .flex()
+                                            .gap_2()
+                                            .items_start()
+                                            .hover(|style| style.bg(colors.selection))
+                                            .child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .w(px(52.0))
+                                                    .text_xs()
+                                                    .text_color(colors.text_muted)
+                                                    .child(format_activity_age(entry.at)),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w(px(0.0))
+                                                    .text_xs()
+                                                    .text_color(color)
+                                                    .child(entry.message),
+                                            )
+                                            .into_any_element()
+                                    })
+                                    .collect()
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn network_activity_progress(
         &self,
         colors: &ui_kit::ThemeColors,
@@ -1319,6 +1483,22 @@ impl GitronimoApp {
                 }))
                 .into_any_element(),
         )
+    }
+}
+
+fn format_activity_age(at: std::time::SystemTime) -> String {
+    let Ok(elapsed) = std::time::SystemTime::now().duration_since(at) else {
+        return String::new();
+    };
+    let secs = elapsed.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86_400 {
+        format!("{}h", secs / 3600)
+    } else {
+        format!("{}d", secs / 86_400)
     }
 }
 

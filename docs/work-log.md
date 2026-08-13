@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-12 — Activity message history popup
+
+**Intent:** Bottom activity bar gets a small button that opens a popup of the last 50 status/error/notification messages so users can review what happened.
+
+**Files:** `app_state.rs` (log + toggle), `main.rs` (`set_activity`), `workspace.rs` (button + popup), `docs/work-log.md`.
+
+**Acceptance:** Messages append to a 50-cap log; button opens anchored popup; newest first; click outside / button again closes; current activity line unchanged.
+
 ## 2026-08-12 — Tower-style sidebar HEAD vs selection
 
 **Intent:** Match Tower branch rows: selection is a full-width accent ribbon with light text; HEAD is a trailing badge. When HEAD is the selected row, the badge sits on the ribbon (light outlined pill). When another branch is selected, HEAD keeps a muted badge without a ribbon.
