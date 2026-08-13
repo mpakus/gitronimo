@@ -1347,15 +1347,38 @@ return remote_url & linefeed & parent_path"#;
                 self.set_activity("Commit composer ready — type a subject.");
                 cx.notify();
             }
+            PaletteCommand::AmendLastCommit => {
+                self.navigate_to(RepositoryView::WorkingCopy, cx);
+                self.toggle_commit_amend(cx);
+            }
             PaletteCommand::SaveStash => self.create_stash(false, cx),
+            PaletteCommand::SaveStashUntracked => self.create_stash(true, cx),
             PaletteCommand::ApplyLatestStash => self.apply_latest_stash(cx),
             PaletteCommand::CreateBranch => {
                 self.begin_text_prompt(TextPromptKind::CreateBranch { start: None }, "", cx);
+            }
+            PaletteCommand::CreateTag => {
+                let start = self.selected_history_oid().unwrap_or_else(|| "HEAD".into());
+                self.begin_text_prompt(TextPromptKind::CreateTag { start }, "", cx);
             }
             PaletteCommand::ShowHistory => {
                 if let ShellState::Repository(repository) = &self.state {
                     self.show_history(repository.clone(), cx);
                 }
+            }
+            PaletteCommand::HistoryFilter => {
+                self.begin_choice_prompt(ChoicePromptKind::HistoryFilter, cx);
+            }
+            PaletteCommand::RevealHistoryHead => self.reveal_history_head(cx),
+            PaletteCommand::CopySelectedCommitHash => self.copy_selected_history_oid(cx),
+            PaletteCommand::BranchFromSelectedCommit => self.prompt_branch_from_selected(cx),
+            PaletteCommand::CheckoutSelectedCommit
+            | PaletteCommand::ResetHeadToSelected
+            | PaletteCommand::RevertSelectedCommit
+            | PaletteCommand::SaveSelectedPatch
+            | PaletteCommand::ExportSelectedCommit
+            | PaletteCommand::CompareSelectedCommit => {
+                self.run_selected_history_palette_command(command, cx);
             }
             PaletteCommand::CommitDetail => {
                 if let ShellState::Repository(repository) = &self.state {
@@ -1378,6 +1401,9 @@ return remote_url & linefeed & parent_path"#;
             }
             PaletteCommand::ShowSettings => {
                 self.navigate_to(RepositoryView::Settings, cx);
+            }
+            PaletteCommand::ShowBranchesReview => {
+                self.navigate_to(RepositoryView::BranchesReview, cx);
             }
             PaletteCommand::GitLfsStatus => {
                 if let ShellState::Repository(repository) = &self.state {
@@ -1410,6 +1436,10 @@ return remote_url & linefeed & parent_path"#;
                 if let ShellState::Repository(repository) = &self.state {
                     self.show_rebase(repository.clone(), cx);
                 }
+            }
+            PaletteCommand::RebaseOnto => self.prompt_start_rebase(cx),
+            PaletteCommand::MergeRevision => {
+                self.begin_text_prompt(TextPromptKind::MergeRevision, "", cx);
             }
             PaletteCommand::SquashStaged => self.prompt_autosquash(true, cx),
             PaletteCommand::FixupStaged => self.prompt_autosquash(false, cx),
@@ -1462,6 +1492,53 @@ return remote_url & linefeed & parent_path"#;
                     cx.notify();
                 }
             }
+        }
+    }
+
+    fn selected_history_oid(&self) -> Option<String> {
+        self.selected_history
+            .and_then(|index| self.history.get(index))
+            .map(|commit| commit.oid.clone())
+    }
+
+    fn run_selected_history_palette_command(
+        &mut self,
+        command: PaletteCommand,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(oid) = self.selected_history_oid() else {
+            self.set_activity("Select a history commit first.");
+            cx.notify();
+            return;
+        };
+        match command {
+            PaletteCommand::CheckoutSelectedCommit => self.checkout_detached_commit(&oid, cx),
+            PaletteCommand::ResetHeadToSelected => {
+                if !self.history_is_head_branch_scope() {
+                    self.set_activity(
+                        "Reset is available only when History shows the current HEAD branch.",
+                    );
+                    cx.notify();
+                    return;
+                }
+                self.prompt_reset_head_to(&oid, cx);
+            }
+            PaletteCommand::RevertSelectedCommit => {
+                if !self.history_is_head_branch_scope() {
+                    self.set_activity(
+                        "Revert is available only when History shows the current HEAD branch.",
+                    );
+                    cx.notify();
+                    return;
+                }
+                self.prompt_revert_commit(&oid, cx);
+            }
+            PaletteCommand::SaveSelectedPatch => self.save_commit_patch(&oid, cx),
+            PaletteCommand::ExportSelectedCommit => self.export_branch_archive(&oid, cx),
+            PaletteCommand::CompareSelectedCommit => {
+                self.begin_text_prompt(TextPromptKind::CompareTo { left: oid }, "", cx);
+            }
+            _ => {}
         }
     }
 

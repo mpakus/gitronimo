@@ -5,7 +5,7 @@
 ### Shell and workflow
 
 - Message history on the activity bar (scrollable; successes, errors, confirmations; working-copy refresh lines coalesced).
-- Command palette expanded and scrollable: Fetch/Pull/Push/Sync, staging, stash, create branch, settings, and secondary views.
+- Command palette expanded and scrollable: Fetch/Pull/Push/Sync, staging, stash, create branch/tag, amend, history selection actions (checkout/reset/revert/patch/export/compare), rebase onto, merge revision, settings, and secondary views.
 - Branch delete Cancel/Delete; unmerged tips open **Could Not Delete Branch** for force delete (`git branch -D`).
 - Pinned branches persist per repository and sort flat at the top of BRANCHES; preference writes are serialized so geometry saves cannot wipe pins.
 - Network progress strip in the bottom activity bar during fetch/pull/push/sync.

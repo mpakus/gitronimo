@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-12 — Palette: history/commit actions coverage
+
+**Intent:** After the History commit context menu, expose the same user-facing handlers (and a few adjacent ones) in the command palette so they are discoverable without right-click.
+
+**Files:** `app_state.rs` (`PaletteCommand` / `PALETTE_COMMANDS`), `main.rs` (`run_palette_command`), `docs/desktop-shell.md`, `docs/work-log.md`, `CHANGELOG.md`.
+
+**Acceptance:** Palette lists amend, create tag, history filter, selected-commit copy/checkout/reset/revert/patch/export/compare, branch-from-selected, rebase onto, merge revision, stash untracked, branches review; gates still pass. **Done.**
+
 ## 2026-08-12 — History commit context menu (Tower-style)
 
 **Intent:** Right-click a History commit to open a Tower-grouped menu (copy, checkout detach, reset/revert/rebase with confirms, amend/reword when HEAD, create branch/tag, patch, export, compare). Approach from Tower Commit History / Undoing Commits / Checkout guides; original menu chrome reused from ref context menu.
