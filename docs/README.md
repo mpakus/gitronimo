@@ -25,6 +25,7 @@ Index of project documentation. Start with [README.md](../README.md) for install
 
 | Document | Purpose |
 |----------|---------|
+| [desktop-shell.md](desktop-shell.md) | Activity bar, message history, confirms, pins, command palette |
 | [keyboard-shortcuts.md](keyboard-shortcuts.md) | Global shortcuts and Working Copy multi-select |
 | [troubleshooting.md](troubleshooting.md) | Repo open failures, index locks, auth, toolchain |
 | [third-party-notices.md](third-party-notices.md) | License attributions |
@@ -54,6 +55,7 @@ When you change user-visible behavior:
 
 1. Add or update an entry in [work-log.md](work-log.md) **before** coding.
 2. Update [keyboard-shortcuts.md](keyboard-shortcuts.md) if shortcuts or selection rules change.
-3. Update [README.md](../README.md) screenshots if the UI changed materially.
-4. Sync [UI-IMPROVE.md](UI-IMPROVE.md) implementation status when a Tower parity item lands.
-5. Add a [CHANGELOG.md](../CHANGELOG.md) note when preparing a release.
+3. Update [desktop-shell.md](desktop-shell.md) if activity bar, palette, confirms, or branch pin/archive behavior changes.
+4. Update [README.md](../README.md) screenshots if the UI changed materially.
+5. Sync [UI-IMPROVE.md](UI-IMPROVE.md) implementation status when a Tower parity item lands.
+6. Add a [CHANGELOG.md](../CHANGELOG.md) note when preparing a release.

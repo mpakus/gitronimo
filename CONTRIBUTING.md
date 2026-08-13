@@ -2,7 +2,7 @@
 
 Read [PLAN.md](PLAN.md) and [AGENTS.md](AGENTS.md) before coding. Keep each change tied to one checklist group and record its intended files and acceptance checks in [docs/work-log.md](docs/work-log.md).
 
-Documentation lives under [docs/](docs/README.md). Update [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) when shortcuts or Working Copy selection behavior changes, and refresh [README.md](README.md) screenshots when the UI changes materially.
+Documentation lives under [docs/](docs/README.md). Update [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) when shortcuts or Working Copy selection behavior changes, [docs/desktop-shell.md](docs/desktop-shell.md) when activity bar / palette / confirms / pins change, and refresh [README.md](README.md) screenshots when the UI changes materially.
 
 ## Development rules
 

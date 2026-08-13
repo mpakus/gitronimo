@@ -12,7 +12,9 @@ The current beta includes:
 - **Working Copy** — status and diffs, Modified/All Files toggle, multi-select (`Command-A`, Shift-click), batch stage/unstage via checkboxes, partial line/hunk staging, commit/amend/sign-off
 - **History** — bounded commit log with graph, scope filter, Changeset/Tree detail, double-click to Commit Detail
 - **Stashes, Remotes, Pull Requests, Services, Settings** — two-pane list + detail layouts (some secondary views remain palette-only)
-- **Network** — fetch, pull, publish, and push in the background with cancellation where Git allows
+- **Branches** — context menu (pin/archive/rename/delete…); pinned branches persist and sit at the top of BRANCHES; unmerged delete offers a force-confirm dialog
+- **Network** — fetch, pull, publish, and push in the background with cancellation; progress in the activity bar; Pull/Push dialogs for options
+- **Command palette / Message history** — searchable scrollable palette (`Command-Shift-P`); activity-bar history of statuses, errors, and confirmations
 - **Safety** — typed Git invocation, force-with-lease confirmation, local crash reports, recovery from missing repos and stale index locks
 
 Not yet included or still partial: signed/notarized distribution, OAuth/enterprise GitHub, deterministic byte-level progress parsing, full VoiceOver parity (GPUI limitation), merge/rebase wizards, and built-in editing.
@@ -65,6 +67,7 @@ cargo deny check
 | [docs/README.md](docs/README.md) | Documentation index |
 | [Architecture](docs/architecture.md) | Crate layers and mutation flow |
 | [Keyboard shortcuts](docs/keyboard-shortcuts.md) | Global and Working Copy shortcuts |
+| [Desktop shell](docs/desktop-shell.md) | Activity bar, palette, confirms, pins |
 | [UI plan](docs/UI-PLAN.md) | Tower parity phases |
 | [UI improve](docs/UI-IMPROVE.md) | Tower guide → Gitronimo mapping |
 | [Work log](docs/work-log.md) | Implementation notes |

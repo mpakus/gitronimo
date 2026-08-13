@@ -34,6 +34,7 @@ System `cargo` older than 1.97 will fail on this workspace.
 | `PLAN.md` | Product roadmap and checklist — source of truth for scope |
 | `docs/README.md` | Documentation index |
 | `docs/work-log.md` | Per-task intent, files, acceptance checks (write **before** coding) |
+| `docs/desktop-shell.md` | Activity bar, message history, confirms, pins, command palette |
 | `docs/UI-PLAN.md` | Tower parity phases and screenshot regression matrix |
 | `docs/UI-IMPROVE.md` | Tower guide patterns mapped to Gitronimo views |
 | `docs/architecture.md` | Crate layers and mutation flow |
@@ -69,3 +70,13 @@ When touching file-list selection or staging:
 - Commit subject/body fields keep their own `SingleLineInput` `Cmd/Ctrl+A` binding when focused.
 
 See `docs/keyboard-shortcuts.md` for the full shortcut list.
+
+## Desktop shell (agent context)
+
+Read `docs/desktop-shell.md` before changing activity bar, overlays, pins, or the palette.
+
+- **Status text:** always use `set_activity(...)` (never assign `self.activity` alone) so Message history stays populated. Refresh chatter is coalesced; do not log secrets or raw Git dumps.
+- **Confirms:** blocked/destructive Git outcomes that users must acknowledge belong in `AppConfirmDialog` (or the branch-delete pending modal), not only a flashing status line. Example: unmerged delete → Cancel / Delete force.
+- **Pins / archives:** persist via `RecentRepositoryStore::save_branch_organization`; sidebar shows pins flat atop BRANCHES (no “PINNED” label). Preference RMW is path-locked — do not reintroduce unlocked load-modify-save on that JSON.
+- **Command palette:** new user-facing commands that already have handlers should get a `PaletteCommand` + `PALETTE_COMMANDS` label + `run_palette_command` arm; keep the overlay list scrollable.
+- **Overlays:** Git/domain work stays in `main.rs`; `views/workspace.rs` only renders and dispatches.

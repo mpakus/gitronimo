@@ -19,6 +19,20 @@ Press **Command-/** in the app to toggle the in-app shortcut reference overlay. 
 | Command-Option-Left | Widen sidebar |
 | Command-Option-Right | Widen inspector |
 
+## Activity bar
+
+| Control | Behavior |
+|---------|----------|
+| Status line | Latest activity message (success / error / progress / confirm coloring) |
+| History button (left of status) | Opens **Message history** — scrollable log of recent statuses, errors, and confirmations (refresh chatter coalesced) |
+| Network progress | Appears while fetch/pull/push/sync runs; **Cancel** aborts the in-flight Git child when possible |
+
+Palette command **Message history** toggles the same popup. See [desktop-shell.md](desktop-shell.md).
+
+## Command palette
+
+`Command-Shift-P` opens a filterable, **scrollable** command list. Besides secondary views (Reflog, Blame, Compare, …), it includes toolbar actions: Open repository, Fetch, Pull…, Push…, Sync, Stage/Unstage all, stash Save/Apply, Create branch…, Show settings, Quick open file, Message history, Toggle appearance, Navigate back/forward.
+
 ## Working Copy
 
 | Shortcut | Action |
@@ -69,6 +83,17 @@ Partial line/hunk staging remains in the diff viewer (Stage Chunk / Discard Chun
 | Skip Hooks | `--no-verify` |
 
 The destination is pushed as `<remote> HEAD:<branch>`; picking a remote branch that does not exist yet adds `--set-upstream`.
+
+## Branches (sidebar)
+
+| Interaction | Behavior |
+|-------------|----------|
+| Left-click local/remote/tag | Open History scoped to that ref |
+| Double-click local/remote branch | Check out (`git switch` / `git switch --track`) |
+| Right-click | Branch context menu (pin, pull/push, archive, rename, delete, …) |
+| Pin | Branch stays flat at the top of BRANCHES across relaunch (persisted per repo) |
+| Archive | Branch moves under **ARCHIVED** |
+| Delete… | Cancel / Delete (`git branch -d`); if unmerged → **Could Not Delete Branch** Cancel / Delete force (`-D`) |
 
 ## Welcome window
 

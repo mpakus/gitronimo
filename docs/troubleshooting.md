@@ -12,13 +12,25 @@ Check that no Git process is still running. If none is running, inspect `.git/in
 
 Gitronimo delegates credentials to your installed Git credential helper or SSH configuration. For a non-fast-forward rejection, fetch or pull the newer remote commits, resolve any changes, then push again. Force-with-lease is available only through an explicit advanced confirmation.
 
+## Branch delete refused (not fully merged)
+
+Safe delete (`git branch -d`) opens **Could Not Delete Branch** when the tip is not fully merged. Choose **Delete** only if you intend to discard those commits from that branch tip (`git branch -D`). Cancel leaves the branch intact. The refusal is also recorded in Message history (activity bar clock button).
+
+## Pinned branches missing after relaunch
+
+Pins are stored in `~/Library/Application Support/Gitronimo/recent-repositories.json` under `branch_organization`. They appear flat at the top of BRANCHES (no separate section title). If pins vanish after a crash mid-write, check for a `.corrupt` backup beside that file; Gitronimo recovers malformed preferences without overwriting a newer schema.
+
+## Message history looks empty of important events
+
+Working-copy refresh lines are coalesced so they do not fill the log. Successes (e.g. push complete), errors, and confirmations remain. Open the clock button on the activity bar, or run **Message history** from the command palette, and scroll.
+
 ## Crash report
 
 On a panic, Gitronimo writes a local report under `~/Library/Application Support/Gitronimo/crash-reports/`. Reports are never uploaded automatically and contain only timestamp and source-location metadata.
 
 ## Keyboard and assistive technology
 
-All Gitronimo actions use visible text labels, and shared action controls repeat those labels in hover tooltips. Use the native menus or `Command-Shift-P` command palette; `Command-/` opens the complete shortcut reference.
+All Gitronimo actions use visible text labels, and shared action controls repeat those labels in hover tooltips. Use the native menus or `Command-Shift-P` command palette (scrollable; includes Fetch/Pull/Push/Sync and staging); `Command-/` opens the complete shortcut reference. Shell chrome details: [`desktop-shell.md`](desktop-shell.md).
 
 Working Copy file selection:
 

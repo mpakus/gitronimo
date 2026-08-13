@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-12 — Docs: shell chrome functional pass
+
+**Intent:** After the shell feature commits (message history, force-delete confirm, pins, palette), sync `docs/` and `AGENTS.md` with the shipped behavior.
+
+**Files:** `docs/desktop-shell.md` (new), `docs/README.md`, `docs/architecture.md`, `docs/keyboard-shortcuts.md`, `docs/troubleshooting.md`, `docs/UI-IMPROVE.md`, `CHANGELOG.md`, `README.md`, `AGENTS.md`, `docs/work-log.md`.
+
+**Acceptance:** Agents and humans can find activity/palette/pin/confirm rules without reading the diff; work-log/UI-IMPROVE/CHANGELOG reflect 2026-08-12 shell work.
+
 ## 2026-08-12 — Extend command palette coverage + scroll
 
 **Intent:** Command palette only showed the first ~9 items (list clipped, not scrollable). Expose toolbar and common Git/shell actions in the searchable list and make the list scroll.
@@ -20,7 +28,7 @@
 
 **Intent:** Pinned branches must look the same after quitting and reopening. Prefs already store pins, but unsynchronized preference writes (window geometry, widths, etc.) can overwrite them, and nested pins stay hidden inside folders so relaunch looks unchanged.
 
-**Files:** `crates/app_core/src/lib.rs` (serialize preference RMW), `apps/desktop/src/views/sidebar.rs` (PINNED section), `docs/work-log.md`, `docs/UI-IMPROVE.md`.
+**Files:** `crates/app_core/src/lib.rs` (serialize preference RMW), `apps/desktop/src/views/sidebar.rs` (pins flat atop BRANCHES), `docs/work-log.md`, `docs/UI-IMPROVE.md`, `docs/desktop-shell.md`.
 
 **Acceptance:** Pin a nested branch → quit → reopen → it still appears flat above other BRANCHES in pin order (no PINNED label); concurrent geometry saves do not clear pins.
 

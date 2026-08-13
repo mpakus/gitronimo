@@ -224,6 +224,14 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Sidebar remote-activity progress bar during fetch/pull/push + last-result footer when idle
 - [x] Visual polish pass: welcome detail headers, commit focus border, diff tabs/hunk headers, HEAD badge, activity bar
 
+**Done (2026-08-12 — shell chrome pass):**
+
+- [x] Message history popup on the activity bar (successes / errors / confirms; refresh coalesced; scrollable)
+- [x] Branch delete Cancel/Delete + unmerged **Could Not Delete Branch** force confirm (`AppConfirmDialog`)
+- [x] Pinned branches persist across relaunch; flat at top of BRANCHES (no PINNED label); prefs RMW path-locked
+- [x] Command palette expanded (Fetch/Pull/Push/Sync, staging, stash, settings, …) and scrollable
+- [x] Network progress strip in the bottom activity bar during fetch/pull/push/sync
+
 **Done (2026-08-11 — Tower interior pass):**
 
 - [x] In-repo sidebar trimmed to Working Copy / History / Stashes / Settings; PRs, Branches Review, Reflog via palette
@@ -246,7 +254,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 - [~] §1.1 Services — hosting view exists; welcome now has vertical Services/Bookmarks/Workflow rail; Workflow tab is placeholder-only
 - [~] §1.4 Back/Forward — Prev/Next labels added; toolbar groups Fetch/Pull/Push/Sync, stash Apply/Save, Refresh, and inline search fields Tower-style
-- [~] §1.5 Remote activity — in-flight progress bar in the bottom activity strip (left) and sidebar footer; Cancel available while running; last-result text when idle
+- [x] §1.5 Remote activity — in-flight progress bar in the bottom activity strip (left) and sidebar footer; Cancel available while running; last-result text when idle; Message history for past statuses/errors
 
 - [~] §1.8 History inline detail — Changeset/Tree segmented toggle in History inspector; commit rows use Tower density (author/date/subject)
 - [~] §4 Visual polish — interior pass: in-repo sidebar IA, WC composer rows, accent file selection, diff line backgrounds, stashes/remotes two-pane; OAuth/enterprise still deferred
@@ -267,13 +275,13 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 | ----------------------------- | -------------- | ----------------------------------------------------------------------------------- |
 | Workflow view content         | §1.1           | Rail tab exists; full workflow surface still placeholder                            |
 | OAuth / enterprise GitHub     | Delivery notes | Still deferred per `PLAN.md`                                                        |
-| Deterministic remote progress | §1.5           | Progress bar bottom-left during fetch/pull/push; sidebar footer mirrors it; Cancel while in flight |
+| Deterministic remote progress | §1.5           | Strip + Cancel exist; finer Git stderr byte/object parsing still partial |
 
 | IME-rich search/composer      | §4             | Inline search uses key-down capture; full EntityInputHandler fields deferred        |
 | Settings dedicated view       | §1.3           | Settings sidebar item routes to Services; no separate preferences panel yet         |
 | History ref label density     | §1.8           | Plain text labels; long ref names still truncate on narrow panes                    |
 
-See also [`keyboard-shortcuts.md`](keyboard-shortcuts.md) for Working Copy selection behavior.
+See also [`keyboard-shortcuts.md`](keyboard-shortcuts.md) for Working Copy selection behavior and [`desktop-shell.md`](desktop-shell.md) for activity bar, palette, pins, and confirms.
 
 ### Delivery notes
 
