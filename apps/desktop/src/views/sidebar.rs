@@ -463,6 +463,19 @@ impl GitronimoApp {
                         HistoryReference::Named(selected) if selected == &name
                     );
                 let leaf_label = parts.last().copied().unwrap_or_default().to_owned();
+                let selected = is_history_scope;
+                let label_color = if selected {
+                    colors.panel_background
+                } else if is_head {
+                    colors.text_primary
+                } else {
+                    colors.text_secondary
+                };
+                let icon_color = if selected {
+                    colors.panel_background
+                } else {
+                    colors.text_muted
+                };
                 let mut row = div()
                     .id((id_prefix, rows.len()))
                     .h(px(REF_ROW_HEIGHT))
@@ -472,15 +485,10 @@ impl GitronimoApp {
                     .items_center()
                     .gap_2()
                     .text_xs()
-                    .text_color(if is_history_scope {
-                        colors.panel_background
-                    } else if is_head {
-                        colors.text_primary
-                    } else {
-                        colors.text_secondary
-                    })
+                    .text_color(label_color)
                     .cursor_pointer();
-                if is_history_scope {
+                if selected {
+                    // Tower: full-width accent ribbon for the selected/viewed branch.
                     row = row.bg(colors.accent);
                 } else {
                     row = row.hover(|style| style.bg(colors.selection));
@@ -505,29 +513,21 @@ impl GitronimoApp {
                     )
                     // Align leaf icons under folder name (chevron column + gap).
                     .when(nest > 0, |row| row.child(div().w(px(12.0)).flex_shrink_0()))
-                    .child(icon(
-                        leaf_icon,
-                        13.0,
-                        if is_history_scope {
-                            colors.panel_background
-                        } else {
-                            colors.text_muted
-                        },
-                    ))
+                    .child(icon(leaf_icon, 13.0, icon_color))
                     .child(
                         div()
                             .flex_1()
                             .min_w(px(0.0))
                             .overflow_hidden()
                             .whitespace_nowrap()
-                            .font_weight(if is_head || is_history_scope {
+                            .font_weight(if is_head || selected {
                                 gpui::FontWeight::MEDIUM
                             } else {
                                 gpui::FontWeight::NORMAL
                             })
                             .child(leaf_label),
                     )
-                    .children(is_head.then(|| head_badge(colors)))
+                    .children(is_head.then(|| head_badge(colors, selected)))
                     .into_any_element(),
                 );
             }

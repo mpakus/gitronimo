@@ -148,7 +148,7 @@ impl GitronimoApp {
                             })
                             .child(name.clone()),
                     )
-                    .children(is_head.then(|| head_badge(colors)))
+                    .children(is_head.then(|| head_badge(colors, active)))
                     .children(badge.map(|text| count_badge(text, active, colors)))
                     .into_any_element(),
             );
@@ -210,7 +210,7 @@ impl GitronimoApp {
                                         .font_weight(gpui::FontWeight::SEMIBOLD)
                                         .child(name.clone()),
                                 )
-                                .children(is_head.then(|| head_badge(colors))),
+                                .children(is_head.then(|| head_badge(colors, false))),
                         )
                         .child(detail_row("Commit", &short_oid, colors))
                         .child(detail_row(

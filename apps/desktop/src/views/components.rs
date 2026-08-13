@@ -637,21 +637,26 @@ pub(crate) fn two_pane_view(
         .into_any_element()
 }
 
-pub(crate) fn head_badge(colors: &ThemeColors) -> gpui::AnyElement {
-    div()
+/// Trailing `HEAD` label for the checked-out branch.
+///
+/// On the accent selection ribbon: compact light text, no chrome. Otherwise a
+/// small muted label without a border (Tower: badge stays quiet when not selected).
+pub(crate) fn head_badge(colors: &ThemeColors, on_selection: bool) -> gpui::AnyElement {
+    let mut badge = div()
         .ml_auto()
         .flex_shrink_0()
-        .px_1()
-        .py_0p5()
-        .rounded(px(3.0))
-        .bg(colors.raised_background)
-        .border_1()
-        .border_color(colors.border)
-        .text_xs()
+        .text_size(px(9.0))
         .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(colors.text_secondary)
-        .child("HEAD")
-        .into_any_element()
+        .text_color(if on_selection {
+            colors.panel_background
+        } else {
+            colors.text_muted
+        })
+        .child("HEAD");
+    if !on_selection {
+        badge = badge.px_1().rounded(px(2.0)).bg(colors.raised_background);
+    }
+    badge.into_any_element()
 }
 
 pub(crate) fn count_badge(text: String, inverted: bool, colors: &ThemeColors) -> gpui::AnyElement {

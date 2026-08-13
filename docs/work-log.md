@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-12 — Tower-style sidebar HEAD vs selection
+
+**Intent:** Match Tower branch rows: selection is a full-width accent ribbon with light text; HEAD is a trailing badge. When HEAD is the selected row, the badge sits on the ribbon (light outlined pill). When another branch is selected, HEAD keeps a muted badge without a ribbon.
+
+**Files:** `components.rs` (`head_badge` variants), `sidebar.rs` (row styling), `branches_review.rs`, `docs/work-log.md`.
+
+**Acceptance:** Selected history branch = accent ribbon; HEAD-on-selection badge matches ribbon; HEAD-not-selected shows muted badge only; selected non-HEAD still gets the ribbon.
+
 ## 2026-08-12 — Keep composer open for Amend / Sign-off
 
 **Intent:** Checking Amend or Sign-off must keep the commit subject block expanded after focus leaves the fields.

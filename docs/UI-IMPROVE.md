@@ -227,7 +227,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 **Done (2026-08-11 — Tower interior pass):**
 
 - [x] In-repo sidebar trimmed to Working Copy / History / Stashes / Settings; PRs, Branches Review, Reflog via palette
-- [x] Branch/ref: left-click opens scoped History (list + detail); double-click checks out local/remote branches; right-click context menu (Checkout, History, Merge, …)
+- [x] Branch/ref: left-click opens scoped History (list + detail); double-click checks out local/remote branches; right-click context menu (Checkout, History, Merge, …); sidebar selection ribbon vs muted HEAD badge (Tower)
 - [x] Pull dialog: Remote Branch dropdown + Use Rebase Instead of Merge checkbox
 - [x] Push HEAD dialog: Destination dropdown + Options (all tags, force-with-lease, recurse submodules, skip hooks)
 - [x] History: full-width flat rows, multi-lane graph, plain ref labels, scope header + month groups
