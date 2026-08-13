@@ -51,14 +51,15 @@ use crate::actions::{
     WidenSidebar,
 };
 use crate::app_state::{
-    ACTIVITY_LOG_CAPACITY, ActivityLogEntry, ChoicePromptKind, DEFAULT_LIST_PANE_WIDTH,
-    DEFAULT_SIDEBAR_WIDTH, ForcePushState, GitronimoApp, HistoryDetailMode, LastAction, Mutation,
-    NetworkOperation, OpenedRepository, OperationAction, OverlayFocus, PR_MERGE_METHOD_CHOICES,
-    PaletteCommand, PullDialogState, PushDialogState, PushOption, RefContext, RefContextSubmenu,
-    RepositoryView, ShellState, ShortcutReferenceState, StashAction, SubmodulePushMode,
-    TextPromptKind, ThemeMode, WelcomeRepoSnapshot, WelcomeShellView, appearance_from_window,
-    clamp_list_pane_width, clamp_sidebar_width, discard_selected, git_failure_message,
-    network_failure_message, repository_is_available, repository_unavailable_message, resize_width,
+    ACTIVITY_LOG_CAPACITY, ActivityLogEntry, AppConfirmDialog, ChoicePromptKind,
+    DEFAULT_LIST_PANE_WIDTH, DEFAULT_SIDEBAR_WIDTH, ForcePushState, GitronimoApp,
+    HistoryDetailMode, LastAction, Mutation, NetworkOperation, OpenedRepository, OperationAction,
+    OverlayFocus, PR_MERGE_METHOD_CHOICES, PaletteCommand, PullDialogState, PushDialogState,
+    PushOption, RefContext, RefContextSubmenu, RepositoryView, ShellState, ShortcutReferenceState,
+    StashAction, SubmodulePushMode, TextPromptKind, ThemeMode, WelcomeRepoSnapshot,
+    WelcomeShellView, appearance_from_window, branch_not_fully_merged_error, clamp_list_pane_width,
+    clamp_sidebar_width, discard_selected, git_failure_message, network_failure_message,
+    repository_is_available, repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
 use crate::views::single_line_input::register_input_bindings;
@@ -393,6 +394,7 @@ impl GitronimoApp {
             pending_stash_action: None,
             pending_operation_action: None,
             pending_branch_delete: None,
+            confirm_dialog: None,
             pending_text_prompt: None,
             text_prompt_value: String::new(),
             pending_choice_prompt: None,
@@ -633,6 +635,7 @@ impl GitronimoApp {
             pending_stash_action: None,
             pending_operation_action: None,
             pending_branch_delete: None,
+            confirm_dialog: None,
             pending_text_prompt: None,
             text_prompt_value: String::new(),
             pending_choice_prompt: None,
@@ -907,6 +910,7 @@ impl GitronimoApp {
                 self.pending_stash_action = None;
                 self.pending_operation_action = None;
                 self.pending_branch_delete = None;
+                self.confirm_dialog = None;
                 self.force_push_state = ForcePushState::Idle;
                 self.shortcut_reference_state = ShortcutReferenceState::Hidden;
                 self.network_operation = None;
@@ -1455,10 +1459,11 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
-    fn request_branch_delete(&mut self, branch: String, cx: &mut Context<Self>) {
+    fn request_branch_delete(&mut self, branch: &str, cx: &mut Context<Self>) {
         self.close_ref_context_menu(cx);
+        self.confirm_dialog = None;
+        self.pending_branch_delete = Some(branch.to_owned());
         self.set_activity(format!("Confirm deletion of branch {branch}."));
-        self.pending_branch_delete = Some(branch);
         cx.notify();
     }
 
@@ -1466,6 +1471,24 @@ return remote_url & linefeed & parent_path"#;
         self.pending_branch_delete = None;
         self.set_activity("Branch deletion cancelled.");
         cx.notify();
+    }
+
+    pub(crate) fn cancel_confirm_dialog(&mut self, cx: &mut Context<Self>) {
+        self.confirm_dialog = None;
+        self.set_activity("Cancelled.");
+        cx.notify();
+    }
+
+    pub(crate) fn confirm_confirm_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.confirm_dialog.take() else {
+            return;
+        };
+        match dialog {
+            AppConfirmDialog::ForceDeleteBranch { branch } => {
+                self.pending_branch_delete = Some(branch);
+                self.confirm_branch_delete(true, cx);
+            }
+        }
     }
 
     fn begin_text_prompt(
@@ -4390,16 +4413,55 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let Some(branch) = self.pending_branch_delete.take() else {
             return;
         };
+        self.confirm_dialog = None;
+        if self.mutation_in_flight {
+            self.pending_branch_delete = Some(branch);
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            self.pending_branch_delete = Some(branch);
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let branch_name = branch.clone();
         let label = if force {
             format!("Force deleting unmerged branch {branch}")
         } else {
-            format!("Deleting merged branch {branch}")
+            format!("Deleting branch {branch}")
         };
-        self.run_branch_command(
-            label,
-            move |git, repository| git.delete_branch(repository, &branch, force),
-            cx,
-        );
+        self.mutation_in_flight = true;
+        self.set_activity(format!("{label}…"));
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    git.delete_branch(&worker_repository, &branch_name, force)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.set_activity(format!("{label} complete."));
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_refs(repository, cx);
+                    }
+                    Err(error) if !force && branch_not_fully_merged_error(&error) => {
+                        app.confirm_dialog = Some(AppConfirmDialog::ForceDeleteBranch {
+                            branch: branch.clone(),
+                        });
+                        app.set_activity(format!(
+                            "Could not delete \"{branch}\": it contains unmerged changes."
+                        ));
+                    }
+                    Err(error) => app.set_activity(git_failure_message(&label, &error)),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn create_branch_from(

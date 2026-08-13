@@ -231,7 +231,7 @@ impl GitronimoApp {
             is_head.then_some("Checkout another branch before deleting HEAD."),
             colors,
             cx,
-            move |app, _, cx| app.request_branch_delete(delete_branch.clone(), cx),
+            move |app, _, cx| app.request_branch_delete(&delete_branch, cx),
         ));
 
         menu = menu.child(menu_separator(colors));

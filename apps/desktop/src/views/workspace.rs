@@ -1,14 +1,14 @@
 //! The root window layout: toolbar, sidebar, content, activity bar.
 
 use gpui::{
-    AnyElement, Focusable, MouseButton, MouseDownEvent, Render, Window, div, prelude::*, px,
-    relative,
+    AnyElement, Focusable, MouseButton, MouseDownEvent, Render, SharedString, Window, div,
+    prelude::*, px, relative,
 };
 use ui_kit::Theme;
 
 use crate::app_state::{
-    ChoicePromptKind, GitronimoApp, OverlayFocus, PaletteCommand, PushOption, ShellState,
-    ShortcutReferenceState, SubmodulePushMode, TextPromptKind, window_title,
+    AppConfirmDialog, ChoicePromptKind, GitronimoApp, OverlayFocus, PaletteCommand, PushOption,
+    ShellState, ShortcutReferenceState, SubmodulePushMode, TextPromptKind, window_title,
 };
 
 use crate::views::components::{
@@ -141,6 +141,10 @@ impl Render for GitronimoApp {
             )
             .children(self.pending_branch_delete.is_some().then(|| {
                 self.branch_delete_confirm_overlay(&colors, cx)
+                    .into_any_element()
+            }))
+            .children(self.confirm_dialog.is_some().then(|| {
+                self.app_confirm_dialog_overlay(&colors, cx)
                     .into_any_element()
             }))
             .children(
@@ -1206,6 +1210,52 @@ impl GitronimoApp {
         let Some(branch) = self.pending_branch_delete.clone() else {
             return div().into_any_element();
         };
+        Self::modal_confirm_overlay(
+            colors,
+            cx,
+            "Delete Branch",
+            format!("Do you really want to delete the branch \"{branch}\"?"),
+            "Cancel",
+            "Delete",
+            GitronimoApp::cancel_branch_delete,
+            |app, cx| app.confirm_branch_delete(false, cx),
+        )
+    }
+
+    pub(crate) fn app_confirm_dialog_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let Some(dialog) = self.confirm_dialog.clone() else {
+            return div().into_any_element();
+        };
+        Self::modal_confirm_overlay(
+            colors,
+            cx,
+            dialog.title(),
+            dialog.body(),
+            AppConfirmDialog::cancel_label(),
+            dialog.confirm_label(),
+            GitronimoApp::cancel_confirm_dialog,
+            GitronimoApp::confirm_confirm_dialog,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn modal_confirm_overlay(
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+        title: impl Into<SharedString>,
+        body: impl Into<SharedString>,
+        cancel_label: &'static str,
+        confirm_label: &'static str,
+        on_cancel: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static + Clone,
+        on_confirm: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static + Clone,
+    ) -> AnyElement {
+        let on_cancel_scrim = on_cancel.clone();
+        let on_cancel_btn = on_cancel;
+        let on_confirm_btn = on_confirm;
         div()
             .absolute()
             .top(px(56.0))
@@ -1219,8 +1269,8 @@ impl GitronimoApp {
             .pt_8()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|app, _: &MouseDownEvent, _, cx| {
-                    app.cancel_branch_delete(cx);
+                cx.listener(move |app, _: &MouseDownEvent, _, cx| {
+                    on_cancel_scrim(app, cx);
                 }),
             )
             .child(
@@ -1247,7 +1297,7 @@ impl GitronimoApp {
                             .border_color(colors.border)
                             .text_sm()
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(format!("Delete branch \"{branch}\"?")),
+                            .child(title.into()),
                     )
                     .child(
                         div()
@@ -1255,9 +1305,7 @@ impl GitronimoApp {
                             .py_2()
                             .text_xs()
                             .text_color(colors.text_secondary)
-                            .child(
-                                "Yes deletes the local branch. Safe deletion refuses unmerged work; use Force Delete only when you intend to discard those commits from this branch tip.",
-                            ),
+                            .child(body.into()),
                     )
                     .child(
                         div()
@@ -1268,15 +1316,22 @@ impl GitronimoApp {
                             .flex()
                             .justify_end()
                             .gap_2()
-                            .child(file_action_button("No", colors, cx, |app, cx| {
-                                app.cancel_branch_delete(cx);
-                            }))
-                            .child(file_action_button("Force Delete", colors, cx, |app, cx| {
-                                app.confirm_branch_delete(true, cx);
-                            }))
-                            .child(primary_action_button("Yes", colors, cx, |app, cx| {
-                                app.confirm_branch_delete(false, cx);
-                            })),
+                            .child(file_action_button(
+                                cancel_label,
+                                colors,
+                                cx,
+                                move |app, cx| {
+                                    on_cancel_btn(app, cx);
+                                },
+                            ))
+                            .child(primary_action_button(
+                                confirm_label,
+                                colors,
+                                cx,
+                                move |app, cx| {
+                                    on_confirm_btn(app, cx);
+                                },
+                            )),
                     ),
             )
             .into_any_element()

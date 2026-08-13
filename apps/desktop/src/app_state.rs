@@ -129,6 +129,39 @@ pub(crate) enum ForcePushState {
     AwaitingConfirmation,
 }
 
+/// Modal confirmation for destructive or blocked Git actions (Tower-style).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum AppConfirmDialog {
+    /// Safe delete refused because the branch is not fully merged.
+    ForceDeleteBranch { branch: String },
+}
+
+impl AppConfirmDialog {
+    pub(crate) fn title(&self) -> String {
+        match self {
+            Self::ForceDeleteBranch { .. } => "Could Not Delete Branch".into(),
+        }
+    }
+
+    pub(crate) fn body(&self) -> String {
+        match self {
+            Self::ForceDeleteBranch { branch } => format!(
+                "The branch \"{branch}\" contains unmerged changes. Do you really want to delete it?"
+            ),
+        }
+    }
+
+    pub(crate) fn cancel_label() -> &'static str {
+        "Cancel"
+    }
+
+    pub(crate) fn confirm_label(&self) -> &'static str {
+        match self {
+            Self::ForceDeleteBranch { .. } => "Delete",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShortcutReferenceState {
     Hidden,
@@ -560,6 +593,7 @@ pub(crate) struct GitronimoApp {
     pub pending_stash_action: Option<StashAction>,
     pub pending_operation_action: Option<OperationAction>,
     pub pending_branch_delete: Option<String>,
+    pub confirm_dialog: Option<AppConfirmDialog>,
     pub pending_text_prompt: Option<TextPromptKind>,
     pub text_prompt_value: String,
     pub pending_choice_prompt: Option<ChoicePromptKind>,
@@ -710,6 +744,12 @@ pub(crate) fn git_failure_message(label: &str, error: &str) -> String {
     }
 }
 
+/// Git refuses `git branch --delete` when the tip is not reachable from HEAD.
+pub(crate) fn branch_not_fully_merged_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("not fully merged") || lower.contains("isn't fully merged")
+}
+
 pub(crate) fn repository_is_available(repository: &WorktreeRepository) -> bool {
     repository.worktree_root.is_dir() && repository.git_dir.is_dir()
 }
@@ -810,4 +850,34 @@ pub(crate) fn eligible_trash_path(root: &Path, path: &GitPath) -> std::io::Resul
         ));
     }
     Ok(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppConfirmDialog, branch_not_fully_merged_error};
+
+    #[test]
+    fn detects_not_fully_merged_git_errors() {
+        assert!(branch_not_fully_merged_error(
+            "error: The branch 'feature/ui-improvements' is not fully merged."
+        ));
+        assert!(branch_not_fully_merged_error(
+            "GitError(\"The branch 'x' isn't fully merged.\\n\")"
+        ));
+        assert!(!branch_not_fully_merged_error(
+            "error: Cannot delete branch 'main' checked out at ..."
+        ));
+    }
+
+    #[test]
+    fn force_delete_dialog_copy() {
+        let dialog = AppConfirmDialog::ForceDeleteBranch {
+            branch: "feature/ui-improvements".into(),
+        };
+        assert_eq!(dialog.title(), "Could Not Delete Branch");
+        assert!(dialog.body().contains("feature/ui-improvements"));
+        assert!(dialog.body().contains("unmerged changes"));
+        assert_eq!(AppConfirmDialog::cancel_label(), "Cancel");
+        assert_eq!(dialog.confirm_label(), "Delete");
+    }
 }

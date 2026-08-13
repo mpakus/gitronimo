@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-12 — Unmerged branch delete confirmation dialog
+
+**Intent:** Safe branch delete failures (not fully merged) currently flash in the activity bar. Show a Tower-style modal (“Could Not Delete Branch”) with Cancel / Delete (force), and keep the initial delete prompt as Cancel / Delete only.
+
+**Files:** `app_state.rs` (`AppConfirmDialog`), `main.rs` (delete error → dialog), `workspace.rs` (overlay), `docs/work-log.md`.
+
+**Acceptance:** Delete unmerged branch → Yes → modal with unmerged copy; Cancel closes; Delete runs `git branch -D`; activity log still records the failure.
+
 ## 2026-08-12 — Activity message history popup
 
 **Intent:** Bottom activity bar gets a small button that opens a popup of the last 50 status/error/notification messages so users can review what happened.
@@ -38,7 +46,7 @@
 
 **Files:** `workspace.rs` (delete confirm overlay; activity-bar progress), `working_copy.rs` (remove WC-only delete strip), `main.rs` (`cancel_branch_delete`, clear pending on confirm), `sidebar.rs` / `components.rs` (keep footer), `docs/UI-IMPROVE.md`, `docs/work-log.md`.
 
-**Acceptance:** Delete… → modal with Yes/No; Yes runs safe `git branch -d` (Force Delete still available for unmerged); No closes; progress bar visible bottom-left during network ops.
+**Acceptance:** Delete… → Cancel/Delete modal; Delete runs safe `git branch -d`; unmerged refusal opens “Could Not Delete Branch” for force (`-D`); progress bar visible bottom-left during network ops.
 
 ## 2026-08-12 — Double-click sidebar branch switches checkout
 
