@@ -48,23 +48,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app_path="target/release-universal/Gitronimo.app"
+          app_path="target/release-universal/GitRonimo.app"
           api_key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
           mkdir -p target/release-universal
-          ditto target/release-arm/Gitronimo.app "$app_path"
-          lipo -create target/release-arm/Gitronimo.app/Contents/MacOS/gitronimo-desktop target/release-intel/Gitronimo.app/Contents/MacOS/gitronimo-desktop -output "$app_path/Contents/MacOS/gitronimo-desktop"
+          ditto target/release-arm/GitRonimo.app "$app_path"
+          lipo -create target/release-arm/GitRonimo.app/Contents/MacOS/GitRonimo target/release-intel/GitRonimo.app/Contents/MacOS/GitRonimo -output "$app_path/Contents/MacOS/GitRonimo"
           codesign --force --deep --options runtime --timestamp --sign "$DEVELOPER_ID_APPLICATION" "$app_path"
           codesign --verify --deep --strict --verbose=2 "$app_path"
-          ditto -c -k --sequesterRsrc --keepParent "$app_path" target/release-universal/Gitronimo-${GITHUB_REF_NAME}.zip
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip
           printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$api_key_path"
-          xcrun notarytool submit target/release-universal/Gitronimo-${GITHUB_REF_NAME}.zip --key "$api_key_path" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun notarytool submit target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip --key "$api_key_path" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
           rm -f "$api_key_path"
           xcrun stapler staple "$app_path"
           spctl --assess --type execute --verbose=4 "$app_path"
-          rm -f target/release-universal/Gitronimo-${GITHUB_REF_NAME}.zip
-          ditto -c -k --sequesterRsrc --keepParent "$app_path" target/release-universal/Gitronimo-${GITHUB_REF_NAME}.zip
-          shasum -a 256 target/release-universal/Gitronimo-${GITHUB_REF_NAME}.zip > target/release-universal/SHA256SUMS.txt
+          rm -f target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip
+          shasum -a 256 target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip > target/release-universal/SHA256SUMS.txt
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" target/release-universal/Gitronimo-${GITHUB_REF_NAME}.zip target/release-universal/SHA256SUMS.txt --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md
+        run: gh release create "$GITHUB_REF_NAME" target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip target/release-universal/SHA256SUMS.txt --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md

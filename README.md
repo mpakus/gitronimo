@@ -48,7 +48,7 @@ export PATH="$HOME/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin:$PATH"
 
 cargo install cargo-packager --version 0.11.8 --locked
 cargo packager --release --formats app --manifest-path apps/desktop/Cargo.toml --out-dir target/release
-open target/release/Gitronimo.app
+open target/release/GitRonimo.app
 ```
 
 An installed Git executable is required. See [macOS packaging](docs/packaging.md) for signing and notarization handoff.

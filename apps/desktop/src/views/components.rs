@@ -48,15 +48,19 @@ impl Render for ListPaneResizeDrag {
     }
 }
 
+/// Hit target between panes. Do not put `.cursor_col_resize()` on this element:
+/// GPUI copies `mouse_cursor` onto `on_drag` and then calls `set_window_cursor_style`
+/// during paint, which debug-asserts `DrawPhase::Paint` and aborts on macOS mouse-down
+/// if the phase is still None. Hover cursor is applied on a non-drag ancestor.
 fn resize_handle_shell(id: &'static str, colors: &ThemeColors) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
+        .debug_selector(|| id.to_owned())
         .w(px(PANE_RESIZE_HIT_WIDTH))
         .h_full()
         .flex_shrink_0()
         .flex()
         .justify_center()
-        .cursor_col_resize()
         .hover(|style| style.bg(colors.selection))
         .child(div().w(px(2.0)).h_full().bg(colors.list_row_border))
 }
@@ -72,6 +76,12 @@ pub(crate) fn sidebar_resize_handle(
         start_width: Arc::new(Mutex::new(start_width)),
     };
     resize_handle_shell("sidebar-resize-handle", colors)
+        .on_hover(cx.listener(|app, hovered: &bool, _, cx| {
+            if app.resize_handle_hovered != *hovered {
+                app.resize_handle_hovered = *hovered;
+                cx.notify();
+            }
+        }))
         .on_drag(drag, move |drag, _offset, window, cx| {
             *drag.start_x.lock().unwrap() = f32::from(window.mouse_position().x);
             *drag.start_width.lock().unwrap() = start_width;
@@ -102,6 +112,12 @@ pub(crate) fn list_pane_resize_handle(
         start_width: Arc::new(Mutex::new(start_width)),
     };
     resize_handle_shell("list-pane-resize-handle", colors)
+        .on_hover(cx.listener(|app, hovered: &bool, _, cx| {
+            if app.resize_handle_hovered != *hovered {
+                app.resize_handle_hovered = *hovered;
+                cx.notify();
+            }
+        }))
         .on_drag(drag, move |drag, _offset, window, cx| {
             *drag.start_x.lock().unwrap() = f32::from(window.mouse_position().x);
             *drag.start_width.lock().unwrap() = start_width;

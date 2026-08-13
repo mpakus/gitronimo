@@ -63,6 +63,7 @@ impl Render for GitronimoApp {
             .on_action(cx.listener(Self::widen_sidebar))
             .on_action(cx.listener(Self::select_all_status_files))
             .on_action(cx.listener(Self::save_stash_shortcut))
+            .on_action(cx.listener(Self::show_about))
             .on_drop(cx.listener(Self::dropped_paths))
             .child(self.workspace_toolbar(&colors, cx))
             .child(
@@ -71,6 +72,7 @@ impl Render for GitronimoApp {
                     .flex()
                     .h_full()
                     .min_h(px(0.0))
+                    .when(self.resize_handle_hovered, gpui::Styled::cursor_col_resize)
                     .child(self.sidebar_view(sidebar_width, &colors, cx))
                     .child(sidebar_resize_handle(sidebar_width, &colors, cx))
                     .child(
@@ -160,6 +162,10 @@ impl Render for GitronimoApp {
             .children(
                 self.show_activity_log
                     .then(|| self.activity_log_overlay(&colors, cx).into_any_element()),
+            )
+            .children(
+                self.show_about
+                    .then(|| Self::about_overlay(&colors, cx).into_any_element()),
             )
     }
 }

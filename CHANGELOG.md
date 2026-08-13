@@ -16,6 +16,8 @@
 - Workflow tab (welcome + in-repo): GitHub Flow / GitLab Flow / git-flow templates, auto-detect from local branches, Start / Finish / Sync topic branches; config persists per repository. Approach-only from Tower Workflows.
 - Command-H hides Gitronimo (`Hide Gitronimo` in the application menu), matching Command-Q quit.
 - Command-F focuses the toolbar search field (welcome repository filter or in-repo file search).
+- macOS application menu is **GitRonimo** (binary / bundle name). **About GitRonimo** opens a black two-column overlay with `assets/gitronimo-icon.png`, product version **0.9** (`APP_VERSION` in `apps/desktop/src/views/about.rs`), “Made in Austin ✩ Texas”, and https://aomega.co.
+- Crash-report panics: branch context-menu render no longer re-reads `GitronimoApp` (GPUI double-lease); pane resize / bookmark drag no longer copy a cursor style onto `on_drag` (GPUI `set_window_cursor_style` debug assert).
 
 ## 0.1.0 beta
 

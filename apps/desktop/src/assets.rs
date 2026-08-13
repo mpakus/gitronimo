@@ -55,6 +55,9 @@ impl AssetSource for DesktopAssets {
             }
             "icons/scale.svg" => include_bytes!("../assets/icons/scale.svg").as_slice(),
             "icons/branch.svg" => include_bytes!("../assets/icons/branch.svg").as_slice(),
+            "icons/gitronimo-icon.png" => {
+                include_bytes!("../../../assets/gitronimo-icon.png").as_slice()
+            }
             _ => return Ok(None),
         };
         Ok(Some(Cow::Borrowed(bytes)))
@@ -85,6 +88,7 @@ impl AssetSource for DesktopAssets {
             "icons/arrows-right-left.svg",
             "icons/scale.svg",
             "icons/branch.svg",
+            "icons/gitronimo-icon.png",
         ];
         Ok(all
             .into_iter()

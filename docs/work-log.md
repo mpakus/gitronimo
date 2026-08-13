@@ -1,5 +1,35 @@
 # Implementation work log
 
+## 2026-08-13 — About overlay black + release version 0.9
+
+**Intent:** About panel uses a black card. Show product version **0.9** from a dedicated constant (not Cargo `0.1.0`) so it can be bumped after each release.
+
+**Files:** `apps/desktop/src/views/about.rs`, `apps/desktop/src/tests.rs`, `docs/desktop-shell.md`, `CHANGELOG.md`.
+
+**Acceptance:** Overlay card is black with light copy; About shows `Version 0.9`; `APP_VERSION` is the single bump site.
+
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, desktop About tests, `cargo deny check`.
+
+## 2026-08-13 — About GitRonimo (menu + overlay)
+
+**Intent:** The macOS application menu showed `gitronimo-desktop` (debug binary name). Rename the visible app to **GitRonimo**, add **About GitRonimo**, and show a centered overlay: app icon, name, version, “Made in Austin ✩ Texas”, and https://aomega.co. No Acknowledgements/License buttons. Approach-only from Tower About layout; original Gitronimo chrome and `assets/gitronimo-icon.png`.
+
+**Files:** `apps/desktop/Cargo.toml` (bin + packager name), `assets.rs`, `actions.rs`, `menus.rs`, `app_state.rs`, `main.rs`, `views/about.rs`, `workspace.rs`, `tests.rs`, CI/packaging docs.
+
+**Acceptance:** Menu bar title is GitRonimo when running the desktop binary; About opens the overlay; site link uses `open_url`; gates pass.
+
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check`.
+
+## 2026-08-13 — Crash-report panics (double-lease + drag cursor)
+
+**Intent:** Local crash reports under `~/Library/Application Support/Gitronimo/crash-reports/` plus matching macOS IPS stacks: (1) `entity_map.rs` double-lease while rendering the branch context menu (`submenu_item` nested `GitronimoApp` read); (2) `window.rs:2364` `set_window_cursor_style` debug-assert during mouse-down (GPUI copies `.cursor_*()` onto `on_drag` and applies it as a window cursor). Cargo future-incompat (`block`, `proc-macro-error2`) is transitive GPUI/macOS and is not patched here.
+
+**Files:** `views/ref_context_menu.rs`, `views/components.rs`, `views/workspace.rs`, `views/sidebar.rs`, `app_state.rs`, `main.rs`, `tests.rs`, docs.
+
+**Acceptance:** Opening a local-branch context menu (and Push To submenu) draws without double-lease; resize/bookmark drag sources do not put `mouse_cursor` on the same element as `on_drag`; hover still shows col-resize via ancestor style; gates pass.
+
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check`. rgitui `layout.rs` resize handle keeps cursor+drag together (MIT, not copied) because that combo trips gpui 0.2.2’s paint-phase assert.
+
 ## 2026-08-13 — Command-F focuses toolbar search
 
 **Intent:** The toolbar search field shows ⌘F but the shortcut was not bound, so it did nothing. Focus the visible search input (welcome repositories or in-repo files).

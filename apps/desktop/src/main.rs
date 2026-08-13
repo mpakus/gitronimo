@@ -49,8 +49,8 @@ use platform_macos::MacKeychainStore;
 use ui_kit::Appearance;
 
 use crate::actions::{
-    CommandPalette, FocusComposer, FocusSearch, Hide, HistoryNext, HistoryPrevious, NavigateBack,
-    NavigateForward, OpenRepository, Quit, Refresh, SaveStash, SelectAllStatusFiles,
+    About, CommandPalette, FocusComposer, FocusSearch, Hide, HistoryNext, HistoryPrevious,
+    NavigateBack, NavigateForward, OpenRepository, Quit, Refresh, SaveStash, SelectAllStatusFiles,
     ShortcutReference, ToggleAppearance, WidenSidebar,
 };
 use crate::app_state::{
@@ -355,6 +355,7 @@ impl GitronimoApp {
             appearance: appearance_from_window(window.appearance()),
             theme_mode: ThemeMode::System,
             sidebar_width,
+            resize_handle_hovered: false,
             state: ShellState::Welcome,
             recents,
             selected_recent,
@@ -417,6 +418,7 @@ impl GitronimoApp {
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_selected: 0,
+            show_about: false,
             pending_overlay_focus: None,
             selected_branch_review: None,
             branches_review_show_all: false,
@@ -609,6 +611,7 @@ impl GitronimoApp {
             appearance: appearance_from_window(window.appearance()),
             theme_mode: ThemeMode::System,
             sidebar_width,
+            resize_handle_hovered: false,
             state,
             recents,
             selected_recent: None,
@@ -671,6 +674,7 @@ impl GitronimoApp {
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_selected: 0,
+            show_about: false,
             pending_overlay_focus: None,
             selected_branch_review: None,
             branches_review_show_all: false,
@@ -1557,6 +1561,22 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
+    fn show_about(&mut self, _: &About, _: &mut Window, cx: &mut Context<Self>) {
+        self.show_about_dialog(cx);
+    }
+
+    pub(crate) fn show_about_dialog(&mut self, cx: &mut Context<Self>) {
+        self.show_about = true;
+        cx.notify();
+    }
+
+    pub(crate) fn close_about_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.show_about {
+            self.show_about = false;
+            cx.notify();
+        }
+    }
+
     fn move_command_palette_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
         let count = PaletteCommand::filtered(&self.command_palette_query).len();
         if count == 0 {
@@ -1779,6 +1799,7 @@ return remote_url & linefeed & parent_path"#;
                     cx.notify();
                 }
             }
+            PaletteCommand::AboutGitRonimo => self.show_about_dialog(cx),
         }
     }
 

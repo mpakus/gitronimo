@@ -11,11 +11,12 @@ use super::crash_report_body;
 use super::crash_report_path;
 use super::window_options;
 use crate::app_state::{
-    GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, OperationAction,
-    RepositoryView, ShellState, eligible_trash_path, git_failure_message, network_failure_message,
-    repository_is_available, resize_width, window_title,
+    GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, OperationAction, RefContext,
+    RefContextSubmenu, RepositoryView, ShellState, eligible_trash_path, git_failure_message,
+    network_failure_message, repository_is_available, resize_width, window_title,
 };
 use crate::keymap;
+use crate::menus;
 use crate::views::commit_composer::commit_unavailable_reason;
 use crate::views::components::{
     activity_label, empty_status_message, format_divergence_arrows, head_badge_text,
@@ -238,6 +239,29 @@ fn command_h_is_bound_to_hide() {
     };
     assert_eq!(keystroke.key(), "h");
     assert!(keystroke.modifiers().platform, "Hide needs the Command key");
+}
+
+#[test]
+fn application_menu_is_named_gitronimo_and_starts_with_about() {
+    let menus = menus::application_menus();
+    assert_eq!(
+        menus[0].name.as_ref(),
+        "GitRonimo",
+        "the application menu title must match the macOS process/bundle name"
+    );
+    let gpui::MenuItem::Action { name, .. } = &menus[0].items[0] else {
+        panic!("the first application menu item should be About GitRonimo");
+    };
+    assert_eq!(name.as_ref(), "About GitRonimo");
+}
+
+#[test]
+fn about_dialog_uses_the_release_version() {
+    assert_eq!(
+        crate::views::about::APP_VERSION,
+        "0.9",
+        "bump APP_VERSION in views/about.rs after each release"
+    );
 }
 
 #[test]
@@ -822,5 +846,61 @@ fn checkbox_click_stages_a_single_file(cx: &mut TestAppContext) {
         fixture.staged_paths(),
         vec!["a.txt".to_owned()],
         "an unselected row stages only itself"
+    );
+}
+
+#[gpui::test]
+fn rendering_a_branch_context_menu_does_not_double_lease(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("ref-context-menu");
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    app.update(cx, |app, cx| {
+        app.state = ShellState::Repository(fixture.repository.clone());
+        app.working_copy = Some(fixture.status());
+        app.open_ref_context_menu(RefContext::LocalBranch("main".into()), (40.0, 90.0), cx);
+        app.open_ref_context_submenu(RefContextSubmenu::PushTo, cx);
+    });
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("ref-context-menu").is_some(),
+        "the branch menu must paint without re-reading GitronimoApp during Render"
+    );
+}
+
+#[gpui::test]
+fn sidebar_resize_handle_mouse_down_does_not_panic(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("resize-handle-click");
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    app.update(cx, |app, _| {
+        app.state = ShellState::Repository(fixture.repository.clone());
+        app.working_copy = Some(fixture.status());
+    });
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    let bounds = cx
+        .debug_bounds("sidebar-resize-handle")
+        .expect("the sidebar resize handle should be rendered");
+    cx.simulate_click(bounds.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn about_overlay_renders_from_show_about_dialog(cx: &mut TestAppContext) {
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    app.update(cx, GitronimoApp::show_about_dialog);
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("about-gitronimo").is_some(),
+        "About GitRonimo must paint the overlay"
     );
 }

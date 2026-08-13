@@ -4,6 +4,7 @@
 //! free render helpers. State-mutating behavior stays in `crate::main`; shared
 //! types and helpers live in `crate::app_state`.
 
+pub(crate) mod about;
 pub(crate) mod blame;
 pub(crate) mod branches_review;
 pub(crate) mod commit_composer;

@@ -26,7 +26,7 @@ Working-copy refresh lines are coalesced so they do not fill the log. Successes 
 
 ## Crash report
 
-On a panic, Gitronimo writes a local report under `~/Library/Application Support/Gitronimo/crash-reports/`. Reports are never uploaded automatically and contain only timestamp and source-location metadata.
+On a panic, Gitronimo writes a local report under `~/Library/Application Support/Gitronimo/crash-reports/`. Reports are never uploaded automatically and contain only timestamp and source-location metadata. macOS may also keep a matching `.ips` under `~/Library/Logs/DiagnosticReports/`.
 
 ## Keyboard and assistive technology
 

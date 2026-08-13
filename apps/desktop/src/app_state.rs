@@ -506,6 +506,7 @@ pub(crate) enum PaletteCommand {
     ShowKeyboardShortcuts,
     NavigateBack,
     NavigateForward,
+    AboutGitRonimo,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -728,6 +729,7 @@ pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
     ),
     ("Navigate back", PaletteCommand::NavigateBack),
     ("Navigate forward", PaletteCommand::NavigateForward),
+    ("About GitRonimo", PaletteCommand::AboutGitRonimo),
 ];
 
 impl PaletteCommand {
@@ -766,6 +768,7 @@ mod palette_tests {
             "Show workflow",
             "Quick open file…",
             "Message history",
+            "About GitRonimo",
         ] {
             assert!(
                 labels.contains(&expected),
@@ -848,6 +851,8 @@ pub(crate) struct GitronimoApp {
     pub appearance: Appearance,
     pub theme_mode: ThemeMode,
     pub sidebar_width: f32,
+    /// Hovering a pane resize handle; col-resize cursor lives on a non-drag ancestor.
+    pub resize_handle_hovered: bool,
     pub state: ShellState,
     pub recents: Vec<PathBuf>,
     pub selected_recent: Option<usize>,
@@ -915,6 +920,7 @@ pub(crate) struct GitronimoApp {
     pub show_command_palette: bool,
     pub command_palette_query: String,
     pub command_palette_selected: usize,
+    pub show_about: bool,
     pub pending_overlay_focus: Option<OverlayFocus>,
     pub selected_branch_review: Option<String>,
     pub branches_review_show_all: bool,

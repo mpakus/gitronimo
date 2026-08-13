@@ -537,6 +537,7 @@ fn quote(name: &str) -> String {
 fn menu_shell(colors: &ThemeColors) -> gpui::Stateful<gpui::Div> {
     div()
         .id("ref-context-menu")
+        .debug_selector(|| "ref-context-menu".into())
         .p_1p5()
         .flex()
         .flex_col()
@@ -573,8 +574,9 @@ fn submenu_item(
     colors: &ThemeColors,
     cx: &mut gpui::Context<GitronimoApp>,
 ) -> AnyElement {
-    // Do not call `cx.entity().read(cx)` here: this runs while Render already
-    // holds a lease on GitronimoApp, and a second read panics with double_lease.
+    // `active` is passed in from the parent `&self` during Render. Do not
+    // `cx.entity().read(cx)` here: Render already holds a GitronimoApp lease,
+    // and a second read panics (`entity_map` double_lease).
     let open = submenu;
     div()
         .id(gpui::ElementId::Name(format!("submenu:{label}").into()))

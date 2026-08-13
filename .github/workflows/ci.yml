@@ -34,5 +34,5 @@ jobs:
       - run: cargo packager --release --formats app --manifest-path apps/desktop/Cargo.toml --out-dir target/release
       - uses: actions/upload-artifact@v7
         with:
-          name: Gitronimo-unsigned-macos
-          path: target/release/Gitronimo.app
+          name: GitRonimo-unsigned-macos
+          path: target/release/GitRonimo.app

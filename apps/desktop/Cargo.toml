@@ -6,6 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+autobins = false
+
+[[bin]]
+name = "GitRonimo"
+path = "src/main.rs"
 
 [dependencies]
 app_core = { path = "../../crates/app_core", version = "0.1.0" }
@@ -21,14 +26,14 @@ ui_kit = { path = "../../crates/ui_kit", version = "0.1.0" }
 gpui = { workspace = true, features = ["test-support"] }
 
 [package.metadata.packager]
-product-name = "Gitronimo"
+product-name = "GitRonimo"
 identifier = "com.gitronimo.desktop"
 category = "DeveloperTool"
 copyright = "Copyright (c) 2026 Gitronimo contributors"
 icons = ["../../assets/gitronimo.icns"]
 
 [[package.metadata.packager.binaries]]
-path = "gitronimo-desktop"
+path = "GitRonimo"
 main = true
 
 [lints]

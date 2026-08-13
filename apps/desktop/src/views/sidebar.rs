@@ -939,7 +939,6 @@ fn welcome_repo_row(
             colors.sidebar_background
         })
         .text_color(text_primary)
-        .cursor_pointer()
         .when(!selected, |row| {
             row.hover(|style| style.bg(colors.selection))
         })

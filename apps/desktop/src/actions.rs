@@ -19,6 +19,7 @@ actions!(
         SelectAllStatusFiles,
         SaveStash,
         Hide,
+        About,
         Quit
     ]
 );
