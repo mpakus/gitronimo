@@ -279,26 +279,59 @@ pub(crate) enum RefContextSubmenu {
 
 #[derive(Clone, Debug)]
 pub(crate) enum TextPromptKind {
-    BranchRename { current: String },
-    CreateBranch { start: Option<String> },
-    CreateTag { start: String },
+    BranchRename {
+        current: String,
+    },
+    CreateBranch {
+        start: Option<String>,
+    },
+    CreateTag {
+        start: String,
+    },
+    /// Save stash: prompt value is the message; options carry untracked + paths.
+    CreateStash {
+        include_untracked: bool,
+        paths: Vec<GitPath>,
+    },
+    /// Branch name; creates a branch from the named stash.
+    StashBranch {
+        reference: String,
+    },
     FileHistoryPath,
     BlamePath,
     CompareFrom,
-    CompareTo { left: String },
+    CompareTo {
+        left: String,
+    },
     DropCommit,
     BrowseTree,
     HistorySearch,
     HistoryReference,
     RebaseOnto,
     MergeRevision,
-    AutosquashTarget { squash: bool },
-    AutosquashMessage { target: String },
+    AutosquashTarget {
+        squash: bool,
+    },
+    AutosquashMessage {
+        target: String,
+    },
     RewordSubject,
-    RewordBody { subject: String },
+    RewordBody {
+        subject: String,
+    },
     MergeToolPath,
     CreateBookmarkFolder,
-    RenameBookmarkFolder { id: String },
+    RenameBookmarkFolder {
+        id: String,
+    },
+}
+
+/// Tower-style Apply Stash options dialog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct StashApplyDialog {
+    pub reference: String,
+    pub delete_after: bool,
+    pub restore_index: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -419,6 +452,10 @@ pub(crate) enum PaletteCommand {
     CompareSelectedCommit,
     CommitDetail,
     ShowStashes,
+    ApplySelectedStash,
+    BranchFromSelectedStash,
+    PopSelectedStash,
+    DropSelectedStash,
     ShowRemotes,
     ShowSettings,
     ShowBranchesReview,
@@ -582,12 +619,19 @@ pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
     ("Unstage all", PaletteCommand::UnstageAll),
     ("Focus commit composer", PaletteCommand::FocusCommitComposer),
     ("Amend last commit", PaletteCommand::AmendLastCommit),
-    ("Save stash", PaletteCommand::SaveStash),
+    ("Save stash…", PaletteCommand::SaveStash),
     (
-        "Save stash including untracked",
+        "Save stash including untracked…",
         PaletteCommand::SaveStashUntracked,
     ),
-    ("Apply latest stash", PaletteCommand::ApplyLatestStash),
+    ("Apply latest stash…", PaletteCommand::ApplyLatestStash),
+    ("Apply selected stash…", PaletteCommand::ApplySelectedStash),
+    (
+        "Branch from selected stash…",
+        PaletteCommand::BranchFromSelectedStash,
+    ),
+    ("Pop selected stash…", PaletteCommand::PopSelectedStash),
+    ("Drop selected stash…", PaletteCommand::DropSelectedStash),
     ("Create branch…", PaletteCommand::CreateBranch),
     ("Create tag…", PaletteCommand::CreateTag),
     ("Show history", PaletteCommand::ShowHistory),
@@ -689,7 +733,8 @@ mod palette_tests {
             "Push…",
             "Sync",
             "Stage all",
-            "Save stash",
+            "Save stash…",
+            "Apply selected stash…",
             "Create branch…",
             "Create tag…",
             "Amend last commit",
@@ -831,7 +876,6 @@ pub(crate) struct GitronimoApp {
     pub pending_line_discard: Option<(GitPath, Vec<(usize, usize)>)>,
     pub pending_hunk_discard: Option<(GitPath, usize)>,
     pub pending_discard: Option<Vec<GitPath>>,
-    pub pending_stash_action: Option<StashAction>,
     pub pending_operation_action: Option<OperationAction>,
     pub pending_branch_delete: Option<String>,
     pub confirm_dialog: Option<AppConfirmDialog>,
@@ -842,6 +886,7 @@ pub(crate) struct GitronimoApp {
     pub choice_prompt_selected: usize,
     pub pull_dialog: Option<PullDialogState>,
     pub push_dialog: Option<PushDialogState>,
+    pub stash_apply_dialog: Option<StashApplyDialog>,
     pub show_command_palette: bool,
     pub command_palette_query: String,
     pub command_palette_selected: usize,
@@ -881,6 +926,9 @@ pub(crate) struct GitronimoApp {
     pub stashes: Vec<StashEntry>,
     pub stashes_load_token: u64,
     pub selected_stash: Option<usize>,
+    pub stash_selection_token: u64,
+    pub selected_stash_paths: Vec<GitPath>,
+    pub selected_stash_diff: Option<LoadedDiff>,
     pub pending_stash_action_ref: Option<(StashAction, String, String)>,
     pub reflog: Vec<ReflogEntry>,
     pub reflog_load_token: u64,

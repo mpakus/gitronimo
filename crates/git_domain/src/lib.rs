@@ -619,6 +619,8 @@ pub struct StashEntry {
     pub oid: String,
     /// The stash subject (`%gs`), typically "WIP on <branch>: <oid> <subject>".
     pub subject: Vec<u8>,
+    /// Committer unix timestamp (`%ct`) for the stash commit.
+    pub timestamp: i64,
 }
 
 /// A changed Git LFS path reported by `git lfs status --porcelain`.

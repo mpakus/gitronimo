@@ -30,7 +30,10 @@ use app_core::{
     RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError, SecretStore, WindowGeometry,
     open_repository,
 };
-use git_cli::{CommitRequest, GitExecutable, GitStatusError, ResetMode, parse_git_progress_line};
+use git_cli::{
+    CommitRequest, CreateStashRequest, GitExecutable, GitStatusError, ResetMode,
+    parse_git_progress_line,
+};
 use git_domain::{
     ConflictSide, FileHistoryRequest, GitPath, GraphState, HeadStatus, HistoryPage,
     HistoryReference, HistoryRequest, RefSnapshot, ReflogRequest, TreeEntry, TreeEntryKind,
@@ -47,8 +50,8 @@ use ui_kit::Appearance;
 
 use crate::actions::{
     CommandPalette, FocusComposer, HistoryNext, HistoryPrevious, NavigateBack, NavigateForward,
-    OpenRepository, Quit, Refresh, SelectAllStatusFiles, ShortcutReference, ToggleAppearance,
-    WidenSidebar,
+    OpenRepository, Quit, Refresh, SaveStash, SelectAllStatusFiles, ShortcutReference,
+    ToggleAppearance, WidenSidebar,
 };
 use crate::app_state::{
     ACTIVITY_LOG_CAPACITY, ActivityLogEntry, AppConfirmDialog, ChoicePromptKind, CommitContext,
@@ -56,11 +59,11 @@ use crate::app_state::{
     HistoryDetailMode, LastAction, Mutation, NetworkOperation, OpenedRepository, OperationAction,
     OverlayFocus, PR_MERGE_METHOD_CHOICES, PaletteCommand, PullDialogState, PushDialogState,
     PushOption, RefContext, RefContextSubmenu, RepositoryView, ShellState, ShortcutReferenceState,
-    StashAction, SubmodulePushMode, TextPromptKind, ThemeMode, WelcomeRepoSnapshot,
-    WelcomeShellView, appearance_from_window, branch_not_fully_merged_error, clamp_list_pane_width,
-    clamp_sidebar_width, classify_activity, discard_selected, git_failure_message,
-    is_working_copy_refresh_noise, network_failure_message, repository_is_available,
-    repository_unavailable_message, resize_width,
+    StashAction, StashApplyDialog, SubmodulePushMode, TextPromptKind, ThemeMode,
+    WelcomeRepoSnapshot, WelcomeShellView, appearance_from_window, branch_not_fully_merged_error,
+    clamp_list_pane_width, clamp_sidebar_width, classify_activity, discard_selected,
+    git_failure_message, is_working_copy_refresh_noise, network_failure_message,
+    repository_is_available, repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
 use crate::views::single_line_input::register_input_bindings;
@@ -395,7 +398,6 @@ impl GitronimoApp {
             pending_line_discard: None,
             pending_hunk_discard: None,
             pending_discard: None,
-            pending_stash_action: None,
             pending_operation_action: None,
             pending_branch_delete: None,
             confirm_dialog: None,
@@ -406,6 +408,7 @@ impl GitronimoApp {
             choice_prompt_selected: 0,
             pull_dialog: None,
             push_dialog: None,
+            stash_apply_dialog: None,
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_selected: 0,
@@ -443,6 +446,9 @@ impl GitronimoApp {
             stashes: Vec::new(),
             stashes_load_token: 0,
             selected_stash: None,
+            stash_selection_token: 0,
+            selected_stash_paths: Vec::new(),
+            selected_stash_diff: None,
             pending_stash_action_ref: None,
             reflog: Vec::new(),
             reflog_load_token: 0,
@@ -639,7 +645,6 @@ impl GitronimoApp {
             pending_line_discard: None,
             pending_hunk_discard: None,
             pending_discard: None,
-            pending_stash_action: None,
             pending_operation_action: None,
             pending_branch_delete: None,
             confirm_dialog: None,
@@ -650,6 +655,7 @@ impl GitronimoApp {
             choice_prompt_selected: 0,
             pull_dialog: None,
             push_dialog: None,
+            stash_apply_dialog: None,
             show_command_palette: false,
             command_palette_query: String::new(),
             command_palette_selected: 0,
@@ -687,6 +693,9 @@ impl GitronimoApp {
             stashes: Vec::new(),
             stashes_load_token: 0,
             selected_stash: None,
+            stash_selection_token: 0,
+            selected_stash_paths: Vec::new(),
+            selected_stash_diff: None,
             pending_stash_action_ref: None,
             reflog: Vec::new(),
             reflog_load_token: 0,
@@ -924,6 +933,7 @@ impl GitronimoApp {
                 }
                 self.pull_dialog = None;
                 self.push_dialog = None;
+                self.stash_apply_dialog = None;
                 self.selected_paths.clear();
                 self.file_list_select_all_toggle = None;
                 self.context_path = None;
@@ -933,7 +943,6 @@ impl GitronimoApp {
                 self.pending_line_discard = None;
                 self.pending_hunk_discard = None;
                 self.pending_discard = None;
-                self.pending_stash_action = None;
                 self.pending_operation_action = None;
                 self.pending_branch_delete = None;
                 self.confirm_dialog = None;
@@ -968,6 +977,9 @@ impl GitronimoApp {
                 self.stashes.clear();
                 self.stashes_load_token = self.stashes_load_token.wrapping_add(1);
                 self.selected_stash = None;
+                self.stash_selection_token = self.stash_selection_token.wrapping_add(1);
+                self.selected_stash_paths.clear();
+                self.selected_stash_diff = None;
                 self.pending_stash_action_ref = None;
                 self.lfs.clear();
                 self.lfs_load_token = self.lfs_load_token.wrapping_add(1);
@@ -1246,6 +1258,18 @@ return remote_url & linefeed & parent_path"#;
         cx.notify();
     }
 
+    fn save_stash_shortcut(&mut self, _: &SaveStash, _: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.state, ShellState::Repository(_))
+            || self.pending_text_prompt.is_some()
+            || self.stash_apply_dialog.is_some()
+            || self.show_command_palette
+            || self.show_quick_open
+        {
+            return;
+        }
+        self.open_stash_save_dialog(false, Vec::new(), cx);
+    }
+
     fn show_command_palette(&mut self, _: &CommandPalette, _: &mut Window, cx: &mut Context<Self>) {
         self.open_command_palette(cx);
     }
@@ -1351,9 +1375,13 @@ return remote_url & linefeed & parent_path"#;
                 self.navigate_to(RepositoryView::WorkingCopy, cx);
                 self.toggle_commit_amend(cx);
             }
-            PaletteCommand::SaveStash => self.create_stash(false, cx),
-            PaletteCommand::SaveStashUntracked => self.create_stash(true, cx),
-            PaletteCommand::ApplyLatestStash => self.apply_latest_stash(cx),
+            PaletteCommand::SaveStash => self.open_stash_save_dialog(false, Vec::new(), cx),
+            PaletteCommand::SaveStashUntracked => self.open_stash_save_dialog(true, Vec::new(), cx),
+            PaletteCommand::ApplyLatestStash => self.open_apply_latest_stash_dialog(cx),
+            PaletteCommand::ApplySelectedStash => self.open_stash_apply_dialog_for_selection(cx),
+            PaletteCommand::BranchFromSelectedStash => self.prompt_branch_from_selected_stash(cx),
+            PaletteCommand::PopSelectedStash => self.request_stash_action(StashAction::Pop, cx),
+            PaletteCommand::DropSelectedStash => self.request_stash_action(StashAction::Drop, cx),
             PaletteCommand::CreateBranch => {
                 self.begin_text_prompt(TextPromptKind::CreateBranch { start: None }, "", cx);
             }
@@ -1751,6 +1779,32 @@ return remote_url & linefeed & parent_path"#;
                     move |git, repository| git.create_tag(repository, &value, &start),
                     cx,
                 );
+            }
+            TextPromptKind::CreateStash {
+                include_untracked,
+                paths,
+            } => {
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                let message = (!value.is_empty()).then_some(value);
+                self.run_create_stash(
+                    CreateStashRequest {
+                        message,
+                        include_untracked,
+                        paths,
+                    },
+                    cx,
+                );
+            }
+            TextPromptKind::StashBranch { reference } => {
+                if value.is_empty() {
+                    self.set_activity("Enter a branch name.");
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.run_stash_branch(value, reference, cx);
             }
             TextPromptKind::FileHistoryPath => {
                 if value.is_empty() {
@@ -6555,6 +6609,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok(stashes) => {
                         app.stashes = stashes;
                         app.selected_stash = None;
+                        app.selected_stash_paths.clear();
+                        app.selected_stash_diff = None;
+                        app.stash_selection_token =
+                            app.stash_selection_token.wrapping_add(1);
                         app.set_activity(format!("Loaded {} stash entr(ies).", app.stashes.len()));
                     }
                     Err(error) => app.set_activity(git_failure_message("List stashes", &error)),
@@ -6577,8 +6635,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 .saturating_add(delta.unsigned_abs())
                 .min(self.stashes.len() - 1)
         };
-        self.selected_stash = Some(index);
-        cx.notify();
+        self.select_stash(index, cx);
     }
 
     fn selected_stash(&self) -> Option<(String, String)> {
@@ -6592,15 +6649,106 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         })
     }
 
-    fn apply_stash_by_selection(&mut self, cx: &mut Context<Self>) {
-        if self.mutation_in_flight {
+    pub(crate) fn open_stash_save_dialog(
+        &mut self,
+        include_untracked: bool,
+        paths: Vec<GitPath>,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(self.state, ShellState::Repository(_)) {
+            self.set_activity("Open a repository before saving a stash.");
+            cx.notify();
             return;
         }
+        self.begin_text_prompt(
+            TextPromptKind::CreateStash {
+                include_untracked,
+                paths,
+            },
+            "",
+            cx,
+        );
+    }
+
+    pub(crate) fn toggle_create_stash_include_untracked(&mut self, cx: &mut Context<Self>) {
+        if let Some(TextPromptKind::CreateStash {
+            include_untracked, ..
+        }) = self.pending_text_prompt.as_mut()
+        {
+            *include_untracked = !*include_untracked;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn open_stash_apply_dialog_for_selection(&mut self, cx: &mut Context<Self>) {
         let Some((reference, _)) = self.selected_stash() else {
             self.set_activity("Select a stash first.");
             cx.notify();
             return;
         };
+        self.stash_apply_dialog = Some(StashApplyDialog {
+            reference,
+            delete_after: false,
+            restore_index: false,
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn open_apply_latest_stash_dialog(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.state, ShellState::Repository(_)) {
+            self.set_activity("Open a repository before applying a stash.");
+            cx.notify();
+            return;
+        }
+        self.stash_apply_dialog = Some(StashApplyDialog {
+            reference: "stash@{0}".into(),
+            delete_after: false,
+            restore_index: false,
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn close_stash_apply_dialog(&mut self, cx: &mut Context<Self>) {
+        self.stash_apply_dialog = None;
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_stash_apply_delete_after(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.stash_apply_dialog.as_mut() {
+            dialog.delete_after = !dialog.delete_after;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn toggle_stash_apply_restore_index(&mut self, cx: &mut Context<Self>) {
+        if let Some(dialog) = self.stash_apply_dialog.as_mut() {
+            dialog.restore_index = !dialog.restore_index;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn confirm_stash_apply_dialog(&mut self, cx: &mut Context<Self>) {
+        let Some(dialog) = self.stash_apply_dialog.take() else {
+            return;
+        };
+        self.run_apply_or_pop_stash(
+            dialog.reference,
+            dialog.delete_after,
+            dialog.restore_index,
+            cx,
+        );
+    }
+
+    fn run_apply_or_pop_stash(
+        &mut self,
+        reference: String,
+        delete_after: bool,
+        restore_index: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mutation_in_flight {
+            return;
+        }
         let ShellState::Repository(repository) = &self.state else {
             return;
         };
@@ -6608,27 +6756,33 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_repository = repository.clone();
         let worker_reference = reference.clone();
         self.mutation_in_flight = true;
-        self.set_activity(format!("Applying {reference}…"));
+        let label = if delete_after {
+            "Pop stash"
+        } else {
+            "Apply stash"
+        };
+        self.set_activity(format!("{label} {reference}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    GitExecutable::discover()
-                        .map_err(|error| error.to_string())?
-                        .apply_stash(&worker_repository, &worker_reference)
-                        .map_err(|error| format!("{error:?}"))
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    if delete_after {
+                        git.pop_stash(&worker_repository, &worker_reference, restore_index)
+                    } else {
+                        git.apply_stash(&worker_repository, &worker_reference, restore_index)
+                    }
+                    .map_err(|error| format!("{error:?}"))
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.set_activity(format!(
-                            "{reference} applied; its recovery entry remains."
-                        ));
+                        app.set_activity(format!("{label} {reference} complete."));
                         app.load_working_copy(repository.clone(), cx);
                         app.load_stashes(repository, cx);
                     }
-                    Err(error) => app.set_activity(git_failure_message("Apply stash", &error)),
+                    Err(error) => app.set_activity(git_failure_message(label, &error)),
                 }
                 cx.notify();
             });
@@ -6636,7 +6790,54 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         .detach();
     }
 
-    fn request_stash_action(&mut self, action: StashAction, cx: &mut Context<Self>) {
+    pub(crate) fn select_stash(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(stash) = self.stashes.get(index).cloned() else {
+            return;
+        };
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let oid = stash.oid.clone();
+        self.selected_stash = Some(index);
+        self.pending_stash_action_ref = None;
+        self.stash_selection_token = self.stash_selection_token.wrapping_add(1);
+        let selection_token = self.stash_selection_token;
+        self.selected_stash_paths.clear();
+        self.selected_stash_diff = None;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    Ok::<_, String>((
+                        git.commit_paths(&repository, &oid)
+                            .map_err(|error| format!("{error:?}"))?,
+                        git.commit_diff(&repository, &oid)
+                            .map_err(|error| format!("{error:?}"))?,
+                    ))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if app.stash_selection_token == selection_token
+                    && app.selected_stash == Some(index)
+                    && app
+                        .stashes
+                        .get(index)
+                        .is_some_and(|entry| entry.oid == stash.oid)
+                {
+                    if let Ok((paths, diff)) = result {
+                        app.selected_stash_paths = paths;
+                        app.selected_stash_diff = Some(diff);
+                    }
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(crate) fn request_stash_action(&mut self, action: StashAction, cx: &mut Context<Self>) {
         let Some((reference, subject)) = self.selected_stash() else {
             self.set_activity("Select a stash first.");
             cx.notify();
@@ -6650,15 +6851,22 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         cx.notify();
     }
 
-    fn cancel_stash_action_ref(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn cancel_stash_action_ref(&mut self, cx: &mut Context<Self>) {
         self.pending_stash_action_ref = None;
         cx.notify();
     }
 
-    fn confirm_stash_action_ref(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn confirm_stash_action_ref(&mut self, cx: &mut Context<Self>) {
         let Some((action, reference, _)) = self.pending_stash_action_ref.take() else {
             return;
         };
+        match action {
+            StashAction::Pop => self.run_apply_or_pop_stash(reference, true, false, cx),
+            StashAction::Drop => self.run_drop_stash(reference, cx),
+        }
+    }
+
+    fn run_drop_stash(&mut self, reference: String, cx: &mut Context<Self>) {
         if self.mutation_in_flight {
             return;
         }
@@ -6669,31 +6877,75 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_repository = repository.clone();
         let worker_reference = reference.clone();
         self.mutation_in_flight = true;
-        let action_label = match action {
-            StashAction::Pop => "Pop stash",
-            StashAction::Drop => "Drop stash",
-        };
-        self.set_activity(format!("{action_label} {reference}…"));
+        self.set_activity(format!("Drop stash {reference}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
-                    let outcome = match action {
-                        StashAction::Pop => git.pop_stash(&worker_repository, &worker_reference),
-                        StashAction::Drop => git.drop_stash(&worker_repository, &worker_reference),
-                    };
-                    outcome.map_err(|error| format!("{error:?}"))
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .drop_stash(&worker_repository, &worker_reference)
+                        .map_err(|error| format!("{error:?}"))
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.set_activity(format!("{action_label} {reference} complete."));
+                        app.set_activity(format!("Drop stash {reference} complete."));
                         app.load_working_copy(repository.clone(), cx);
                         app.load_stashes(repository, cx);
                     }
-                    Err(error) => app.set_activity(git_failure_message(action_label, &error)),
+                    Err(error) => app.set_activity(git_failure_message("Drop stash", &error)),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub(crate) fn prompt_branch_from_selected_stash(&mut self, cx: &mut Context<Self>) {
+        let Some((reference, _)) = self.selected_stash() else {
+            self.set_activity("Select a stash first.");
+            cx.notify();
+            return;
+        };
+        self.begin_text_prompt(TextPromptKind::StashBranch { reference }, "", cx);
+    }
+
+    fn run_stash_branch(&mut self, branch: String, reference: String, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let activity_branch = branch.clone();
+        self.mutation_in_flight = true;
+        self.set_activity(format!("Creating branch {branch} from {reference}…"));
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
+                        .stash_branch(&worker_repository, &branch, &reference)
+                        .map_err(|error| format!("{error:?}"))
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => {
+                        app.set_activity(format!(
+                            "Checked out branch {activity_branch} from stash."
+                        ));
+                        app.load_working_copy(repository.clone(), cx);
+                        app.load_stashes(repository, cx);
+                    }
+                    Err(error) => {
+                        app.set_activity(git_failure_message("Branch from stash", &error));
+                    }
                 }
                 cx.notify();
             });
@@ -6714,7 +6966,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         );
     }
 
-    fn create_stash(&mut self, include_untracked: bool, cx: &mut Context<Self>) {
+    fn run_create_stash(&mut self, request: CreateStashRequest, cx: &mut Context<Self>) {
         if self.mutation_in_flight {
             return;
         }
@@ -6730,7 +6982,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 .background_spawn(async move {
                     GitExecutable::discover()
                         .map_err(|error| error.to_string())?
-                        .create_stash(&worker_repository, include_untracked)
+                        .create_stash(&worker_repository, &request)
                         .map_err(|error| format!("{error:?}"))
                 })
                 .await;
@@ -6739,114 +6991,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 match result {
                     Ok(()) => {
                         app.set_activity("Stash created.");
-                        app.load_working_copy(repository, cx);
+                        app.load_working_copy(repository.clone(), cx);
+                        app.load_stashes(repository, cx);
                     }
                     Err(error) => app.set_activity(git_failure_message("Create stash", &error)),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn apply_latest_stash(&mut self, cx: &mut Context<Self>) {
-        if self.mutation_in_flight {
-            return;
-        }
-        let ShellState::Repository(repository) = &self.state else {
-            return;
-        };
-        let repository = repository.clone();
-        let worker_repository = repository.clone();
-        self.mutation_in_flight = true;
-        self.set_activity("Applying latest stash…");
-        cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    GitExecutable::discover()
-                        .map_err(|error| error.to_string())?
-                        .apply_latest_stash(&worker_repository)
-                        .map_err(|error| format!("{error:?}"))
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                app.mutation_in_flight = false;
-                match result {
-                    Ok(()) => {
-                        app.set_activity(
-                            "Latest stash applied; it remains available for recovery.",
-                        );
-                        app.load_working_copy(repository, cx);
-                    }
-                    Err(error) => {
-                        app.set_activity(git_failure_message("Apply latest stash", &error));
-                    }
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn pop_latest_stash(&mut self, cx: &mut Context<Self>) {
-        let ShellState::Repository(repository) = &self.state else {
-            return;
-        };
-        let repository = repository.clone();
-        let worker_repository = repository.clone();
-        self.pending_stash_action = None;
-        self.mutation_in_flight = true;
-        cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    GitExecutable::discover()
-                        .map_err(|error| error.to_string())?
-                        .pop_latest_stash(&worker_repository)
-                        .map_err(|error| format!("{error:?}"))
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                app.mutation_in_flight = false;
-                match result {
-                    Ok(()) => {
-                        app.set_activity("Latest stash applied and removed.");
-                        app.load_working_copy(repository, cx);
-                    }
-                    Err(error) => app.set_activity(git_failure_message("Pop latest stash", &error)),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn drop_latest_stash(&mut self, cx: &mut Context<Self>) {
-        let ShellState::Repository(repository) = &self.state else {
-            return;
-        };
-        let repository = repository.clone();
-        let worker_repository = repository.clone();
-        self.pending_stash_action = None;
-        self.mutation_in_flight = true;
-        cx.spawn(async move |this, cx| {
-            let result = cx
-                .background_spawn(async move {
-                    GitExecutable::discover()
-                        .map_err(|error| error.to_string())?
-                        .drop_latest_stash(&worker_repository)
-                        .map_err(|error| format!("{error:?}"))
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                app.mutation_in_flight = false;
-                match result {
-                    Ok(()) => {
-                        app.set_activity("Latest stash removed.");
-                        app.load_working_copy(repository, cx);
-                    }
-                    Err(error) => {
-                        app.set_activity(git_failure_message("Drop latest stash", &error));
-                    }
                 }
                 cx.notify();
             });

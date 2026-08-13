@@ -64,13 +64,22 @@ Chrome matches the sidebar ref menu (cursor-anchored overlay).
 Searchable list (`PALETTE_COMMANDS` in `app_state.rs`); list viewport scrolls. Includes:
 
 - Open repository, Fetch / Pull… / Push… / Sync, Refresh
-- Stage all / Unstage all, Focus commit composer, Amend last commit, Save stash (+ untracked) / Apply latest stash, Create branch… / Create tag…
+- Stage all / Unstage all, Focus commit composer, Amend last commit
+- Stashes: Save stash… / Save including untracked… (dialogs), Apply latest/selected… (apply dialog), Branch / Pop / Drop selected…
+- Create branch… / Create tag…
 - Show working copy / history / stashes / remotes / settings / branches review / reflog / LFS / services / worktrees / submodules / rebase / conflicts…
 - History filter, Reveal HEAD, selected-commit copy / checkout / reset / revert / patch / export / compare / new branch
 - History tools (file history, blame, compare refs, browse tree, rebase onto, merge revision, squash/fixup/drop/reword, merge tool, signature check)
 - Quick open file, Message history, Toggle appearance, Keyboard shortcuts, Navigate back/forward
 
 Dispatch is `run_palette_command` in `main.rs`. Adding a user-facing action that already has a handler should usually add a `PaletteCommand` variant + label + match arm. Selected-commit actions require a History selection; Reset/Revert also require History scoped to the HEAD branch.
+
+## Stashes (Tower-style core)
+
+- **Save stash** (toolbar Save, Stashes header, palette, `Command-Shift-S`): text prompt for message + Include untracked checkbox; optional pathspecs from Working Copy **Stash selected…**.
+- **Apply** (toolbar Apply, Stashes Apply…): dialog with Delete after applying (pop) and Restore staging area (`--index`).
+- Stashes detail: date + subject list; on select, changeset paths + read-only diff; Apply… / Pop… / Drop… / Branch….
+- Create/apply/pop/drop/branch refresh Working Copy and the stash list. Auto-stash, Snapshots, and DnD partial apply are deferred.
 
 ## Related docs
 

@@ -62,6 +62,15 @@ pub struct AuthorIdentity {
     pub email: String,
 }
 
+/// Options for `git stash push`.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct CreateStashRequest {
+    pub message: Option<String>,
+    pub include_untracked: bool,
+    /// Empty means the whole working copy; otherwise pathspecs after `--`.
+    pub paths: Vec<GitPath>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitExecutable(PathBuf);
 
@@ -1750,23 +1759,41 @@ impl GitExecutable {
         Ok(diff)
     }
 
-    /// Stashes tracked changes, optionally including untracked files.
+    /// Stashes changes according to `request` (`git stash push`).
     ///
     /// # Errors
     /// Returns Git's refusal when there are no storable changes or the stash fails.
     pub fn create_stash(
         &self,
         repository: &WorktreeRepository,
-        include_untracked: bool,
+        request: &CreateStashRequest,
     ) -> Result<(), GitStatusError> {
         let mut args = vec![OsString::from("stash"), OsString::from("push")];
-        if include_untracked {
+        if request.include_untracked {
             args.push(OsString::from("--include-untracked"));
+        }
+        if let Some(message) = request
+            .message
+            .as_ref()
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+        {
+            args.push(OsString::from("--message"));
+            args.push(OsString::from(message));
+        }
+        if !request.paths.is_empty() {
+            args.push(OsString::from("--"));
+            args.extend(
+                request
+                    .paths
+                    .iter()
+                    .map(|path| OsString::from_vec(path.0.clone())),
+            );
         }
         self.mutate(repository, args)
     }
 
-    /// Lists every stash newest-first, with its selector, oid, and subject.
+    /// Lists every stash newest-first, with selector, oid, subject, and timestamp.
     ///
     /// # Errors
     /// Returns Git's refusal when the stash query fails or the output cannot be parsed.
@@ -1776,7 +1803,7 @@ impl GitExecutable {
     ) -> Result<Vec<StashEntry>, GitStatusError> {
         let output = self.run(
             &repository.worktree_root,
-            ["stash", "list", "--format=%gd%x00%H%x00%gs%x1e"],
+            ["stash", "list", "--format=%gd%x00%H%x00%gs%x00%ct%x1e"],
         )?;
         if !output.status.success() {
             return Err(command_error(&output));
@@ -1800,6 +1827,7 @@ impl GitExecutable {
     }
 
     /// Applies the named stash (e.g. `stash@{0}`) while retaining its recovery entry.
+    /// When `restore_index` is true, passes `--index` so the staging area is restored.
     ///
     /// # Errors
     /// Returns Git's conflict or missing-stash failure.
@@ -1807,11 +1835,18 @@ impl GitExecutable {
         &self,
         repository: &WorktreeRepository,
         reference: &str,
+        restore_index: bool,
     ) -> Result<(), GitStatusError> {
-        self.mutate(repository, ["stash", "apply", reference])
+        let mut args = vec![OsString::from("stash"), OsString::from("apply")];
+        if restore_index {
+            args.push(OsString::from("--index"));
+        }
+        args.push(OsString::from(reference));
+        self.mutate(repository, args)
     }
 
     /// Applies and removes the named stash after caller confirmation.
+    /// When `restore_index` is true, passes `--index` so the staging area is restored.
     ///
     /// # Errors
     /// Returns Git's conflict or missing-stash failure.
@@ -1819,8 +1854,14 @@ impl GitExecutable {
         &self,
         repository: &WorktreeRepository,
         reference: &str,
+        restore_index: bool,
     ) -> Result<(), GitStatusError> {
-        self.mutate(repository, ["stash", "pop", reference])
+        let mut args = vec![OsString::from("stash"), OsString::from("pop")];
+        if restore_index {
+            args.push(OsString::from("--index"));
+        }
+        args.push(OsString::from(reference));
+        self.mutate(repository, args)
     }
 
     /// Removes the named stash after caller confirmation.
@@ -1835,6 +1876,19 @@ impl GitExecutable {
         self.mutate(repository, ["stash", "drop", reference])
     }
 
+    /// Creates and checks out a branch from a stash (`git stash branch`).
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the name is invalid or the stash is missing.
+    pub fn stash_branch(
+        &self,
+        repository: &WorktreeRepository,
+        branch: &str,
+        reference: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["stash", "branch", branch, reference])
+    }
+
     /// Applies the latest stash while retaining its recovery entry.
     ///
     /// # Errors
@@ -1843,7 +1897,7 @@ impl GitExecutable {
         &self,
         repository: &WorktreeRepository,
     ) -> Result<(), GitStatusError> {
-        self.apply_stash(repository, "stash@{0}")
+        self.apply_stash(repository, "stash@{0}", false)
     }
 
     /// Applies and removes the latest stash after caller confirmation.
@@ -1851,7 +1905,7 @@ impl GitExecutable {
     /// # Errors
     /// Returns Git's conflict or missing-stash failure.
     pub fn pop_latest_stash(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
-        self.pop_stash(repository, "stash@{0}")
+        self.pop_stash(repository, "stash@{0}", false)
     }
 
     /// Removes the latest stash after caller confirmation.
@@ -3035,7 +3089,7 @@ fn parse_stash_records(bytes: &[u8]) -> Result<Vec<StashEntry>, GitStatusError> 
         .map(|record| {
             let record = record.strip_prefix(b"\n").unwrap_or(record);
             let fields = record.split(|byte| *byte == 0).collect::<Vec<_>>();
-            if fields.len() < 3 {
+            if fields.len() < 4 {
                 return Err(GitStatusError::ParseStash);
             }
             let reference = std::str::from_utf8(fields[0])
@@ -3046,10 +3100,16 @@ fn parse_stash_records(bytes: &[u8]) -> Result<Vec<StashEntry>, GitStatusError> 
                 .map_err(|_| GitStatusError::ParseStash)?
                 .trim()
                 .to_owned();
+            let timestamp = std::str::from_utf8(fields[3])
+                .map_err(|_| GitStatusError::ParseStash)?
+                .trim()
+                .parse::<i64>()
+                .map_err(|_| GitStatusError::ParseStash)?;
             Ok(StashEntry {
                 reference,
                 oid,
                 subject: fields[2].to_vec(),
+                timestamp,
             })
         })
         .collect()
@@ -3303,11 +3363,11 @@ mod tests {
     };
 
     use super::{
-        CommitRequest, GitExecutable, GitStatusError, MAX_PROCESS_OUTPUT_BYTES, RenameKind,
-        ResetMode, git_candidates, parse_commit_records, parse_git_progress_line, parse_lfs_status,
-        parse_nul_paths, parse_numstat_line, parse_porcelain_v2_z, parse_rebase_todo,
-        parse_ref_ahead_behind, parse_ref_snapshot, parse_signature, parse_stash_records,
-        parse_unified_diff, read_limited, trim_oid,
+        CommitRequest, CreateStashRequest, GitExecutable, GitStatusError, MAX_PROCESS_OUTPUT_BYTES,
+        RenameKind, ResetMode, git_candidates, parse_commit_records, parse_git_progress_line,
+        parse_lfs_status, parse_nul_paths, parse_numstat_line, parse_porcelain_v2_z,
+        parse_rebase_todo, parse_ref_ahead_behind, parse_ref_snapshot, parse_signature,
+        parse_stash_records, parse_unified_diff, read_limited, trim_oid,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
@@ -3351,20 +3411,24 @@ mod tests {
     #[test]
     fn parses_stash_list_records() {
         let records = parse_stash_records(
-            b"stash@{0}\0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b\0WIP on main: 1a2b3c initial\0\x1e\
-              stash@{1}\09f8e7d6c5b4a39281706050403020100ffeeddcc\0WIP on main: 1a2b3c first commit\0\x1e",
+            b"stash@{0}\0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b\0WIP on main: 1a2b3c initial\0\
+1700000000\0\x1e\
+stash@{1}\09f8e7d6c5b4a39281706050403020100ffeeddcc\0WIP on main: 1a2b3c first commit\0\
+1700000001\0\x1e",
         )
         .expect("records should parse");
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].reference, "stash@{0}");
         assert_eq!(records[0].oid, "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b");
         assert_eq!(records[0].subject, b"WIP on main: 1a2b3c initial".to_vec());
+        assert_eq!(records[0].timestamp, 1_700_000_000);
         assert_eq!(records[1].reference, "stash@{1}");
+        assert_eq!(records[1].timestamp, 1_700_000_001);
     }
 
     #[test]
     fn parses_stash_list_records_with_truncated_fields() {
-        let error = parse_stash_records(b"stash@{0}\0only-two-fields").expect_err("should fail");
+        let error = parse_stash_records(b"stash@{0}\0oid\0subject").expect_err("should fail");
         assert!(matches!(error, GitStatusError::ParseStash));
     }
 
@@ -4229,7 +4293,14 @@ index 1111111..2222222 100644\n\
         };
         repository
             .git
-            .create_stash(&worktree, false)
+            .create_stash(
+                &worktree,
+                &CreateStashRequest {
+                    message: Some("tracked only".into()),
+                    include_untracked: false,
+                    paths: Vec::new(),
+                },
+            )
             .expect("tracked changes should stash");
         let status = repository
             .git
@@ -4250,7 +4321,14 @@ index 1111111..2222222 100644\n\
         assert_eq!(status.stash_count, 0);
         repository
             .git
-            .create_stash(&worktree, true)
+            .create_stash(
+                &worktree,
+                &CreateStashRequest {
+                    message: None,
+                    include_untracked: true,
+                    paths: Vec::new(),
+                },
+            )
             .expect("untracked changes should stash when requested");
         let status = repository
             .git
@@ -4274,7 +4352,14 @@ index 1111111..2222222 100644\n\
             .expect("fixture should write");
         repository
             .git
-            .create_stash(&worktree, true)
+            .create_stash(
+                &worktree,
+                &CreateStashRequest {
+                    message: Some("second".into()),
+                    include_untracked: true,
+                    paths: Vec::new(),
+                },
+            )
             .expect("fixture should stash");
         let status = repository
             .git
@@ -4307,13 +4392,25 @@ index 1111111..2222222 100644\n\
             .expect("fixture should write");
         repository
             .git
-            .create_stash(&worktree, false)
+            .create_stash(
+                &worktree,
+                &CreateStashRequest {
+                    message: Some("first".into()),
+                    ..CreateStashRequest::default()
+                },
+            )
             .expect("first change should stash");
         fs::write(repository.path.join("fixture.txt"), "second change")
             .expect("fixture should write");
         repository
             .git
-            .create_stash(&worktree, false)
+            .create_stash(
+                &worktree,
+                &CreateStashRequest {
+                    message: Some("second".into()),
+                    ..CreateStashRequest::default()
+                },
+            )
             .expect("second change should stash");
         let stashes = repository
             .git
@@ -4323,6 +4420,7 @@ index 1111111..2222222 100644\n\
         assert_eq!(stashes[0].reference, "stash@{0}");
         assert_eq!(stashes[1].reference, "stash@{1}");
         assert!(!stashes[0].subject.is_empty());
+        assert!(stashes[0].timestamp > 0);
         let status = repository
             .git
             .worktree_status(&worktree, false)
@@ -4330,7 +4428,7 @@ index 1111111..2222222 100644\n\
         assert_eq!(status.stash_count, 2);
         repository
             .git
-            .apply_stash(&worktree, &stashes[1].reference)
+            .apply_stash(&worktree, &stashes[1].reference, false)
             .expect("older stash should apply");
         let status = repository
             .git
@@ -4353,7 +4451,7 @@ index 1111111..2222222 100644\n\
         assert_eq!(status.stash_count, 1);
         repository
             .git
-            .pop_stash(&worktree, &stashes[0].reference)
+            .pop_stash(&worktree, &stashes[0].reference, false)
             .expect("newest stash should pop");
         let status = repository
             .git
@@ -4363,6 +4461,96 @@ index 1111111..2222222 100644\n\
         assert_eq!(
             fs::read_to_string(repository.path.join("fixture.txt")).expect("file should exist"),
             "second change"
+        );
+    }
+
+    #[test]
+    fn pathspec_message_index_apply_and_stash_branch() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let worktree = worktree_of(&repository);
+
+        fs::write(repository.path.join("a.txt"), "a").expect("a");
+        fs::write(repository.path.join("b.txt"), "b").expect("b");
+        repository.success(["add", "a.txt", "b.txt"]);
+        repository.success(["commit", "-m", "two files"]);
+        fs::write(repository.path.join("a.txt"), "a2").expect("a2");
+        fs::write(repository.path.join("b.txt"), "b2").expect("b2");
+        repository
+            .git
+            .create_stash(
+                &worktree,
+                &CreateStashRequest {
+                    message: Some("partial".into()),
+                    paths: vec![GitPath(b"a.txt".to_vec())],
+                    ..CreateStashRequest::default()
+                },
+            )
+            .expect("pathspec stash");
+        assert_eq!(
+            fs::read_to_string(repository.path.join("a.txt")).expect("a"),
+            "a"
+        );
+        assert_eq!(
+            fs::read_to_string(repository.path.join("b.txt")).expect("b"),
+            "b2"
+        );
+        let stashes = repository.git.stash_list(&worktree).expect("list");
+        assert!(String::from_utf8_lossy(&stashes[0].subject).contains("partial"));
+        repository.success(["checkout", "--", "b.txt"]);
+        repository
+            .git
+            .drop_latest_stash(&worktree)
+            .expect("clear stash");
+
+        fs::write(repository.path.join("a.txt"), "staged-a").expect("staged-a");
+        repository.success(["add", "a.txt"]);
+        repository
+            .git
+            .create_stash(
+                &worktree,
+                &CreateStashRequest {
+                    message: Some("indexed".into()),
+                    ..CreateStashRequest::default()
+                },
+            )
+            .expect("stash staged");
+        let stashes = repository.git.stash_list(&worktree).expect("list");
+        repository
+            .git
+            .apply_stash(&worktree, &stashes[0].reference, true)
+            .expect("apply --index");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status");
+        assert!(!status.entries.is_empty());
+        repository.success(["reset", "--hard", "HEAD"]);
+        repository.git.drop_latest_stash(&worktree).expect("drop");
+
+        fs::write(repository.path.join("a.txt"), "branch-me").expect("branch-me");
+        repository
+            .git
+            .create_stash(
+                &worktree,
+                &CreateStashRequest {
+                    message: Some("for-branch".into()),
+                    ..CreateStashRequest::default()
+                },
+            )
+            .expect("stash for branch");
+        let stashes = repository.git.stash_list(&worktree).expect("list");
+        repository
+            .git
+            .stash_branch(&worktree, "from-stash", &stashes[0].reference)
+            .expect("stash branch");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status");
+        assert_eq!(
+            status.branch.head,
+            HeadStatus::Branch(GitPath(b"from-stash".to_vec()))
         );
     }
 

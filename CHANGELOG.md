@@ -10,6 +10,7 @@
 - Pinned branches persist per repository and sort flat at the top of BRANCHES; preference writes are serialized so geometry saves cannot wipe pins.
 - Network progress strip in the bottom activity bar during fetch/pull/push/sync.
 - History commit context menu (right-click): copy, detached checkout, reset/revert/rebase with confirms, amend/reword on HEAD, branch/tag/patch/export/compare.
+- Stashes Tower-style core: save dialog (message + untracked + path-limited from WC), apply dialog (pop / restore index), stash changeset detail, branch-from-stash; `Command-Shift-S` opens Save stash.
 
 ## 0.1.0 beta
 

@@ -10,6 +10,7 @@ Press **Command-/** in the app to toggle the in-app shortcut reference overlay. 
 | Command-O | Open repository |
 | Command-R | Refresh working copy |
 | Command-Shift-C | Focus commit subject |
+| Command-Shift-S | Save stash (message + include-untracked dialog) |
 | Command-Shift-P | Command palette (Fetch/Pull/Push/Sync, staging, views, …) |
 | Command-/ | Show or hide shortcut reference |
 | Command-[ | Navigate back |
@@ -31,7 +32,7 @@ Palette command **Message history** toggles the same popup. See [desktop-shell.m
 
 ## Command palette
 
-`Command-Shift-P` opens a filterable, **scrollable** command list. Besides secondary views (Reflog, Blame, Compare, …), it includes toolbar actions: Open repository, Fetch, Pull…, Push…, Sync, Stage/Unstage all, stash Save/Apply, Create branch…, Show settings, Quick open file, Message history, Toggle appearance, Navigate back/forward.
+`Command-Shift-P` opens a filterable, **scrollable** command list. Besides secondary views (Reflog, Blame, Compare, …), it includes toolbar actions: Open repository, Fetch, Pull…, Push…, Sync, Stage/Unstage all, stash Save/Apply (dialogs), Apply/Branch/Pop/Drop selected stash, Create branch…, Show settings, Quick open file, Message history, Toggle appearance, Navigate back/forward.
 
 ## Working Copy
 

@@ -61,6 +61,7 @@ impl Render for GitronimoApp {
             .on_action(cx.listener(Self::toggle_appearance))
             .on_action(cx.listener(Self::widen_sidebar))
             .on_action(cx.listener(Self::select_all_status_files))
+            .on_action(cx.listener(Self::save_stash_shortcut))
             .on_drop(cx.listener(Self::dropped_paths))
             .child(self.workspace_toolbar(&colors, cx))
             .child(
@@ -143,6 +144,10 @@ impl Render for GitronimoApp {
                     .is_some()
                     .then(|| self.push_dialog_overlay(&colors, cx).into_any_element()),
             )
+            .children(self.stash_apply_dialog.is_some().then(|| {
+                self.stash_apply_dialog_overlay(&colors, cx)
+                    .into_any_element()
+            }))
             .children(self.pending_branch_delete.is_some().then(|| {
                 self.branch_delete_confirm_overlay(&colors, cx)
                     .into_any_element()
@@ -179,6 +184,7 @@ impl GitronimoApp {
                 .child("Command-R  Refresh working copy")
                 .child("Command-A  Select all changed files (Working Copy)")
                 .child("Command-Shift-C  Edit commit subject")
+                .child("Command-Shift-S  Save stash")
                 .child("Command-Shift-P  Command palette")
                 .child("Command-/  Show or hide this reference")
                 .child("Command-[ / Command-]  Back / Forward")
@@ -401,6 +407,10 @@ impl GitronimoApp {
             }
             TextPromptKind::CreateBranch { .. } => ("New branch".into(), "Create"),
             TextPromptKind::CreateTag { start } => (format!("New tag from {start}"), "Create tag"),
+            TextPromptKind::CreateStash { .. } => ("Save stash".into(), "Save"),
+            TextPromptKind::StashBranch { reference } => {
+                (format!("Branch from {reference}"), "Create branch")
+            }
             TextPromptKind::FileHistoryPath => ("File history for path".into(), "Show history"),
             TextPromptKind::BlamePath => ("Blame path".into(), "Show blame"),
             TextPromptKind::CompareFrom => ("Compare from ref".into(), "Next"),
@@ -481,6 +491,80 @@ impl GitronimoApp {
                             false,
                         ),
                     ))
+                    .children(matches!(&kind, TextPromptKind::CreateStash { .. }).then(|| {
+                        let checked = matches!(
+                            &kind,
+                            TextPromptKind::CreateStash {
+                                include_untracked: true,
+                                ..
+                            }
+                        );
+                        let path_note = match &kind {
+                            TextPromptKind::CreateStash { paths, .. } if !paths.is_empty() => {
+                                format!("Stashing {} selected path(s).", paths.len())
+                            }
+                            _ => String::new(),
+                        };
+                        div()
+                            .px_3()
+                            .pb_2()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child({
+                                let mut row = div()
+                                    .id("stash-include-untracked")
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .cursor_pointer()
+                                    .text_sm();
+                                row.interactivity().on_click(cx.listener(
+                                    |app, _: &gpui::ClickEvent, _, cx| {
+                                        app.toggle_create_stash_include_untracked(cx);
+                                    },
+                                ));
+                                row.child(
+                                    div()
+                                        .w(px(14.0))
+                                        .h(px(14.0))
+                                        .rounded(px(3.0))
+                                        .border_1()
+                                        .border_color(if checked {
+                                            colors.accent
+                                        } else {
+                                            colors.border
+                                        })
+                                        .bg(if checked {
+                                            colors.accent
+                                        } else {
+                                            colors.panel_background
+                                        })
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_color(colors.panel_background)
+                                        .text_xs()
+                                        .child(if checked { "✓" } else { "" }),
+                                )
+                                .child("Include untracked files")
+                            })
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(colors.text_muted)
+                                    .child(
+                                        "Including untracked files can remove ignored folders depending on ignore rules (Git behavior).",
+                                    ),
+                            )
+                            .children((!path_note.is_empty()).then(|| {
+                                div()
+                                    .text_xs()
+                                    .text_color(colors.text_muted)
+                                    .child(path_note)
+                            }))
+                            .into_any_element()
+                    }))
                     .child(
                         div()
                             .px_3()
@@ -497,6 +581,101 @@ impl GitronimoApp {
                             ))
                             .child(file_action_button("Cancel", colors, cx, |app, cx| {
                                 app.cancel_text_prompt(cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    pub(crate) fn stash_apply_dialog_overlay(
+        &self,
+        colors: &ui_kit::ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let Some(dialog) = self.stash_apply_dialog.clone() else {
+            return div().into_any_element();
+        };
+        div()
+            .absolute()
+            .top(px(56.0))
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(colors.overlay_scrim)
+            .flex()
+            .items_start()
+            .justify_center()
+            .pt_8()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.close_stash_apply_dialog(cx);
+                }),
+            )
+            .child(
+                div()
+                    .w(px(420.0))
+                    .flex()
+                    .flex_col()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(8.0))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(colors.border)
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(format!("Apply {}", dialog.reference)),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(stash_option_row(
+                                "stash-delete-after",
+                                "Delete stash after applying changes",
+                                dialog.delete_after,
+                                colors,
+                                cx,
+                                GitronimoApp::toggle_stash_apply_delete_after,
+                            ))
+                            .child(stash_option_row(
+                                "stash-restore-index",
+                                "Restore staging area status",
+                                dialog.restore_index,
+                                colors,
+                                cx,
+                                GitronimoApp::toggle_stash_apply_restore_index,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .px_3()
+                            .py_2()
+                            .border_t_1()
+                            .border_color(colors.border)
+                            .flex()
+                            .justify_end()
+                            .gap_2()
+                            .child(file_action_button("Cancel", colors, cx, |app, cx| {
+                                app.close_stash_apply_dialog(cx);
+                            }))
+                            .child(primary_action_button("Apply", colors, cx, |app, cx| {
+                                app.confirm_stash_apply_dialog(cx);
                             })),
                     ),
             )
@@ -1643,6 +1822,52 @@ fn push_option_row(
                     .child(option.caption()),
             ),
     )
+    .into_any_element()
+}
+
+fn stash_option_row(
+    id: &'static str,
+    label: &'static str,
+    checked: bool,
+    colors: &ui_kit::ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> AnyElement {
+    let mut row = div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap_2()
+        .cursor_pointer()
+        .text_sm();
+    row.interactivity()
+        .on_click(cx.listener(move |app, _: &gpui::ClickEvent, _, cx| {
+            on_click(app, cx);
+        }));
+    row.child(
+        div()
+            .w(px(14.0))
+            .h(px(14.0))
+            .rounded(px(3.0))
+            .border_1()
+            .border_color(if checked {
+                colors.accent
+            } else {
+                colors.border
+            })
+            .bg(if checked {
+                colors.accent
+            } else {
+                colors.panel_background
+            })
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(colors.panel_background)
+            .text_xs()
+            .child(if checked { "✓" } else { "" }),
+    )
+    .child(label)
     .into_any_element()
 }
 

@@ -232,6 +232,14 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Command palette expanded (Fetch/Pull/Push/Sync, staging, stash, settings, …) and scrollable
 - [x] Network progress strip in the bottom activity bar during fetch/pull/push/sync
 
+**Done (2026-08-12 — Tower-style Stashes core):**
+
+- [x] Save stash dialog (message + include untracked); path-limited stash from WC **Stash selected…**
+- [x] Apply stash dialog (delete after = pop; restore staging area = `--index`)
+- [x] Stashes list shows date; selection loads paths + diff; Branch… from stash
+- [x] Toolbar / palette / `Command-Shift-S` open save dialog; Apply opens apply dialog
+- [x] Mutations refresh Working Copy and stash list (auto-stash / Snapshots / DnD deferred)
+
 **Done (2026-08-11 — Tower interior pass):**
 
 - [x] In-repo sidebar trimmed to Working Copy / History / Stashes / Settings; PRs, Branches Review, Reflog via palette

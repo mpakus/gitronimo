@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-08-12 — Tower-style Stashes (core parity)
+
+**Intent:** Match Tower stash guide core flows: save dialog (message + untracked + path-limited), apply dialog (delete-after / restore index), stash changeset detail, branch-from-stash. Approach-only from Tower; rgitui `stashes_panel.rs` for Apply/Pop/Drop/Branch shape (MIT).
+
+**Files:** `git_domain`/`git_cli` stash APIs (`CreateStashRequest`, `--index`, `stash_branch`, list `%ct`), `app_state` dialogs, `stashes.rs`, `working_copy.rs`, `toolbar.rs`, `workspace.rs`, `main.rs`, palette, keymap `cmd-shift-s`, docs.
+
+**Acceptance:** Save/apply dialogs; WC Stash selected; detail shows date/files/diff; Branch…; list refresh; gates pass. **Done.**
+
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass. Tower guide approach-only; rgitui `stashes_panel.rs` MIT for Apply/Pop/Drop/Branch action shape.
+
 ## 2026-08-12 — Palette: history/commit actions coverage
 
 **Intent:** After the History commit context menu, expose the same user-facing handlers (and a few adjacent ones) in the command palette so they are discoverable without right-click.

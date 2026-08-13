@@ -16,6 +16,7 @@ actions!(
         WidenSidebar,
         WidenInspector,
         SelectAllStatusFiles,
+        SaveStash,
         Quit
     ]
 );

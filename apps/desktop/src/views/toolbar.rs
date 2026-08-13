@@ -387,7 +387,7 @@ impl GitronimoApp {
                 colors,
                 cx,
                 |app, _, cx| {
-                    app.apply_latest_stash(cx);
+                    app.open_apply_latest_stash_dialog(cx);
                 },
                 false,
             ),
@@ -397,7 +397,7 @@ impl GitronimoApp {
                 colors,
                 cx,
                 |app, _, cx| {
-                    app.create_stash(false, cx);
+                    app.open_stash_save_dialog(false, Vec::new(), cx);
                 },
                 false,
             ),

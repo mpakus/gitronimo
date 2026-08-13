@@ -5,9 +5,7 @@ use ui_kit::ThemeColors;
 
 use git_domain::{GitPath, InProgressOperation, StatusEntry, WorktreeRepository};
 
-use crate::app_state::{
-    ForcePushState, GitronimoApp, Mutation, OperationAction, RepositoryView, StashAction,
-};
+use crate::app_state::{ForcePushState, GitronimoApp, Mutation, OperationAction, RepositoryView};
 use crate::views::components::{
     centered_empty_state, file_action_button, list_pane_resize_handle, mutation_button,
     primary_action_button, state_panel, status_badge_info, status_badge_square, status_label,
@@ -105,8 +103,6 @@ impl GitronimoApp {
             .children(self.discard_confirmation_view(colors, cx))
             .children(self.line_discard_confirmation_view(colors, cx))
             .children(self.hunk_discard_confirmation_view(colors, cx))
-            .children(self.stash_pop_confirmation_view(colors, cx))
-            .children(self.stash_drop_confirmation_view(colors, cx))
             .children(self.force_with_lease_confirmation_view(colors, cx))
             .children(self.context_menu_view(repository, colors, cx))
             .child(self.file_review_workspace(colors, cx))
@@ -401,8 +397,8 @@ impl GitronimoApp {
                 colors,
                 cx,
             ))
-            .child(file_action_button("Stash", colors, cx, |app, cx| {
-                app.create_stash(false, cx);
+            .child(file_action_button("Stash…", colors, cx, |app, cx| {
+                app.open_stash_save_dialog(false, Vec::new(), cx);
             }))
     }
 
@@ -570,47 +566,6 @@ impl GitronimoApp {
             })
     }
 
-    pub(crate) fn stash_pop_confirmation_view(
-        &self,
-        colors: &ThemeColors,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        (self.pending_stash_action == Some(StashAction::Pop)).then(|| {
-            div()
-                .p_2()
-                .bg(colors.raised_background)
-                .border_1()
-                .border_color(colors.border)
-                .child("Pop the latest stash? Its recovery entry will be removed after a successful apply.")
-                .child(primary_action_button("Confirm pop latest stash", colors, cx, |app, cx| {
-                    app.pop_latest_stash(cx);
-                }))
-                .into_any_element()
-        })
-    }
-
-    pub(crate) fn stash_drop_confirmation_view(
-        &self,
-        colors: &ThemeColors,
-        cx: &mut gpui::Context<Self>,
-    ) -> Option<AnyElement> {
-        (self.pending_stash_action == Some(StashAction::Drop)).then(|| {
-            div()
-                .p_2()
-                .bg(colors.raised_background)
-                .border_1()
-                .border_color(colors.border)
-                .child("Drop the latest stash permanently? This cannot be undone.")
-                .child(primary_action_button(
-                    "Confirm drop latest stash",
-                    colors,
-                    cx,
-                    GitronimoApp::drop_latest_stash,
-                ))
-                .into_any_element()
-        })
-    }
-
     pub(crate) fn force_with_lease_confirmation_view(
         &self,
         colors: &ThemeColors,
@@ -640,6 +595,11 @@ impl GitronimoApp {
             let copy_repository = repository.clone();
             let reveal_repository = repository.clone();
             let open_repository = repository.clone();
+            let stash_paths = if self.selected_paths.is_empty() {
+                vec![path.clone()]
+            } else {
+                self.selected_paths.clone()
+            };
             div()
                 .p_2()
                 .bg(colors.raised_background)
@@ -652,6 +612,7 @@ impl GitronimoApp {
                 .child(
                     div()
                         .flex()
+                        .flex_wrap()
                         .gap_2()
                         .child(file_action_button(
                             "Copy path",
@@ -675,6 +636,14 @@ impl GitronimoApp {
                             cx,
                             move |app, cx| {
                                 app.open_context_path(&open_repository, false, cx);
+                            },
+                        ))
+                        .child(file_action_button(
+                            "Stash selected…",
+                            colors,
+                            cx,
+                            move |app, cx| {
+                                app.open_stash_save_dialog(false, stash_paths.clone(), cx);
                             },
                         )),
                 )
