@@ -27,8 +27,8 @@ use std::{
 
 use app_core::{
     BookmarkFolder, BookmarkOrganization, BranchOrganization, HostingError, HostingService,
-    RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError, SecretStore, WindowGeometry,
-    open_repository,
+    RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError, RepositoryWorkflow,
+    SecretStore, WindowGeometry, WorkflowGitStep, WorkflowKind, open_repository,
 };
 use git_cli::{
     CommitRequest, CreateStashRequest, GitExecutable, GitStatusError, ResetMode,
@@ -336,6 +336,9 @@ impl GitronimoApp {
             .map_or(DEFAULT_LIST_PANE_WIDTH, clamp_list_pane_width);
         let branch_organization = BranchOrganization::default();
         let selected_recent = (!recents.is_empty()).then_some(0);
+        let workflow = selected_recent
+            .and_then(|index| recents.get(index))
+            .and_then(|path| store.load_workflow(path).ok().flatten());
         let (
             welcome_search_input,
             worktree_search_input,
@@ -388,6 +391,7 @@ impl GitronimoApp {
             commit_context: None,
             commit_context_menu_position: None,
             branch_organization,
+            workflow,
             selected_paths: Vec::new(),
             last_selected_path_index: None,
             file_list_select_all_toggle: None,
@@ -582,6 +586,13 @@ impl GitronimoApp {
                 .unwrap_or_default(),
             _ => BranchOrganization::default(),
         };
+        let workflow = match &state {
+            ShellState::Repository(repository) => store
+                .load_workflow(&repository.worktree_root)
+                .ok()
+                .flatten(),
+            _ => None,
+        };
         let (
             welcome_search_input,
             worktree_search_input,
@@ -634,6 +645,7 @@ impl GitronimoApp {
             commit_context: None,
             commit_context_menu_position: None,
             branch_organization,
+            workflow,
             selected_paths: Vec::new(),
             last_selected_path_index: None,
             file_list_select_all_toggle: None,
@@ -903,6 +915,7 @@ impl GitronimoApp {
         .detach();
     }
 
+    #[allow(clippy::too_many_lines)]
     fn apply_open_outcome(
         &mut self,
         outcome: Result<OpenedRepository, RepositoryOpenError>,
@@ -926,8 +939,14 @@ impl GitronimoApp {
                         .store
                         .load_branch_organization(&repository.worktree_root)
                         .unwrap_or_default();
+                    self.workflow = self
+                        .store
+                        .load_workflow(&repository.worktree_root)
+                        .ok()
+                        .flatten();
                 } else {
                     self.branch_organization = BranchOrganization::default();
+                    self.workflow = None;
                 }
                 self.pull_dialog = None;
                 self.push_dialog = None;
@@ -1033,7 +1052,236 @@ impl GitronimoApp {
             return;
         }
         self.welcome_shell_view = view;
+        if view == WelcomeShellView::Workflow {
+            self.reload_workflow_from_selection();
+        }
         cx.notify();
+    }
+
+    pub(crate) fn open_workflow(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.state, ShellState::Repository(_)) {
+            self.navigate_to(RepositoryView::Workflow, cx);
+            return;
+        }
+        self.set_welcome_shell_view(WelcomeShellView::Workflow, cx);
+    }
+
+    fn workflow_target_path(&self) -> Option<PathBuf> {
+        match &self.state {
+            ShellState::Repository(repository) => Some(repository.worktree_root.clone()),
+            _ => self
+                .selected_recent
+                .and_then(|index| self.recents.get(index).cloned()),
+        }
+    }
+
+    fn reload_workflow_from_selection(&mut self) {
+        self.workflow = self
+            .workflow_target_path()
+            .and_then(|path| self.store.load_workflow(&path).ok().flatten());
+    }
+
+    fn persist_workflow(&mut self, cx: &mut Context<Self>) {
+        let Some(path) = self.workflow_target_path() else {
+            self.set_activity("Select a repository before saving a workflow.");
+            cx.notify();
+            return;
+        };
+        if self
+            .store
+            .save_workflow(&path, self.workflow.as_ref())
+            .is_err()
+        {
+            self.set_activity("Workflow could not be saved.");
+        }
+        cx.notify();
+    }
+
+    fn local_branch_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .refs
+            .local_branches
+            .iter()
+            .filter_map(|branch| String::from_utf8(branch.name.0.clone()).ok())
+            .collect();
+        if names.is_empty()
+            && let Some(branch) = self
+                .welcome_snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.branch.clone())
+        {
+            names.push(branch);
+        }
+        names
+    }
+
+    pub(crate) fn apply_workflow_kind(&mut self, kind: WorkflowKind, cx: &mut Context<Self>) {
+        if self.workflow_target_path().is_none() {
+            self.set_activity("Select a repository before saving a workflow.");
+            cx.notify();
+            return;
+        }
+        let names = self.local_branch_names();
+        self.workflow = Some(RepositoryWorkflow::from_kind(kind, &names));
+        self.set_activity(format!("Applied {}.", kind.title()));
+        self.persist_workflow(cx);
+    }
+
+    pub(crate) fn detect_workflow(&mut self, cx: &mut Context<Self>) {
+        if self.workflow_target_path().is_none() {
+            self.set_activity("Select a repository before saving a workflow.");
+            cx.notify();
+            return;
+        }
+        let names = self.local_branch_names();
+        let workflow = RepositoryWorkflow::detect(&names);
+        self.set_activity(format!("Detected {}.", workflow.kind.title()));
+        self.workflow = Some(workflow);
+        self.persist_workflow(cx);
+    }
+
+    pub(crate) fn disable_workflow(&mut self, cx: &mut Context<Self>) {
+        self.workflow = None;
+        self.set_activity("Workflow disabled for this repository.");
+        self.persist_workflow(cx);
+    }
+
+    pub(crate) fn cycle_workflow_topic_strategy(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(workflow) = self.workflow.as_mut() else {
+            return;
+        };
+        let Some(topic) = workflow.topics.get_mut(index) else {
+            return;
+        };
+        topic.strategy = topic.strategy.next();
+        workflow.kind = WorkflowKind::Custom;
+        let label = topic.label.clone();
+        let strategy = topic.strategy.title();
+        self.set_activity(format!("{label} now finishes with {strategy}."));
+        self.persist_workflow(cx);
+    }
+
+    pub(crate) fn prompt_start_workflow_topic(
+        &mut self,
+        prefix: String,
+        start: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(self.state, ShellState::Repository(_)) {
+            self.set_activity("Open the repository to start a topic branch.");
+            cx.notify();
+            return;
+        }
+        self.begin_text_prompt(TextPromptKind::StartWorkflowTopic { prefix, start }, "", cx);
+    }
+
+    pub(crate) fn prompt_finish_workflow_topic(&mut self, cx: &mut Context<Self>) {
+        let Some(branch) = self.head_branch_name() else {
+            self.set_activity("Check out a topic branch before finishing.");
+            cx.notify();
+            return;
+        };
+        let Some(workflow) = self.workflow.as_ref() else {
+            self.set_activity("Apply a workflow template first.");
+            cx.notify();
+            return;
+        };
+        let Some(topic) = workflow.topic_for_branch(&branch) else {
+            self.set_activity(format!("{branch} is not a configured topic branch."));
+            cx.notify();
+            return;
+        };
+        if topic.merge_into.is_empty() {
+            self.set_activity("This topic type has no finish targets.");
+            cx.notify();
+            return;
+        }
+        self.confirm_dialog = Some(AppConfirmDialog::FinishTopic {
+            branch,
+            label: topic.label.clone(),
+            targets: topic.merge_into.join(", "),
+            strategy: topic.strategy.title().to_owned(),
+        });
+        self.set_activity("Confirm finishing the topic branch.");
+        cx.notify();
+    }
+
+    fn finish_workflow_topic(&mut self, branch: &str, cx: &mut Context<Self>) {
+        let Some(workflow) = self.workflow.as_ref() else {
+            return;
+        };
+        let Some(topic) = workflow.topic_for_branch(branch).cloned() else {
+            self.set_activity(format!("{branch} is not a configured topic branch."));
+            cx.notify();
+            return;
+        };
+        let steps = RepositoryWorkflow::finish_steps(branch, &topic, true);
+        if steps.is_empty() {
+            self.set_activity("Nothing to finish for this topic type.");
+            cx.notify();
+            return;
+        }
+        self.run_workflow_steps(format!("Finishing {branch}"), steps, cx);
+    }
+
+    pub(crate) fn sync_workflow_head(&mut self, cx: &mut Context<Self>) {
+        let Some(head) = self.head_branch_name() else {
+            self.set_activity("Check out a branch before syncing.");
+            cx.notify();
+            return;
+        };
+        let Some(parent) = self
+            .workflow
+            .as_ref()
+            .and_then(|workflow| workflow.sync_parent(&head))
+            .map(str::to_owned)
+        else {
+            self.set_activity(format!("{head} has no parent to sync from."));
+            cx.notify();
+            return;
+        };
+        self.run_workflow_steps(
+            format!("Syncing {head} from {parent}"),
+            vec![WorkflowGitStep::Merge(parent)],
+            cx,
+        );
+    }
+
+    fn run_workflow_steps(
+        &mut self,
+        label: String,
+        steps: Vec<WorkflowGitStep>,
+        cx: &mut Context<Self>,
+    ) {
+        self.run_branch_command(
+            label,
+            move |git, repository| {
+                for step in &steps {
+                    match step {
+                        WorkflowGitStep::Checkout(name) => {
+                            git.checkout_branch(repository, name)?;
+                        }
+                        WorkflowGitStep::Merge(name) => {
+                            git.merge_branch(repository, name)?;
+                        }
+                        WorkflowGitStep::MergeSquash(name) => {
+                            git.merge_squash(repository, name)?;
+                        }
+                        WorkflowGitStep::Rebase(name) => {
+                            git.rebase_branch(repository, name)?;
+                        }
+                        WorkflowGitStep::MergeFfOnly(name) => {
+                            git.merge_ff_only(repository, name)?;
+                        }
+                        WorkflowGitStep::DeleteBranch { name, force } => {
+                            git.delete_branch(repository, name, *force)?;
+                        }
+                    }
+                }
+                Ok(())
+            },
+            cx,
+        );
     }
 
     fn persist_bookmark_organization(&self) {
@@ -1424,6 +1672,7 @@ return remote_url & linefeed & parent_path"#;
             PaletteCommand::ShowSettings => {
                 self.navigate_to(RepositoryView::Settings, cx);
             }
+            PaletteCommand::ShowWorkflow => self.open_workflow(cx),
             PaletteCommand::ShowPullRequests => self.open_pull_requests(cx),
             PaletteCommand::ShowBranchesReview => {
                 self.navigate_to(RepositoryView::BranchesReview, cx);
@@ -1647,6 +1896,7 @@ return remote_url & linefeed & parent_path"#;
         self.welcome_snapshot = None;
         self.welcome_snapshot_path = None;
         self.welcome_list_snapshots.clear();
+        self.reload_workflow_from_selection();
         if self.selected_recent.is_some() {
             self.refresh_welcome_snapshot(cx);
         }
@@ -1699,6 +1949,9 @@ return remote_url & linefeed & parent_path"#;
                     move |git, repository| git.drop_commit(repository, &oid),
                     cx,
                 );
+            }
+            AppConfirmDialog::FinishTopic { branch, .. } => {
+                self.finish_workflow_topic(&branch, cx);
             }
         }
     }
@@ -1757,6 +2010,17 @@ return remote_url & linefeed & parent_path"#;
                 self.pending_text_prompt = None;
                 self.text_prompt_value.clear();
                 self.create_branch_from(value, start, cx);
+            }
+            TextPromptKind::StartWorkflowTopic { prefix, start } => {
+                if value.is_empty() {
+                    self.set_activity("Enter a topic branch name.");
+                    cx.notify();
+                    return;
+                }
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                let branch = RepositoryWorkflow::branch_name_for_topic(&prefix, &value);
+                self.create_branch_from(branch, Some(start), cx);
             }
             TextPromptKind::CreateTag { start } => {
                 if value.is_empty() {
@@ -4219,6 +4483,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     fn select_recent(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.recents.len() {
             self.selected_recent = Some(index);
+            self.reload_workflow_from_selection();
             self.refresh_welcome_snapshot(cx);
             cx.notify();
         }

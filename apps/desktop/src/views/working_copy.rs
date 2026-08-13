@@ -37,6 +37,9 @@ impl GitronimoApp {
         if self.repository_view == RepositoryView::Settings {
             return self.settings_view(colors, cx).into_any_element();
         }
+        if self.repository_view == RepositoryView::Workflow {
+            return self.workflow_view(colors, cx).into_any_element();
+        }
         if self.repository_view == RepositoryView::PullRequests {
             return self.pull_requests_view(colors, cx).into_any_element();
         }

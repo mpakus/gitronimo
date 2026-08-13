@@ -406,6 +406,9 @@ impl GitronimoApp {
                 (format!("Rename branch '{current}'"), "Rename")
             }
             TextPromptKind::CreateBranch { .. } => ("New branch".into(), "Create"),
+            TextPromptKind::StartWorkflowTopic { prefix, start } => {
+                (format!("New {prefix} branch from {start}"), "Start")
+            }
             TextPromptKind::CreateTag { start } => (format!("New tag from {start}"), "Create tag"),
             TextPromptKind::CreateStash { .. } => ("Save stash".into(), "Save"),
             TextPromptKind::StashBranch { reference } => {

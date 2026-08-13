@@ -662,7 +662,7 @@ fn welcome_sidebar_view(
     cx: &mut gpui::Context<GitronimoApp>,
 ) -> AnyElement {
     if app.welcome_shell_view == WelcomeShellView::Workflow {
-        return welcome_workflow_sidebar(width, colors);
+        return welcome_workflow_sidebar(app, width, colors, cx);
     }
 
     let search = app.welcome_repo_search.to_lowercase();
@@ -851,7 +851,27 @@ fn welcome_sidebar_view(
         .into_any_element()
 }
 
-fn welcome_workflow_sidebar(width: f32, colors: &ThemeColors) -> AnyElement {
+fn welcome_workflow_sidebar(
+    app: &GitronimoApp,
+    width: f32,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+) -> AnyElement {
+    let mut rows = Vec::new();
+    for (index, path) in app.recents.iter().enumerate() {
+        rows.push(welcome_repo_row(app, index, path, false, colors, cx));
+    }
+    let body = if rows.is_empty() {
+        div()
+            .px_3()
+            .py_2()
+            .text_sm()
+            .text_color(colors.text_muted)
+            .child("Add a repository from Bookmarks first.")
+            .into_any_element()
+    } else {
+        div().flex().flex_col().children(rows).into_any_element()
+    };
     div()
         .w(px(width))
         .h_full()
@@ -867,16 +887,9 @@ fn welcome_workflow_sidebar(width: f32, colors: &ThemeColors) -> AnyElement {
                 .pb_2()
                 .text_xs()
                 .text_color(colors.text_muted)
-                .child("Workflow"),
+                .child("Repositories"),
         )
-        .child(
-            div()
-                .px_3()
-                .py_2()
-                .text_sm()
-                .text_color(colors.text_muted)
-                .child("No workflow items yet."),
-        )
+        .child(div().flex_1().overflow_hidden().child(body))
         .into_any_element()
 }
 

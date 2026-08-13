@@ -30,6 +30,7 @@ pub(crate) mod submodules;
 pub(crate) mod toolbar;
 pub(crate) mod tree;
 pub(crate) mod welcome;
+pub(crate) mod workflow;
 pub(crate) mod working_copy;
 pub(crate) mod workspace;
 pub(crate) mod worktrees;

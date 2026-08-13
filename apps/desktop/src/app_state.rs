@@ -147,6 +147,7 @@ pub(crate) enum RepositoryView {
     Stashes,
     Remotes,
     Settings,
+    Workflow,
     PullRequests,
     BranchesReview,
     Reflog,
@@ -191,6 +192,13 @@ pub(crate) enum AppConfirmDialog {
     RevertCommit { oid: String },
     /// Drop a commit from the current branch history via rebase.
     DropCommit { oid: String },
+    /// Finish the current workflow topic into its configured base(s).
+    FinishTopic {
+        branch: String,
+        label: String,
+        targets: String,
+        strategy: String,
+    },
 }
 
 impl AppConfirmDialog {
@@ -200,6 +208,7 @@ impl AppConfirmDialog {
             Self::HardReset { .. } => "Hard Reset".into(),
             Self::RevertCommit { .. } => "Revert Commit".into(),
             Self::DropCommit { .. } => "Delete Commit".into(),
+            Self::FinishTopic { .. } => "Finish Topic Branch".into(),
         }
     }
 
@@ -224,6 +233,14 @@ impl AppConfirmDialog {
                     "Delete \"{short}\" from the current branch? This rewrites history via rebase."
                 )
             }
+            Self::FinishTopic {
+                branch,
+                label,
+                targets,
+                strategy,
+            } => format!(
+                "Finish {label} \"{branch}\" into {targets} using {strategy}? The topic branch is deleted after a successful finish."
+            ),
         }
     }
 
@@ -236,6 +253,7 @@ impl AppConfirmDialog {
             Self::ForceDeleteBranch { .. } | Self::DropCommit { .. } => "Delete",
             Self::HardReset { .. } => "Reset",
             Self::RevertCommit { .. } => "Revert",
+            Self::FinishTopic { .. } => "Finish",
         }
     }
 }
@@ -282,6 +300,10 @@ pub(crate) enum TextPromptKind {
     },
     CreateBranch {
         start: Option<String>,
+    },
+    StartWorkflowTopic {
+        prefix: String,
+        start: String,
     },
     CreateTag {
         start: String,
@@ -456,6 +478,7 @@ pub(crate) enum PaletteCommand {
     DropSelectedStash,
     ShowRemotes,
     ShowSettings,
+    ShowWorkflow,
     ShowPullRequests,
     ShowBranchesReview,
     GitLfsStatus,
@@ -671,6 +694,7 @@ pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
     ("Show stashes", PaletteCommand::ShowStashes),
     ("Show remotes", PaletteCommand::ShowRemotes),
     ("Show settings", PaletteCommand::ShowSettings),
+    ("Show workflow", PaletteCommand::ShowWorkflow),
     ("Show pull requests", PaletteCommand::ShowPullRequests),
     ("Branches review", PaletteCommand::ShowBranchesReview),
     ("Git LFS status", PaletteCommand::GitLfsStatus),
@@ -739,6 +763,7 @@ mod palette_tests {
             "History filter…",
             "Reset HEAD to selected commit…",
             "Show settings",
+            "Show workflow",
             "Quick open file…",
             "Message history",
         ] {
@@ -862,6 +887,8 @@ pub(crate) struct GitronimoApp {
     pub commit_context_menu_position: Option<(f32, f32)>,
     /// Pinned and archived local branches for the open repository.
     pub branch_organization: app_core::BranchOrganization,
+    /// Branching convention for the open repository or selected welcome recent.
+    pub workflow: Option<app_core::RepositoryWorkflow>,
     pub selected_paths: Vec<GitPath>,
     pub last_selected_path_index: Option<usize>,
     /// Row that cleared a full selection; clicking it again re-selects every visible file.
@@ -1194,5 +1221,19 @@ mod tests {
         assert!(dialog.body().contains("unmerged changes"));
         assert_eq!(AppConfirmDialog::cancel_label(), "Cancel");
         assert_eq!(dialog.confirm_label(), "Delete");
+    }
+
+    #[test]
+    fn finish_topic_dialog_copy() {
+        let dialog = AppConfirmDialog::FinishTopic {
+            branch: "feature/login".into(),
+            label: "Feature".into(),
+            targets: "main".into(),
+            strategy: "Merge".into(),
+        };
+        assert_eq!(dialog.title(), "Finish Topic Branch");
+        assert!(dialog.body().contains("feature/login"));
+        assert!(dialog.body().contains("main"));
+        assert_eq!(dialog.confirm_label(), "Finish");
     }
 }

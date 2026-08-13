@@ -37,9 +37,23 @@ Destructive or blocked Git outcomes use modal overlays (not only the activity fl
 | Delete local branch | **Delete Branch** — Cancel / Delete (`git branch -d`) | If not fully merged → **Could Not Delete Branch** — Cancel / Delete (`git branch -D`) via `AppConfirmDialog::ForceDeleteBranch` |
 | History → Hard reset | Choice prompt Soft / Mixed / Hard | **Hard Reset** confirm via `AppConfirmDialog::HardReset` |
 | History → Revert / Delete | `AppConfirmDialog::RevertCommit` / `DropCommit` | — |
+| Workflow → Finish topic | `AppConfirmDialog::FinishTopic` | merge/squash/rebase into configured bases, then delete the topic |
 | Force push | Existing force-with-lease confirmation | — |
 
 `AppConfirmDialog` is the shared enum for blocked-action confirmations; render through `workspace` modal helpers. Domain logic stays in `main.rs`, not in `Render`.
+
+## Workflow (Tower-inspired)
+
+Toolbar **Workflow** opens the in-repo Workflow view when a repository is loaded, or the welcome Workflow hub otherwise. Palette: **Show workflow**.
+
+- Templates: GitHub Flow, GitLab Flow, git-flow, plus Auto-detect from local branch names (`develop` → git-flow, `production`/`staging` → GitLab Flow, else GitHub Flow).
+- Config persists per repository in preferences (`workflows` map, same path-locked RMW as pins).
+- **Start…** prompts for a suffix and creates `{prefix}{name}` from the topic start point.
+- **Finish…** confirms, then merge / squash / rebase-and-ff into each `merge_into` target and deletes the topic (force-delete after squash).
+- **Sync** merges the topic’s start (or a child base’s parent) into HEAD.
+- Deferred: Graphite CLI, git-flow CLI, stacked restack, auto-archive protection.
+
+Approach-only from [Tower Workflows](https://www.git-tower.com/help/guides/workflows/overview/mac); original Gitronimo UI.
 
 ## History commit context menu
 
@@ -68,7 +82,7 @@ Searchable list (`PALETTE_COMMANDS` in `app_state.rs`); list viewport scrolls. I
 - Stage all / Unstage all, Focus commit composer, Amend last commit
 - Stashes: Save stash… / Save including untracked… (dialogs), Apply latest/selected… (apply dialog), Branch / Pop / Drop selected…
 - Create branch… / Create tag…
-- Show working copy / history / stashes / remotes / settings / pull requests / branches review / reflog / LFS / worktrees / submodules / rebase / conflicts…
+- Show working copy / history / stashes / remotes / settings / **workflow** / pull requests / branches review / reflog / LFS / worktrees / submodules / rebase / conflicts…
 - History filter, Reveal HEAD, selected-commit copy / checkout / reset / revert / patch / export / compare / new branch
 - History tools (file history, blame, compare refs, browse tree, rebase onto, merge revision, squash/fixup/drop/reword, merge tool, signature check)
 - Quick open file, Message history, Toggle appearance, Keyboard shortcuts, Navigate back/forward

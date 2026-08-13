@@ -14,6 +14,12 @@ use git_domain::{
 };
 use serde::{Deserialize, Serialize};
 
+mod workflow;
+
+pub use workflow::{
+    RepositoryWorkflow, WorkflowBaseBranch, WorkflowGitStep, WorkflowKind, WorkflowTopicType,
+};
+
 const STORE_SCHEMA_VERSION: u32 = 1;
 const MAXIMUM_RECENT_REPOSITORIES: usize = 12;
 const RECOVERY_JOURNAL_SCHEMA_VERSION: u32 = 1;
@@ -430,6 +436,38 @@ impl RecentRepositoryStore {
         })
     }
 
+    /// Loads the branching convention for one repository.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_workflow(
+        &self,
+        repository: &Path,
+    ) -> Result<Option<crate::RepositoryWorkflow>, RecentRepositoryStoreError> {
+        let key = repository.to_string_lossy().into_owned();
+        self.with_document(|document| document.workflows.get(&key).cloned())
+    }
+
+    /// Persists the branching convention for one repository. `None` clears it.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_workflow(
+        &self,
+        repository: &Path,
+        workflow: Option<&crate::RepositoryWorkflow>,
+    ) -> Result<(), RecentRepositoryStoreError> {
+        let key = repository.to_string_lossy().into_owned();
+        self.with_mut_document(|document| match workflow {
+            Some(workflow) => {
+                document.workflows.insert(key, workflow.clone());
+            }
+            None => {
+                document.workflows.remove(&key);
+            }
+        })
+    }
+
     fn lock_preferences(&self) -> std::sync::MutexGuard<'_, ()> {
         self.lock
             .lock()
@@ -683,6 +721,9 @@ struct RecentRepositoryDocument {
     /// Absolute repository path → pinned/archived branch names.
     #[serde(default)]
     branch_organization: std::collections::BTreeMap<String, BranchOrganization>,
+    /// Absolute repository path → branching convention.
+    #[serde(default)]
+    workflows: std::collections::BTreeMap<String, crate::RepositoryWorkflow>,
 }
 
 impl Default for RecentRepositoryDocument {
@@ -697,6 +738,7 @@ impl Default for RecentRepositoryDocument {
             bookmark_folders: Vec::new(),
             repository_folders: std::collections::BTreeMap::new(),
             branch_organization: std::collections::BTreeMap::new(),
+            workflows: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -792,6 +834,23 @@ mod tests {
                 .expect("cleared first"),
             BranchOrganization::default()
         );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn workflow_is_scoped_per_repository() {
+        let (directory, store) = temporary_store();
+        let first = directory.join("first");
+        let second = directory.join("second");
+        let workflow = crate::RepositoryWorkflow::github_flow("main");
+        store.save_workflow(&first, Some(&workflow)).expect("save");
+        assert_eq!(
+            store.load_workflow(&first).expect("load first"),
+            Some(workflow)
+        );
+        assert_eq!(store.load_workflow(&second).expect("empty second"), None);
+        store.save_workflow(&first, None).expect("clear");
+        assert_eq!(store.load_workflow(&first).expect("cleared"), None);
         let _ = fs::remove_dir_all(directory);
     }
 

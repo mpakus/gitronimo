@@ -213,7 +213,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 - [x] Stashes, Remotes, and Git LFS sidebar destinations
 - [x] Repositories welcome view: grouped/flat recents, detail panel, Add/Create/Clone actions
 - [x] Pull Requests list/detail workflow (Phase 9 baseline)
-- [x] Welcome toolbar Bookmarks / Workflow tabs (Workflow placeholder)
+- [x] Welcome toolbar Bookmarks / Workflow tabs (templates, Start / Finish / Sync)
 - [x] Services tab and view removed; GitHub connect lives in Settings
 - [x] Always-visible inline toolbar/sidebar search filtering repos and files
 - [x] Sidebar remote-activity progress bar during fetch/pull/push + last-result footer when idle
@@ -256,7 +256,7 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 **Partially done (works but visually or structurally short of Tower):**
 
-- [~] §1.1 Welcome tabs — Bookmarks + Workflow; Services surface removed (GitHub in Settings); Workflow still placeholder
+- [x] §1.1 Welcome tabs — Bookmarks + Workflow; Services surface removed (GitHub in Settings); Workflow lists templates and Start / Finish / Sync
 - [~] §1.4 Back/Forward — Prev/Next labels added; toolbar groups Fetch/Pull/Push/Sync, stash Apply/Save, Refresh, and inline search fields Tower-style
 - [x] §1.5 Remote activity — in-flight progress bar in the bottom activity strip (left) and sidebar footer; Cancel available while running; last-result text when idle; Message history for past statuses/errors
 
@@ -277,7 +277,6 @@ Current window layout: toolbar (top), sidebar + content + optional inspector (mi
 
 | Gap                           | Section        | Notes                                                                               |
 | ----------------------------- | -------------- | ----------------------------------------------------------------------------------- |
-| Workflow view content         | §1.1           | Rail tab exists; full workflow surface still placeholder                            |
 | OAuth / enterprise GitHub     | Delivery notes | Still deferred per `PLAN.md`                                                        |
 | Deterministic remote progress | §1.5           | Strip + Cancel exist; finer Git stderr byte/object parsing still partial |
 

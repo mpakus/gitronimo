@@ -673,7 +673,7 @@ pub enum PullRequestState {
     Other(String),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MergeMethod {
     Merge,
     Squash,
@@ -687,6 +687,24 @@ impl MergeMethod {
             Self::Merge => "merge",
             Self::Squash => "squash",
             Self::Rebase => "rebase",
+        }
+    }
+
+    #[must_use]
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Merge => "Merge",
+            Self::Squash => "Squash",
+            Self::Rebase => "Rebase",
+        }
+    }
+
+    #[must_use]
+    pub fn next(self) -> Self {
+        match self {
+            Self::Merge => Self::Squash,
+            Self::Squash => Self::Rebase,
+            Self::Rebase => Self::Merge,
         }
     }
 }

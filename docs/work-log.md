@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-08-13 — Workflow tab (Tower-inspired core)
+
+**Intent:** Replace the Workflow placeholder with a functional page inspired by Tower’s Workflows overview: choose GitHub Flow / GitLab Flow / git-flow or auto-detect from existing branches; start topic branches with prefixes; finish with merge/squash/rebase; sync a topic onto its parent. Approach-only from Tower. Deferred: Graphite CLI, git-flow CLI, restack stacks, auto-archive protection.
+
+**Files:** `crates/app_core` workflow model + prefs, `git_cli` squash/ff-only merge, `views/workflow.rs`, toolbar/welcome/sidebar/`main.rs`/`app_state.rs`, docs.
+
+**Acceptance:** Workflow tab (welcome + in-repo) lists templates and applied config; Start/Finish/Sync mutate via typed Git; config persists per repo; gates pass.
+
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass. Tower Workflows overview / choosing / configuring / topic-branch guides are approach-only (templates, auto-detect, Start/Finish/Sync). Graphite CLI, git-flow CLI, restack, and auto-archive protection remain deferred.
+
 ## 2026-08-13 — Remove Services navigation and view
 
 **Intent:** Drop the Services welcome tab, in-repo destination, palette command, and hosted-repo browser. GitHub token connect/sign-out moves to Settings so Pull Requests still have an account path.

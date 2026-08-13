@@ -21,7 +21,7 @@ impl GitronimoApp {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         if self.welcome_shell_view == WelcomeShellView::Workflow {
-            return welcome_workflow_hub(self, colors, cx).into_any_element();
+            return self.workflow_view(colors, cx).into_any_element();
         }
         div()
             .flex_1()
@@ -304,63 +304,6 @@ fn welcome_repo_detail(
                     colors,
                 )))
         })
-        .into_any_element()
-}
-
-fn welcome_workflow_hub(
-    app: &GitronimoApp,
-    colors: &ThemeColors,
-    cx: &mut gpui::Context<GitronimoApp>,
-) -> AnyElement {
-    let last_action = match app.last_action {
-        Some(crate::app_state::LastAction::Refresh) => "Last action: refreshed working copy",
-        None => "Open a repository to start working",
-    };
-    let last_commit = app
-        .last_commit_summary
-        .as_deref()
-        .unwrap_or("No recent commit loaded");
-    div()
-        .flex_1()
-        .h_full()
-        .overflow_hidden()
-        .bg(colors.window_background)
-        .p_8()
-        .flex()
-        .flex_col()
-        .gap_6()
-        .child(
-            div()
-                .text_xl()
-                .font_weight(gpui::FontWeight::SEMIBOLD)
-                .text_color(colors.text_primary)
-                .child("Workflow"),
-        )
-        .child(detail_section("Recent activity", colors))
-        .child(detail_row("Summary", last_action, colors))
-        .child(detail_row("Last commit", last_commit, colors))
-        .child(
-            div()
-                .flex()
-                .gap_2()
-                .child(primary_window_action_button(
-                    "Open Working Copy",
-                    matches!(app.state, crate::app_state::ShellState::Repository(_)),
-                    colors,
-                    cx,
-                    |app, _, cx| {
-                        app.navigate_to(crate::app_state::RepositoryView::WorkingCopy, cx);
-                    },
-                ))
-                .child(file_action_button(
-                    "Open repository…",
-                    colors,
-                    cx,
-                    |_, cx| {
-                        cx.notify();
-                    },
-                )),
-        )
         .into_any_element()
 }
 

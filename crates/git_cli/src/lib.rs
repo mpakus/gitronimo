@@ -1930,6 +1930,32 @@ impl GitExecutable {
         self.mutate(repository, ["merge", branch])
     }
 
+    /// Squash-merges `branch` into HEAD and creates one commit without opening an editor.
+    ///
+    /// # Errors
+    /// Returns Git's conflict, refusal, or empty-squash failure.
+    pub fn merge_squash(
+        &self,
+        repository: &WorktreeRepository,
+        branch: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["merge", "--squash", branch])?;
+        let message = format!("Merge branch '{branch}'");
+        self.mutate(repository, ["commit", "-m", message.as_str()])
+    }
+
+    /// Fast-forward merges `branch` into HEAD.
+    ///
+    /// # Errors
+    /// Returns Git's refusal when the histories have diverged.
+    pub fn merge_ff_only(
+        &self,
+        repository: &WorktreeRepository,
+        branch: &str,
+    ) -> Result<(), GitStatusError> {
+        self.mutate(repository, ["merge", "--ff-only", branch])
+    }
+
     /// Aborts an in-progress merge, restoring the pre-merge working tree and index.
     ///
     /// # Errors
@@ -5576,6 +5602,48 @@ index 1111111..2222222 100644\n\
             repository.git.in_progress_operation(&worktree),
             InProgressOperation::None
         );
+    }
+
+    #[test]
+    fn squash_merge_collapses_topic_into_one_commit() {
+        let repository = Repository::new();
+        repository.commit("base");
+        let RepositoryLocation::Worktree(worktree) = repository
+            .git
+            .discover_repository(&repository.path)
+            .expect("worktree")
+        else {
+            panic!("worktree");
+        };
+        repository
+            .git
+            .create_branch(&worktree, "topic", None)
+            .expect("topic");
+        fs::write(repository.path.join("topic.txt"), "topic\n").expect("topic file");
+        repository.success(["add", "topic.txt"]);
+        repository.success(["commit", "-m", "topic work"]);
+        repository
+            .git
+            .checkout_branch(&worktree, "main")
+            .expect("back to main");
+        repository
+            .git
+            .merge_squash(&worktree, "topic")
+            .expect("squash");
+        assert_eq!(
+            fs::read_to_string(repository.path.join("topic.txt")).expect("topic file"),
+            "topic\n"
+        );
+        let log = String::from_utf8_lossy(
+            &repository
+                .git
+                .run(&repository.path, ["log", "-1", "--pretty=%s"])
+                .expect("log")
+                .stdout,
+        )
+        .trim()
+        .to_owned();
+        assert_eq!(log, "Merge branch 'topic'");
     }
 
     #[test]

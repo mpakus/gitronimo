@@ -54,6 +54,7 @@ impl GitronimoApp {
                     RepositoryView::PullRequests => "Pull Requests",
                     RepositoryView::BranchesReview => "Branches Review",
                     RepositoryView::Settings => "Settings",
+                    RepositoryView::Workflow => "Workflow",
                     RepositoryView::Stashes => "Stashes",
                     RepositoryView::Remotes => "Remotes",
                     _ => "Git workspace",
@@ -247,6 +248,8 @@ impl GitronimoApp {
 
     fn shell_tabs(&self, colors: &ThemeColors, cx: &mut gpui::Context<Self>) -> AnyElement {
         let on_welcome = matches!(self.state, ShellState::Welcome);
+        let workflow_active = (on_welcome && self.welcome_shell_view == WelcomeShellView::Workflow)
+            || (!on_welcome && self.repository_view == RepositoryView::Workflow);
         div()
             .flex()
             .items_center()
@@ -270,10 +273,10 @@ impl GitronimoApp {
             .child(shell_tab_button(
                 "Workflow",
                 IconKind::Workflow,
-                on_welcome && self.welcome_shell_view == WelcomeShellView::Workflow,
+                workflow_active,
                 colors,
                 cx,
-                |app, cx| app.set_welcome_shell_view(WelcomeShellView::Workflow, cx),
+                GitronimoApp::open_workflow,
             ))
             .into_any_element()
     }
