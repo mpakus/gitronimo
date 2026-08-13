@@ -29,13 +29,66 @@ pub(crate) const DEFAULT_SIDEBAR_WIDTH: f32 = 220.0;
 pub(crate) const MINIMUM_LIST_PANE_WIDTH: f32 = 200.0;
 pub(crate) const MAXIMUM_LIST_PANE_WIDTH: f32 = 600.0;
 pub(crate) const DEFAULT_LIST_PANE_WIDTH: f32 = 400.0;
-pub(crate) const ACTIVITY_LOG_CAPACITY: usize = 50;
+pub(crate) const ACTIVITY_LOG_CAPACITY: usize = 100;
+
+/// Severity / role of an activity line for the status bar and history popup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ActivityKind {
+    Success,
+    Error,
+    Progress,
+    Confirm,
+    Info,
+}
 
 /// One status / error / notification line retained for the activity history popup.
 #[derive(Clone, Debug)]
 pub(crate) struct ActivityLogEntry {
     pub message: String,
+    pub kind: ActivityKind,
     pub at: SystemTime,
+}
+
+/// Classifies status-line copy for color and history filtering.
+pub(crate) fn classify_activity(message: &str) -> ActivityKind {
+    let lower = message.to_lowercase();
+    if lower.contains("failed")
+        || lower.contains("unable")
+        || lower.contains("could not")
+        || lower.contains("error:")
+        || lower.contains("refused")
+    {
+        ActivityKind::Error
+    } else if lower.starts_with("confirm ")
+        || lower.contains("confirm deletion")
+        || lower.contains("confirm discard")
+        || lower.contains("cancelled")
+        || lower.contains("review deletion")
+    {
+        ActivityKind::Confirm
+    } else if lower.contains("complete")
+        || lower.contains("refreshed")
+        || lower.contains("opened")
+        || lower.starts_with("pinned ")
+        || lower.starts_with("unpinned ")
+        || lower.starts_with("archived ")
+        || lower.starts_with("unarchived ")
+        || lower.ends_with(" saved.")
+        || lower.ends_with(" created.")
+        || lower.ends_with(" deleted.")
+        || lower.ends_with(" renamed.")
+    {
+        ActivityKind::Success
+    } else if message.ends_with('…') || lower.contains("in progress") {
+        ActivityKind::Progress
+    } else {
+        ActivityKind::Info
+    }
+}
+
+/// Working-copy refresh chatter that would drown out push/error/confirm lines.
+pub(crate) fn is_working_copy_refresh_noise(message: &str) -> bool {
+    message.starts_with("Refreshing working copy") || message.starts_with("Working copy refreshed")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -854,7 +907,36 @@ pub(crate) fn eligible_trash_path(root: &Path, path: &GitPath) -> std::io::Resul
 
 #[cfg(test)]
 mod tests {
-    use super::{AppConfirmDialog, branch_not_fully_merged_error};
+    use super::{
+        ActivityKind, AppConfirmDialog, branch_not_fully_merged_error, classify_activity,
+        is_working_copy_refresh_noise,
+    };
+
+    #[test]
+    fn classifies_success_error_and_confirm_activity() {
+        assert_eq!(
+            classify_activity("Pushing main to origin/main complete."),
+            ActivityKind::Success
+        );
+        assert_eq!(
+            classify_activity("Could not delete \"feature\": it contains unmerged changes."),
+            ActivityKind::Error
+        );
+        assert_eq!(
+            classify_activity("Confirm deletion of branch feature/ui-improvements."),
+            ActivityKind::Confirm
+        );
+        assert_eq!(
+            classify_activity("Refreshing working copy…"),
+            ActivityKind::Progress
+        );
+        assert!(is_working_copy_refresh_noise(
+            "Working copy refreshed: 0 change(s)."
+        ));
+        assert!(!is_working_copy_refresh_noise(
+            "Pushing main to origin/main complete."
+        ));
+    }
 
     #[test]
     fn detects_not_fully_merged_git_errors() {

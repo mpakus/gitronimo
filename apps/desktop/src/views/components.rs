@@ -838,17 +838,19 @@ pub(crate) fn empty_status_message(title: &str) -> &'static str {
 }
 
 pub(crate) fn activity_color(activity: &str, colors: &ThemeColors) -> gpui::Rgba {
-    if activity.contains("failed") || activity.contains("Unable") {
-        colors.danger
-    } else if activity.contains("complete")
-        || activity.contains("refreshed")
-        || activity.contains("opened")
-    {
-        colors.success
-    } else if activity.ends_with('…') || activity.contains("in progress") {
-        colors.warning
-    } else {
-        colors.text_secondary
+    activity_kind_color(crate::app_state::classify_activity(activity), colors)
+}
+
+pub(crate) fn activity_kind_color(
+    kind: crate::app_state::ActivityKind,
+    colors: &ThemeColors,
+) -> gpui::Rgba {
+    match kind {
+        crate::app_state::ActivityKind::Success => colors.success,
+        crate::app_state::ActivityKind::Error => colors.danger,
+        crate::app_state::ActivityKind::Progress => colors.warning,
+        crate::app_state::ActivityKind::Confirm => colors.accent,
+        crate::app_state::ActivityKind::Info => colors.text_secondary,
     }
 }
 

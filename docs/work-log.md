@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-12 — Message history: successes, errors, scroll
+
+**Intent:** The Message history popup should retain success notices (e.g. push complete), errors, and confirmations—not only refresh chatter—and the list must scroll when it exceeds the popup height.
+
+**Files:** `app_state.rs` (kinds), `main.rs` (`set_activity` coalesce), `workspace.rs` (scroll + row styling), `components.rs` (`activity_color`), `docs/work-log.md`.
+
+**Acceptance:** After push + refreshes, history still shows the push complete line; errors/confirmations appear with distinct colors; mouse wheel scrolls the list.
+
 ## 2026-08-12 — Persist pinned branches across relaunch
 
 **Intent:** Pinned branches must look the same after quitting and reopening. Prefs already store pins, but unsynchronized preference writes (window geometry, widths, etc.) can overwrite them, and nested pins stay hidden inside folders so relaunch looks unchanged.
@@ -22,7 +30,7 @@
 
 **Files:** `app_state.rs` (log + toggle), `main.rs` (`set_activity`), `workspace.rs` (button + popup), `docs/work-log.md`.
 
-**Acceptance:** Messages append to a 50-cap log; button opens anchored popup; newest first; click outside / button again closes; current activity line unchanged.
+**Acceptance:** Messages append to a capped log; button opens anchored popup; newest first; click outside / button again closes; current activity line unchanged. Later: successes/errors/confirmations retained (refresh coalesced); list scrolls.
 
 ## 2026-08-12 — Tower-style sidebar HEAD vs selection
 

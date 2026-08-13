@@ -12,8 +12,8 @@ use crate::app_state::{
 };
 
 use crate::views::components::{
-    activity_color, activity_label, error_view, file_action_button, loading_view,
-    primary_action_button, sidebar_resize_handle,
+    activity_color, activity_kind_color, activity_label, error_view, file_action_button,
+    loading_view, primary_action_button, sidebar_resize_handle,
 };
 use crate::views::icons::{IconKind, icon};
 
@@ -1385,6 +1385,9 @@ impl GitronimoApp {
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {
         let entries = self.activity_log.iter().cloned().collect::<Vec<_>>();
+        let row_count = entries.len().max(1);
+        let scroll_height = (f32::from(u16::try_from(row_count).unwrap_or(u16::MAX)) * 28.0 + 8.0)
+            .clamp(80.0, 280.0);
         div()
             .absolute()
             .inset_0()
@@ -1400,8 +1403,7 @@ impl GitronimoApp {
                     .absolute()
                     .bottom(px(30.0))
                     .left(px(8.0))
-                    .w(px(420.0))
-                    .max_h(px(320.0))
+                    .w(px(440.0))
                     .flex()
                     .flex_col()
                     .bg(colors.panel_background)
@@ -1442,8 +1444,7 @@ impl GitronimoApp {
                     .child(
                         div()
                             .id("activity-log-scroll")
-                            .flex_1()
-                            .min_h(px(0.0))
+                            .h(px(scroll_height))
                             .overflow_y_scroll()
                             .py_1()
                             .children(if entries.is_empty() {
@@ -1461,7 +1462,7 @@ impl GitronimoApp {
                                     .into_iter()
                                     .enumerate()
                                     .map(|(index, entry)| {
-                                        let color = activity_color(&entry.message, colors);
+                                        let color = activity_kind_color(entry.kind, colors);
                                         div()
                                             .id(("activity-log-row", index))
                                             .px_3()
@@ -1472,8 +1473,17 @@ impl GitronimoApp {
                                             .hover(|style| style.bg(colors.selection))
                                             .child(
                                                 div()
+                                                    .mt(px(5.0))
                                                     .flex_shrink_0()
-                                                    .w(px(52.0))
+                                                    .w(px(6.0))
+                                                    .h(px(6.0))
+                                                    .rounded_full()
+                                                    .bg(color),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .w(px(40.0))
                                                     .text_xs()
                                                     .text_color(colors.text_muted)
                                                     .child(format_activity_age(entry.at)),

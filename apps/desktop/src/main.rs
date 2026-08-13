@@ -58,8 +58,9 @@ use crate::app_state::{
     PushOption, RefContext, RefContextSubmenu, RepositoryView, ShellState, ShortcutReferenceState,
     StashAction, SubmodulePushMode, TextPromptKind, ThemeMode, WelcomeRepoSnapshot,
     WelcomeShellView, appearance_from_window, branch_not_fully_merged_error, clamp_list_pane_width,
-    clamp_sidebar_width, discard_selected, git_failure_message, network_failure_message,
-    repository_is_available, repository_unavailable_message, resize_width,
+    clamp_sidebar_width, classify_activity, discard_selected, git_failure_message,
+    is_working_copy_refresh_noise, network_failure_message, repository_is_available,
+    repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
 use crate::views::single_line_input::register_input_bindings;
@@ -369,6 +370,7 @@ impl GitronimoApp {
             activity: "Choose a repository to begin.".into(),
             activity_log: std::collections::VecDeque::from([ActivityLogEntry {
                 message: "Choose a repository to begin.".into(),
+                kind: classify_activity("Choose a repository to begin."),
                 at: SystemTime::now(),
             }]),
             show_activity_log: false,
@@ -607,11 +609,12 @@ impl GitronimoApp {
             commit_composer_expanded: false,
             network_progress: 0.0,
             last_network_result: None,
-            activity: activity.clone(),
             activity_log: std::collections::VecDeque::from([ActivityLogEntry {
-                message: activity,
+                message: activity.clone(),
+                kind: classify_activity(&activity),
                 at: SystemTime::now(),
             }]),
+            activity,
             show_activity_log: false,
             working_copy: None,
             worktree_show_all_files: false,
@@ -779,17 +782,34 @@ impl GitronimoApp {
             }));
     }
 
-    /// Update the status line and append to the capped activity history (skipping duplicates).
+    /// Update the status line and append to the capped activity history.
+    ///
+    /// Consecutive identical lines are skipped. Consecutive working-copy refresh
+    /// chatter is coalesced so successes, errors, and confirmations stay visible.
     pub(crate) fn set_activity(&mut self, message: impl AsRef<str>) {
         let message = message.as_ref().to_owned();
-        if self
+        let kind = classify_activity(&message);
+        let now = SystemTime::now();
+        if is_working_copy_refresh_noise(&message)
+            && self
+                .activity_log
+                .front()
+                .is_some_and(|entry| is_working_copy_refresh_noise(&entry.message))
+        {
+            if let Some(front) = self.activity_log.front_mut() {
+                front.message.clone_from(&message);
+                front.kind = kind;
+                front.at = now;
+            }
+        } else if self
             .activity_log
             .front()
             .is_none_or(|entry| entry.message != message)
         {
             self.activity_log.push_front(ActivityLogEntry {
                 message: message.clone(),
-                at: SystemTime::now(),
+                kind,
+                at: now,
             });
             while self.activity_log.len() > ACTIVITY_LOG_CAPACITY {
                 self.activity_log.pop_back();
