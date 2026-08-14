@@ -12,7 +12,7 @@ use std::{
     time::SystemTime,
 };
 
-use git_cli::LoadedDiff;
+use git_cli::{LoadedDiff, redact_git_text};
 use git_domain::{
     BlameLine, GitPath, GraphRow, GraphState, HistoryCommit, HistoryReference, HostedRepository,
     LfsEntry, PullRequestDetail, PullRequestSummary, RebaseTodoItem, RefDecoration, RefSnapshot,
@@ -1054,6 +1054,7 @@ pub(crate) fn network_failure_message(label: &str, error: &str) -> String {
 }
 
 pub(crate) fn git_failure_message(label: &str, error: &str) -> String {
+    let error = redact_git_text(error);
     if error.to_lowercase().contains("index.lock") {
         format!(
             "{label} could not run because Git's index is locked. Check that no Git process is still running; if none is, inspect .git/index.lock before removing it manually."

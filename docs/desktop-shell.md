@@ -1,6 +1,6 @@
 # Desktop shell chrome
 
-Functional reference for the repository window chrome that sits outside individual views (toolbar, sidebar BRANCHES, activity bar, overlays). Updated for the 2026-08-12 shell pass.
+Functional reference for the repository window chrome that sits outside individual views (toolbar, sidebar BRANCHES, activity bar, overlays).
 
 ## Layout
 
@@ -103,4 +103,4 @@ Dispatch is `run_palette_command` in `main.rs`. Adding a user-facing action that
 
 ## About GitRonimo
 
-**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **0.9.2**, bump after each release), “Made in Austin ✩ Texas”, and a link to https://aomega.co. Click outside to dismiss. The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.
+**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **1.0.0**, bump after each release), “Made in Austin ✩ Texas”, and a link to https://aomega.co. Click outside to dismiss. The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.

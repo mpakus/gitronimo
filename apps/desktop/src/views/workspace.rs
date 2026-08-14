@@ -1725,7 +1725,7 @@ impl GitronimoApp {
     ) -> Option<AnyElement> {
         let operation = self.network_operation.as_ref()?;
         let label = operation.lock().ok()?.label.clone();
-        let fill = self.network_progress.clamp(0.08, 0.92);
+        let fill = crate::views::components::network_progress_fill(self.network_progress);
         Some(
             div()
                 .flex()

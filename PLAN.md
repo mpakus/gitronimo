@@ -144,19 +144,19 @@ Do not implement these during MVP work:
 
 The MVP is considered successful when all of the following are true:
 
-- [ ] A new user can open a repository and understand its current state without Terminal.
-- [ ] Status parsing handles spaces, Unicode, tabs, newlines, renames, untracked files, ignored files, conflicts, and submodule status safely.
-- [ ] The application never constructs a Git command through shell string concatenation.
-- [ ] A repository mutation cannot run concurrently with another mutation in the same repository.
-- [ ] The UI stays responsive while loading at least 50,000 commits.
-- [ ] The initial history page appears without loading the complete history.
-- [ ] A 10,000-file repository does not render all rows at once.
-- [ ] Staging, unstaging, committing, fetching, pulling, and pushing have integration tests.
-- [ ] Destructive actions display the affected repository and paths.
-- [ ] Every failure shows the Git command category, exit status, and useful stderr without exposing secrets.
+- [x] A new user can open a repository and understand its current state without Terminal.
+- [x] Status parsing handles spaces, Unicode, tabs, newlines, renames, untracked files, ignored files, conflicts, and submodule status safely.
+- [x] The application never constructs a Git command through shell string concatenation.
+- [x] A repository mutation cannot run concurrently with another mutation in the same repository.
+- [x] The UI stays responsive while loading at least 50,000 commits.
+- [x] The initial history page appears without loading the complete history.
+- [x] A 10,000-file repository does not render all rows at once.
+- [x] Staging, unstaging, committing, fetching, pulling, and pushing have integration tests.
+- [x] Destructive actions display the affected repository and paths.
+- [x] Every failure shows the Git command category, exit status, and useful stderr without exposing secrets.
 - [x] The application can be built as a universal or separate `arm64` and `x86_64` macOS app.
 - [x] A signed and notarized release workflow is documented.
-- [ ] No third-party copyrighted assets or trademarks are packaged with the application.
+- [x] No third-party copyrighted assets or trademarks are packaged with the application.
 
 ---
 
@@ -166,25 +166,23 @@ The MVP is considered successful when all of the following are true:
 
 Use **GPUI** for the native desktop UI.
 
-Initial baseline:
+Pinned baseline:
 
 ```toml
 gpui = "=0.2.2"
-gpui-component = "=0.5.1"
 ```
+
+`gpui-component` was evaluated in Phase 0 and **removed** (ADR 0001). Build controls in `ui_kit` with GPUI primitives. Do not add `gpui-component` without a new ADR.
 
 Rules:
 
 - Commit `Cargo.lock`.
-- Pin exact GPUI and component versions.
+- Pin exact GPUI versions.
 - Do not use `*`, an unpinned Git branch, or an unpinned Git revision.
-- Put all third-party GPUI components behind the local `ui_kit` crate.
 - A GPUI upgrade must be its own pull request.
 - Run the complete test suite and manual UI smoke checklist on every GPUI upgrade.
 - Use the current stable Rust toolchain required by the pinned GPUI release.
 - Commit `rust-toolchain.toml`.
-
-`gpui-component` is adopted conditionally after the Phase 0 spike. It offers useful controls, docking, resizable layouts, themes, and virtualized lists, but it must not leak throughout application code. If it becomes incompatible, only `ui_kit` should need replacement.
 
 ## 5.2 Git implementation
 
@@ -1311,24 +1309,24 @@ The open-source default must not send telemetry. Any future telemetry must be op
 
 ## 18. Security checklist
 
-- [ ] No shell command construction.
-- [ ] No credentials stored by default.
-- [ ] Existing Git credential helpers are used.
-- [ ] SSH private keys are never read by the application.
-- [ ] URLs are redacted before logging.
-- [ ] Environment variables are allowlisted for diagnostic export.
-- [ ] Temporary commit-message and patch files use secure permissions.
-- [ ] Temporary files are removed on success and best-effort removed on failure.
-- [ ] Repository paths are canonicalized carefully without breaking symlinked worktrees.
-- [ ] Path arguments are separated with `--`.
-- [ ] Ref names are validated with Git, not a hand-written incomplete regex alone.
-- [ ] External diff and textconv execution is disabled for internal parsing unless explicitly supported.
-- [ ] Destructive operations require confirmation.
-- [ ] Force push defaults to force-with-lease.
-- [ ] Dependencies are audited with `cargo-deny`.
-- [ ] Rust advisories are checked in CI.
-- [ ] Release artifacts are signed and checksummed.
-- [ ] Notarization credentials exist only in protected CI secrets.
+- [x] No shell command construction.
+- [x] No credentials stored by default.
+- [x] Existing Git credential helpers are used.
+- [x] SSH private keys are never read by the application.
+- [x] URLs are redacted before logging.
+- [x] Environment variables are allowlisted for diagnostic export.
+- [x] Temporary commit-message and patch files use secure permissions.
+- [x] Temporary files are removed on success and best-effort removed on failure.
+- [x] Repository paths are canonicalized carefully without breaking symlinked worktrees.
+- [x] Path arguments are separated with `--`.
+- [x] Ref names are validated with Git, not a hand-written incomplete regex alone.
+- [x] External diff and textconv execution is disabled for internal parsing unless explicitly supported.
+- [x] Destructive operations require confirmation.
+- [x] Force push defaults to force-with-lease.
+- [x] Dependencies are audited with `cargo-deny`.
+- [x] Rust advisories are checked in CI.
+- [x] Release artifacts are signed and checksummed.
+- [x] Notarization credentials exist only in protected CI secrets.
 
 ---
 
@@ -1937,9 +1935,9 @@ Turn the functional application into a reliable open-source beta.
 - [x] Build Apple Silicon release.
 - [x] Build Intel release.
 - [x] Build universal release if supported.
-- [ ] Sign with Developer ID.
-- [ ] Notarize with `notarytool`.
-- [ ] Staple notarization ticket.
+- [x] Sign with Developer ID.
+- [x] Notarize with `notarytool`.
+- [x] Staple notarization ticket.
 - [x] Package `.dmg` or `.zip`.
 - [x] Generate SHA-256 checksums.
 - [ ] Run clean-machine smoke test.
@@ -1948,7 +1946,7 @@ Turn the functional application into a reliable open-source beta.
 
 ## Exit criteria
 
-- [ ] All MVP success criteria pass.
+- [x] All MVP success criteria pass.
 - [ ] Release artifact opens normally under Gatekeeper.
 - [ ] Core workflows pass on a clean macOS user account.
 - [x] Known limitations are documented.
@@ -2118,7 +2116,7 @@ Create a companion `AGENTS.md` containing at least:
 - Never use shell command strings for Git.
 - Never place Git/domain logic in GPUI Render implementations.
 - Never import GPUI in git_domain.
-- Keep gpui-component usage inside ui_kit.
+- Do not add `gpui-component` (ADR 0001); use `ui_kit` primitives.
 - Pin all framework versions and commit Cargo.lock.
 - Add tests for every Git parser and mutation.
 - Use local temporary repositories for integration tests.
@@ -2199,6 +2197,8 @@ A phase is done only when all checklist items and exit criteria in that phase pa
 
 ## 27. Release checklist
 
+Product version is `APP_VERSION` in `apps/desktop/src/views/about.rs` and `[package.metadata.packager] version` in `apps/desktop/Cargo.toml` (currently **1.0.0**). The Cargo workspace crate version is independent — do not bump it for a product release.
+
 ### Code quality
 
 - [x] Clean release build.
@@ -2246,12 +2246,12 @@ A phase is done only when all checklist items and exit criteria in that phase pa
 
 ### Open source
 
-- [ ] LICENSE present.
-- [ ] Third-party notices current.
+- [x] LICENSE present.
+- [x] Third-party notices current.
 - [ ] Source tag matches binary.
-- [ ] Build instructions reproduce release.
-- [ ] Known limitations published.
-- [ ] Security contact published.
+- [x] Build instructions reproduce release.
+- [x] Known limitations published.
+- [x] Security contact published.
 
 ---
 
@@ -2282,10 +2282,9 @@ A phase is done only when all checklist items and exit criteria in that phase pa
 
 **Mitigation:**
 
-- isolate it in `ui_kit`;
-- adopt only components validated in Phase 0;
-- maintain small project-owned primitives;
-- avoid depending on its editor for MVP diff rendering.
+- library removed after Phase 0 (ADR 0001);
+- project-owned primitives live in `ui_kit`;
+- re-evaluate only through a new ADR and dedicated spike.
 
 ## Risk: Git edge cases
 
@@ -2386,7 +2385,7 @@ The plan is based on the following current project facts as of 2026-08-06:
 - GPUI uses Metal on macOS.
 - GPUI provides actions, an event-loop-integrated async executor, test support, and virtualized uniform lists.
 - GPUI `0.2.2` is published under Apache-2.0.
-- `gpui-component 0.5.1` depends on GPUI `0.2.2` and provides desktop controls, resizable layouts, themes, and virtualized list/table components.
+- `gpui-component 0.5.1` was evaluated against GPUI `0.2.2` in Phase 0 and removed (ADR 0001).
 - Git porcelain-v2 status offers structured, extensible output, and `-z` supports safe machine parsing of filenames.
 - `git rev-list` and related log commands support commit-ancestry traversal and bounded history queries.
 - `gix` is useful as a Rust Git library but still has varying feature/stability levels across its crates; it should not replace system Git semantics in the MVP.
@@ -2399,7 +2398,6 @@ Primary references:
 - GPUI: <https://gpui.rs/>
 - GPUI source and README: <https://github.com/zed-industries/zed/tree/main/crates/gpui>
 - GPUI API docs: <https://docs.rs/gpui/>
-- GPUI Component: <https://longbridge.github.io/gpui-component/>
 - Git status format: <https://git-scm.com/docs/git-status>
 - Git diff: <https://git-scm.com/docs/git-diff>
 - Git revision traversal: <https://git-scm.com/docs/git-rev-list>

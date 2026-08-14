@@ -259,9 +259,16 @@ fn application_menu_is_named_gitronimo_and_starts_with_about() {
 fn about_dialog_uses_the_release_version() {
     assert_eq!(
         crate::views::about::APP_VERSION,
-        "0.9.2",
+        "1.0.0",
         "bump APP_VERSION in views/about.rs after each release"
     );
+}
+
+#[test]
+fn network_progress_fill_follows_git_percentages() {
+    assert!((crate::views::components::network_progress_fill(0.0) - 0.12).abs() < f32::EPSILON);
+    assert!((crate::views::components::network_progress_fill(0.45) - 0.45).abs() < f32::EPSILON);
+    assert!((crate::views::components::network_progress_fill(1.0) - 1.0).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -295,6 +302,12 @@ fn repository_loss_and_index_locks_have_safe_recovery_messages() {
     let message = git_failure_message("Stage selected", "fatal: .git/index.lock: File exists");
     assert!(message.contains("no Git process"));
     assert!(message.contains("before removing it manually"));
+    let leaked = git_failure_message(
+        "Push",
+        "fatal: could not read https://octocat:s3cret@github.com/org/repo.git",
+    );
+    assert!(!leaked.contains("s3cret"));
+    assert!(leaked.contains("***:***@github.com"));
 }
 
 #[test]

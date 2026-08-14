@@ -990,13 +990,23 @@ impl Render for ActionTooltip {
     }
 }
 
+/// Git `--progress` fraction in `[0, 1]`. `0.0` means no percentage line yet.
+#[must_use]
+pub(crate) fn network_progress_fill(progress: f32) -> f32 {
+    if progress <= 0.0 {
+        0.12
+    } else {
+        progress.clamp(0.02, 1.0)
+    }
+}
+
 pub(crate) fn remote_progress_footer(
     label: &str,
     progress: f32,
     colors: &ThemeColors,
     cx: &mut gpui::Context<GitronimoApp>,
 ) -> gpui::AnyElement {
-    let fill = progress.clamp(0.08, 0.92);
+    let fill = network_progress_fill(progress);
     div()
         .mt_auto()
         .mx_3()

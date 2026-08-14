@@ -5,7 +5,7 @@ use std::{
     ffi::{OsStr, OsString},
     fs,
     io::{self, Read, Write},
-    os::unix::ffi::OsStringExt,
+    os::unix::{ffi::OsStringExt, fs::OpenOptionsExt},
     path::{Path, PathBuf},
     process::{Child, ChildStderr, Command, ExitStatus, Output, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
@@ -334,8 +334,14 @@ impl GitExecutable {
 
         let mut stats = HashMap::new();
         for args in [
-            vec!["diff", "--numstat"],
-            vec!["diff", "--cached", "--numstat"],
+            vec!["diff", "--no-ext-diff", "--no-textconv", "--numstat"],
+            vec![
+                "diff",
+                "--cached",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--numstat",
+            ],
         ] {
             let output = self.run(&repository.worktree_root, args)?;
             if !output.status.success() {
@@ -2128,11 +2134,12 @@ impl GitExecutable {
             return Err(GitStatusError::MissingIdentity);
         }
         let message_path = write_commit_message(&request.subject, &request.body)?;
+        let _cleanup = RemoveTempFile(message_path.clone());
         let mut args = vec![
             OsString::from("commit"),
             OsString::from("--cleanup=verbatim"),
             OsString::from("-F"),
-            message_path.clone().into_os_string(),
+            message_path.into_os_string(),
         ];
         if request.amend {
             args.push(OsString::from("--amend"));
@@ -2140,9 +2147,7 @@ impl GitExecutable {
         if request.sign_off {
             args.push(OsString::from("--signoff"));
         }
-        let result = self.mutate(repository, args);
-        let _ = fs::remove_file(message_path);
-        result
+        self.mutate(repository, args)
     }
 
     /// Discards only tracked paths by restoring their HEAD version.
@@ -2328,12 +2333,80 @@ fn write_commit_message(subject: &str, body: &str) -> Result<PathBuf, GitStatusE
     let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
+        .mode(0o600)
         .open(&path)?;
     writeln!(file, "{subject}")?;
     if !body.is_empty() {
         writeln!(file, "\n{body}")?;
     }
     Ok(path)
+}
+
+struct RemoveTempFile(PathBuf);
+
+impl Drop for RemoveTempFile {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// Strips URL userinfo and common token prefixes from Git stderr shown in the UI.
+#[must_use]
+pub fn redact_git_text(input: &str) -> String {
+    let with_urls = redact_url_userinfo(input);
+    ["ghp_", "gho_", "ghu_", "ghs_", "github_pat_"]
+        .into_iter()
+        .fold(with_urls, |text, prefix| {
+            redact_prefixed_token(&text, prefix)
+        })
+}
+
+fn redact_url_userinfo(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(scheme_end) = rest.find("://") {
+        output.push_str(&rest[..scheme_end + 3]);
+        rest = &rest[scheme_end + 3..];
+        let end = rest
+            .find(|character: char| {
+                character == '/'
+                    || character.is_whitespace()
+                    || character == '\''
+                    || character == '"'
+            })
+            .unwrap_or(rest.len());
+        let hostish = &rest[..end];
+        if let Some(at) = hostish.rfind('@') {
+            let userinfo = &hostish[..at];
+            if userinfo.contains(':') {
+                output.push_str("***:***");
+                output.push_str(&hostish[at..]);
+                rest = &rest[end..];
+                continue;
+            }
+        }
+        output.push_str(hostish);
+        rest = &rest[end..];
+    }
+    output.push_str(rest);
+    output
+}
+
+fn redact_prefixed_token(input: &str, prefix: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(pos) = rest.find(prefix) {
+        output.push_str(&rest[..pos]);
+        output.push_str(prefix);
+        output.push_str("***");
+        rest = &rest[pos + prefix.len()..];
+        let skip = rest
+            .find(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+            .unwrap_or(rest.len());
+        rest = &rest[skip..];
+    }
+    output.push_str(rest);
+    output
 }
 
 impl RepositoryDiscoverer for GitExecutable {
@@ -2451,7 +2524,7 @@ fn command_error(output: &Output) -> GitStatusError {
     let message = if message.is_empty() {
         "Git command failed without an error message.".into()
     } else {
-        message
+        redact_git_text(&message)
     };
     GitStatusError::CommandFailed(message)
 }
@@ -3393,7 +3466,8 @@ mod tests {
         RenameKind, ResetMode, git_candidates, parse_commit_records, parse_git_progress_line,
         parse_lfs_status, parse_nul_paths, parse_numstat_line, parse_porcelain_v2_z,
         parse_rebase_todo, parse_ref_ahead_behind, parse_ref_snapshot, parse_signature,
-        parse_stash_records, parse_unified_diff, read_limited, trim_oid,
+        parse_stash_records, parse_unified_diff, read_limited, redact_git_text, trim_oid,
+        write_commit_message,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
@@ -3409,6 +3483,36 @@ mod tests {
         let output = vec![b'x'; MAX_PROCESS_OUTPUT_BYTES + 1];
         let error = read_limited(Cursor::new(output)).expect_err("output should be bounded");
         assert_eq!(error.kind(), std::io::ErrorKind::FileTooLarge);
+    }
+
+    #[test]
+    fn redact_git_text_strips_url_userinfo_and_token_prefixes() {
+        assert_eq!(
+            redact_git_text(
+                "fatal: could not read https://octocat:ghp_abcDEF123@github.com/org/repo.git"
+            ),
+            "fatal: could not read https://***:***@github.com/org/repo.git"
+        );
+        assert_eq!(
+            redact_git_text("Authorization: token github_pat_ABCDEFG"),
+            "Authorization: token github_pat_***"
+        );
+        assert_eq!(
+            redact_git_text("nothing sensitive here"),
+            "nothing sensitive here"
+        );
+    }
+
+    #[test]
+    fn commit_message_files_are_owner_readable_only() {
+        let path = write_commit_message("subject", "body").expect("temp message should write");
+        let mode = fs::metadata(&path)
+            .expect("temp message should exist")
+            .permissions()
+            .mode()
+            & 0o777;
+        let _ = fs::remove_file(&path);
+        assert_eq!(mode, 0o600);
     }
 
     #[test]

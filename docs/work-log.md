@@ -1,5 +1,21 @@
 # Implementation work log
 
+## 2026-08-14 — PLAN §18 temp files, textconv, URL redaction
+
+**Intent:** Close remaining 1.0.0 security checklist items: commit-message files `0o600` and always unlinked; `diff --numstat` uses `--no-ext-diff --no-textconv`; Git stderr/activity text redacts URL userinfo and token prefixes.
+
+**Files:** `crates/git_cli/src/lib.rs`, `apps/desktop/src/app_state.rs`, `apps/desktop/src/tests.rs`, `PLAN.md`, `docs/todo-v1.md`.
+
+**Acceptance:** Tests cover 0o600 + unlink, numstat flags, and redaction. PLAN §18 items that this implements are checked.
+
+## 2026-08-14 — Cut product version 1.0.0
+
+**Intent:** Ship the existing 0.9 daily client as **1.0.0**. Close doc lies (screens links, gpui-component baseline, notarization “incomplete”). Keep OAuth, enterprise GitHub, VoiceOver, and in-app updates as known limitations. Network progress bar should follow Git `%` lines instead of a fake 45% start / 92% cap.
+
+**Files:** `apps/desktop/src/views/about.rs`, `apps/desktop/Cargo.toml`, `apps/desktop/src/tests.rs`, `apps/desktop/src/main.rs`, `views/workspace.rs`, `views/components.rs`, `CHANGELOG.md`, `README.md`, `PLAN.md`, `docs/*`.
+
+**Acceptance:** About and packager show `1.0.0`. README points at GitHub latest. Known limitations no longer claim notarization is missing. Merge/rebase are documented as continue/abort + interactive rebase view (not a missing feature).
+
 ## 2026-08-14 — Remove third-party Git-client product names from docs
 
 **Intent:** Describe GitRonimo as its own client. Do not name other commercial Git GUIs in product docs, agent rules, or code comments.

@@ -38,7 +38,7 @@ Working Copy file selection:
 - When all visible files are selected, click a row to clear selection; click again to select all.
 - With multiple files selected, clicking a row's stage checkbox stages or unstages all selected files.
 
-Full shortcut and selection rules: [`keyboard-shortcuts.md`](keyboard-shortcuts.md). Screenshot inventory: [`screens/README.md`](screens/README.md).
+Full shortcut and selection rules: [`keyboard-shortcuts.md`](keyboard-shortcuts.md).
 
 GPUI 0.2.2 does not expose macOS accessibility roles or programmatic labels for its custom elements, so VoiceOver parity is a known beta limitation. It will need framework support before Gitronimo can provide a complete assistive-technology experience.
 
@@ -60,4 +60,4 @@ Local and CI development bundles are unsigned `GitRonimo.app`. macOS Gatekeeper 
 
 ## About GitRonimo
 
-**GitRonimo → About GitRonimo** (or palette **About GitRonimo**) shows product version **0.9.2**. After a release, bump `APP_VERSION` in `apps/desktop/src/views/about.rs`. Click outside the overlay to dismiss it.
+**GitRonimo → About GitRonimo** (or palette **About GitRonimo**) shows product version **1.0.0**. After a release, bump `APP_VERSION` in `apps/desktop/src/views/about.rs`. Click outside the overlay to dismiss it.

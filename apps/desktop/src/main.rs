@@ -5461,7 +5461,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let worker_repository = repository.clone();
         self.mutation_in_flight = true;
         self.network_operation = Some(operation.clone());
-        self.network_progress = 0.45;
+        self.network_progress = 0.0;
         self.set_activity(format!("{label} in progress. You can cancel it."));
         cx.spawn(async move |this, cx| {
             let (progress_tx, progress_rx) = mpsc::channel::<f32>();

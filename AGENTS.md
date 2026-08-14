@@ -41,7 +41,7 @@ System `cargo` older than 1.97 will fail on this workspace.
 | `docs/implementation-boundaries.md` | Layering constraints |
 | `docs/troubleshooting.md` | User-facing recovery and keyboard reference |
 | `docs/keyboard-shortcuts.md` | Global shortcuts and Working Copy selection rules |
-| `docs/screens/README.md` | Screenshot inventory and attribution rules |
+| `docs/todo-v1.md` | Leftover work toward 1.0.0 |
 | `docs/dependency-policy.md` | `cargo deny` policy |
 | `docs/packaging.md` | macOS Apple Silicon / Intel bundles, signing |
 | `docs/adr/` | Architecture decision records |

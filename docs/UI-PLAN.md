@@ -262,7 +262,7 @@ Manual QA — optional follow-up:
 **Automated gates (2026-08-11):**
 - [x] `cargo fmt --all -- --check`
 - [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- [x] `cargo test --workspace --all-features` (102 tests)
+- [x] `cargo test --workspace --all-features`
 - [x] `cargo deny check`
 
 ---

@@ -6,11 +6,11 @@
 
 GitRonimo is a native macOS Git client written in Rust with [GPUI](https://gpui.rs). It keeps Git as the source of truth and uses your installed Git executable for repository operations, credential helpers, SSH, hooks, signing, and filters.
 
-Product version **0.9.2** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
+Product version **1.0.0** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
 
 ![GitRonimo working copy](docs/screenshot.png)
 
-## 0.9.2 scope
+## 1.0.0 scope
 
 The current release includes:
 
@@ -22,12 +22,12 @@ The current release includes:
 - **Branches** — context menu (pin/archive/rename/delete…); pinned branches persist and sit at the top of BRANCHES; unmerged delete offers a force-confirm dialog
 - **Network** — fetch, pull, publish, and push in the background with cancellation; progress in the activity bar; Pull/Push dialogs for options
 - **Command palette / Message history** — searchable scrollable palette (`Command-Shift-P`); activity-bar history of statuses, errors, and confirmations
-- **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **0.9.2**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co))
+- **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **1.0.0**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co))
 - **Safety** — typed Git invocation, force-with-lease confirmation, local crash reports, recovery from missing repos and stale index locks
 
 GitHub personal-access-token connect/sign-out lives in **Settings** (not a Services tab).
 
-Not yet included or still partial: OAuth/enterprise GitHub, deterministic byte-level progress parsing, full VoiceOver parity (GPUI limitation), merge/rebase wizards, and built-in editing.
+Not in 1.0.0: OAuth / enterprise GitHub, VoiceOver roles (GPUI limitation), in-app updates, localization, AI commit messages, and a built-in editor. Merge and rebase are available from menus plus continue/abort on Working Copy.
 
 See [PLAN.md](PLAN.md) for the full implementation contract and [CHANGELOG.md](CHANGELOG.md) for release notes.
 
@@ -51,7 +51,7 @@ Working Copy selection and batch checkbox staging: [`docs/keyboard-shortcuts.md`
 
 ## Install and run
 
-Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (`GitRonimo-v0.9.2.zip` runs on Apple Silicon and Intel).
+Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (Apple Silicon and Intel in one zip). After the `v1.0.0` tag that file is `GitRonimo-v1.0.0.zip`.
 
 To build a local `.app`:
 

@@ -13,7 +13,7 @@ pub(crate) const APP_TAGLINE: &str = "Made in Austin \u{2729} Texas";
 /// Product version shown in About `GitRonimo`. Bump this after each release.
 /// Keep in sync with `[package.metadata.packager] version` in `apps/desktop/Cargo.toml`.
 /// Independent of the Cargo workspace version.
-pub(crate) const APP_VERSION: &str = "0.9.3";
+pub(crate) const APP_VERSION: &str = "1.0.0";
 
 impl GitronimoApp {
     pub(crate) fn about_overlay(colors: &ThemeColors, cx: &mut gpui::Context<Self>) -> AnyElement {

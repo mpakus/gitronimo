@@ -1,6 +1,6 @@
 # GitRonimo documentation
 
-Index of project documentation. Start with [README.md](../README.md) for install and overview. Product version **0.9.2** is `APP_VERSION` in `apps/desktop/src/views/about.rs` (bump after each release).
+Index of project documentation. Start with [README.md](../README.md) for install and overview. Product version **1.0.0** is `APP_VERSION` in `apps/desktop/src/views/about.rs` (bump after each release).
 
 ## Product and planning
 
@@ -36,8 +36,8 @@ Index of project documentation. Start with [README.md](../README.md) for install
 
 | Location | Purpose |
 |----------|---------|
-| [screens/README.md](screens/README.md) | Product screenshot inventory |
-| `screens/gitronimo-*.png` | Committed product screenshots (README, docs) |
+| `docs/logo.png` | README hero |
+| `docs/screenshot.png` | README working-copy capture |
 
 ## Agent and contributor setup
 
@@ -57,4 +57,4 @@ When you change user-visible behavior:
 4. Update [README.md](../README.md) screenshots if the UI changed materially.
 5. Sync [UI-IMPROVE.md](UI-IMPROVE.md) implementation status when a user-visible UI pattern lands.
 6. Add a [CHANGELOG.md](../CHANGELOG.md) note when preparing a release.
-7. Bump `APP_VERSION` in `apps/desktop/src/views/about.rs` after each product release (currently **0.9.2**).
+7. Bump `APP_VERSION` in `apps/desktop/src/views/about.rs` after each product release (currently **1.0.0**).

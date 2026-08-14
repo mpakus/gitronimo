@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.0 — 2026-08-14
+
+Product version **1.0.0** (About GitRonimo / `APP_VERSION` and packager bundle version). Daily Git client: working copy, history, branches, stashes, remotes, GitHub PRs (PAT), workflow templates. Tag `v1.0.0` for the notarized universal zip.
+
+- Network progress bar follows Git `--progress` percentages when Git prints them (waiting bar until the first `%` line; no 92% cap).
+- Commit-message temp files are `0o600` and always deleted; Git activity text redacts URL passwords and `ghp_` / `github_pat_` tokens.
+- About / bundle version is **1.0.0**.
+
+### Known limitations
+
+- GitHub.com personal-access-token only (Settings). No OAuth device flow or enterprise/self-hosted GitHub endpoint.
+- VoiceOver is limited by GPUI 0.2.2; see [troubleshooting](docs/troubleshooting.md#keyboard-and-assistive-technology).
+- Reflog, Blame, Compare, Branches Review, LFS, Worktrees, Submodules, and Interactive rebase are command-palette destinations, not primary sidebar items.
+- No in-app updater, localization, or AI commit-message assistance.
+- Merge and rebase use the branch/commit menus, the Working Copy continue/abort banner, and the Interactive rebase view — not a separate step-by-step wizard.
+
 ## 0.9.2 — 2026-08-14
 
 Product version **0.9.2** (About GitRonimo / `APP_VERSION` and packager bundle version).
