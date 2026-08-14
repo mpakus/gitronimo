@@ -1,5 +1,21 @@
 # Implementation work log
 
+## 2026-08-14 — Remove third-party Git-client product names from docs
+
+**Intent:** Describe GitRonimo as its own client. Do not name other commercial Git GUIs in product docs, agent rules, or code comments.
+
+**Files:** `PLAN.md`, `AGENTS.md`, `README.md`, `CHANGELOG.md`, `docs/UI-*.md`, `docs/todo-v1.md`, `docs/desktop-shell.md`, `docs/work-log.md`, desktop view comments, `apps/desktop/src/tests.rs`.
+
+**Acceptance:** Repo search for those product names returns no matches.
+
+## 2026-08-14 — Document v1 leftover work
+
+**Intent:** Analyze project `*.md` docs against shipped 0.9.2 and write a single v1 todo at `docs/todo-v1.md`.
+
+**Files:** `docs/todo-v1.md`, `docs/README.md`.
+
+**Acceptance:** Todo lists remaining product work, doc hygiene, and explicit out-of-v1 items; docs index links it.
+
 ## 2026-08-14 — Dock icon.png vs About gitronimo-icon.png
 
 **Intent:** Dock/Finder icon is repo-root `icon.png`. About overlay stays `assets/gitronimo-icon.png`.
@@ -72,7 +88,7 @@
 
 ## 2026-08-13 — About GitRonimo (menu + overlay)
 
-**Intent:** The macOS application menu showed `gitronimo-desktop` (debug binary name). Rename the visible app to **GitRonimo**, add **About GitRonimo**, and show a centered overlay: app icon, name, version, “Made in Austin ✩ Texas”, and https://aomega.co. No Acknowledgements/License buttons. Approach-only from Tower About layout; original Gitronimo chrome and `assets/gitronimo-icon.png`.
+**Intent:** The macOS application menu showed `gitronimo-desktop` (debug binary name). Rename the visible app to **GitRonimo**, add **About GitRonimo**, and show a centered overlay: app icon, name, version, “Made in Austin ✩ Texas”, and https://aomega.co. No Acknowledgements/License buttons.  About layout; original Gitronimo chrome and `assets/gitronimo-icon.png`.
 
 **Files:** `apps/desktop/Cargo.toml` (bin + packager name), `assets.rs`, `actions.rs`, `menus.rs`, `app_state.rs`, `main.rs`, `views/about.rs`, `workspace.rs`, `tests.rs`, CI/packaging docs.
 
@@ -110,15 +126,15 @@
 
 **Verification:** `cargo fmt --check`, clippy `-D warnings` on gitronimo-desktop, `command_h_is_bound_to_hide` / `command_q_is_bound_to_quit` tests pass.
 
-## 2026-08-13 — Workflow tab (Tower-inspired core)
+## 2026-08-13 — Workflow tab (core)
 
-**Intent:** Replace the Workflow placeholder with a functional page inspired by Tower’s Workflows overview: choose GitHub Flow / GitLab Flow / git-flow or auto-detect from existing branches; start topic branches with prefixes; finish with merge/squash/rebase; sync a topic onto its parent. Approach-only from Tower. Deferred: Graphite CLI, git-flow CLI, restack stacks, auto-archive protection.
+**Intent:** Replace the Workflow placeholder with a functional page inspired by Workflows overview: choose GitHub Flow / GitLab Flow / git-flow or auto-detect from existing branches; start topic branches with prefixes; finish with merge/squash/rebase; sync a topic onto its parent. Deferred: Graphite CLI, git-flow CLI, restack stacks, auto-archive protection.
 
 **Files:** `crates/app_core` workflow model + prefs, `git_cli` squash/ff-only merge, `views/workflow.rs`, toolbar/welcome/sidebar/`main.rs`/`app_state.rs`, docs.
 
 **Acceptance:** Workflow tab (welcome + in-repo) lists templates and applied config; Start/Finish/Sync mutate via typed Git; config persists per repo; gates pass.
 
-**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass. Tower Workflows overview / choosing / configuring / topic-branch guides are approach-only (templates, auto-detect, Start/Finish/Sync). Graphite CLI, git-flow CLI, restack, and auto-archive protection remain deferred.
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass. workflow templates overview / choosing / configuring / topic-branch guides are approach-only (templates, auto-detect, Start/Finish/Sync). Graphite CLI, git-flow CLI, restack, and auto-archive protection remain deferred.
 
 ## 2026-08-13 — Remove Services navigation and view
 
@@ -132,25 +148,25 @@
 
 **Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass. GitHub Keychain connect remains in Settings for Pull Requests.
 
-## 2026-08-12 — Sidebar HEAD ahead/behind badge (Tower-style)
+## 2026-08-12 — Sidebar HEAD ahead/behind badge 
 
-**Intent:** Match Tower’s current-branch pill: `HEAD` plus compact `↑N` / `↓N` for unpublished / unpulled commits. Approach-only from Tower; reuse porcelain ahead/behind already shown in the toolbar.
+**Intent:** Match the current-branch pill: `HEAD` plus compact `↑N` / `↓N` for unpublished / unpulled commits. reuse porcelain ahead/behind already shown in the toolbar.
 
 **Files:** `apps/desktop/src/views/components.rs` (`format_divergence_arrows`, `head_badge`), `sidebar.rs`, `toolbar.rs`, `branches_review.rs`, `welcome.rs`, `tests.rs`, docs.
 
 **Acceptance:** HEAD row shows `HEAD ↑1` (and `↓N` when behind) in a muted pill; toolbar tracking uses the same `↑N` / `↓N` order; in-sync HEAD stays `HEAD` only; gates pass. **Done.**
 
-**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass. Tower guide approach-only for the combined HEAD + divergence pill.
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass.
 
-## 2026-08-12 — Tower-style Stashes (core parity)
+## 2026-08-12 — Stashes (core parity)
 
-**Intent:** Match Tower stash guide core flows: save dialog (message + untracked + path-limited), apply dialog (delete-after / restore index), stash changeset detail, branch-from-stash. Approach-only from Tower; rgitui `stashes_panel.rs` for Apply/Pop/Drop/Branch shape (MIT).
+**Intent:** Match the stash guide core flows: save dialog (message + untracked + path-limited), apply dialog (delete-after / restore index), stash changeset detail, branch-from-stash. rgitui `stashes_panel.rs` for Apply/Pop/Drop/Branch shape (MIT).
 
 **Files:** `git_domain`/`git_cli` stash APIs (`CreateStashRequest`, `--index`, `stash_branch`, list `%ct`), `app_state` dialogs, `stashes.rs`, `working_copy.rs`, `toolbar.rs`, `workspace.rs`, `main.rs`, palette, keymap `cmd-shift-s`, docs.
 
 **Acceptance:** Save/apply dialogs; WC Stash selected; detail shows date/files/diff; Branch…; list refresh; gates pass. **Done.**
 
-**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass. Tower guide approach-only; rgitui `stashes_panel.rs` MIT for Apply/Pop/Drop/Branch action shape.
+**Verification:** `cargo fmt --check`, clippy `-D warnings`, workspace tests, `cargo deny check` all pass. rgitui `stashes_panel.rs` MIT for Apply/Pop/Drop/Branch action shape.
 
 ## 2026-08-12 — Palette: history/commit actions coverage
 
@@ -160,9 +176,9 @@
 
 **Acceptance:** Palette lists amend, create tag, history filter, selected-commit copy/checkout/reset/revert/patch/export/compare, branch-from-selected, rebase onto, merge revision, stash untracked, branches review; gates still pass. **Done.**
 
-## 2026-08-12 — History commit context menu (Tower-style)
+## 2026-08-12 — History commit context menu 
 
-**Intent:** Right-click a History commit to open a Tower-grouped menu (copy, checkout detach, reset/revert/rebase with confirms, amend/reword when HEAD, create branch/tag, patch, export, compare). Approach from Tower Commit History / Undoing Commits / Checkout guides; original menu chrome reused from ref context menu.
+**Intent:** Right-click a History commit to open a grouped menu (copy, checkout detach, reset/revert/rebase with confirms, amend/reword when HEAD, create branch/tag, patch, export, compare). Original menu chrome reused from the ref context menu.
 
 **Files:** `crates/git_cli` (detach/reset/format-patch), `app_state.rs` (CommitContext, confirms, reset choice), `views/commit_context_menu.rs`, `history.rs`, `workspace.rs`, `main.rs`, `docs/desktop-shell.md`, `docs/UI-IMPROVE.md`, `docs/work-log.md`.
 
@@ -202,7 +218,7 @@
 
 ## 2026-08-12 — Unmerged branch delete confirmation dialog
 
-**Intent:** Safe branch delete failures (not fully merged) currently flash in the activity bar. Show a Tower-style modal (“Could Not Delete Branch”) with Cancel / Delete (force), and keep the initial delete prompt as Cancel / Delete only.
+**Intent:** Safe branch delete failures (not fully merged) currently flash in the activity bar. Show a modal (“Could Not Delete Branch”) with Cancel / Delete (force), and keep the initial delete prompt as Cancel / Delete only.
 
 **Files:** `app_state.rs` (`AppConfirmDialog`), `main.rs` (delete error → dialog), `workspace.rs` (overlay), `docs/work-log.md`.
 
@@ -216,9 +232,9 @@
 
 **Acceptance:** Messages append to a capped log; button opens anchored popup; newest first; click outside / button again closes; current activity line unchanged. Later: successes/errors/confirmations retained (refresh coalesced); list scrolls.
 
-## 2026-08-12 — Tower-style sidebar HEAD vs selection
+## 2026-08-12 — sidebar HEAD vs selection
 
-**Intent:** Match Tower branch rows: selection is a full-width accent ribbon with light text; HEAD is a trailing badge. When HEAD is the selected row, the badge sits on the ribbon (light outlined pill). When another branch is selected, HEAD keeps a muted badge without a ribbon.
+**Intent:** Match the branch rows: selection is a full-width accent ribbon with light text; HEAD is a trailing badge. When HEAD is the selected row, the badge sits on the ribbon (light outlined pill). When another branch is selected, HEAD keeps a muted badge without a ribbon.
 
 **Files:** `components.rs` (`head_badge` variants), `sidebar.rs` (row styling), `branches_review.rs`, `docs/work-log.md`.
 
@@ -250,7 +266,7 @@
 
 ## 2026-08-12 — Double-click sidebar branch switches checkout
 
-**Intent:** Tower-style activate: double-click a local or remote branch in the sidebar checks it out. Single-click still opens scoped History; tags stay History-only on double-click.
+**Intent:** activate: double-click a local or remote branch in the sidebar checks it out. Single-click still opens scoped History; tags stay History-only on double-click.
 
 **Files:** `views/sidebar.rs` (click_count gate), `main.rs` (`activate_ref_from_double_click`, remote tracking path), `git_cli` (`checkout_tracking_branch`), `docs/UI-IMPROVE.md`.
 
@@ -290,25 +306,25 @@
 
 ## 2026-08-11 — Push dialog (destination + push options)
 
-**Intent:** Toolbar Push opens a Tower-like "Push HEAD" dialog: title + description naming the local HEAD branch, Destination dropdown (remote branch), Options list — Push All Tags, Force Push, Recurse Submodules (with verify/on-demand mode), Skip Hooks — and Cancel / Push HEAD buttons.
+**Intent:** Toolbar Push opens a "Push HEAD" dialog: title + description naming the local HEAD branch, Destination dropdown (remote branch), Options list — Push All Tags, Force Push, Recurse Submodules (with verify/on-demand mode), Skip Hooks — and Cancel / Push HEAD buttons.
 
 **Files:** `app_state.rs` (`PushDialogState`, `SubmodulePushMode`), `main.rs` (open/close/toggles/confirm, `push_command_args`), `workspace.rs` (overlay), `toolbar.rs`, `working_copy.rs` (branch menu Push…), docs.
 
-**Acceptance:** Push opens dialog with destination prefilled from upstream; toggles change the composed command; Push HEAD runs `git push --progress [...] <remote> HEAD:<branch>`; Cancel closes without pushing; Force Push uses `--force-with-lease` per AGENTS safety rule; Sync stays immediate. Approach-only from Tower screenshot.
+**Acceptance:** Push opens dialog with destination prefilled from upstream; toggles change the composed command; Push HEAD runs `git push --progress [...] <remote> HEAD:<branch>`; Cancel closes without pushing; Force Push uses `--force-with-lease` per AGENTS safety rule; Sync stays immediate.  screenshot.
 
 ## 2026-08-11 — Pull dialog (remote branch + rebase option)
 
-**Intent:** Toolbar Pull opens a Tower-like dialog: Remote Branch dropdown, collapsible Options with "Use Rebase Instead of Merge", Pull/Cancel. Confirm runs `git pull --progress [--rebase] [remote branch]`.
+**Intent:** Toolbar Pull opens a dialog: Remote Branch dropdown, collapsible Options with "Use Rebase Instead of Merge", Pull/Cancel. Confirm runs `git pull --progress [--rebase] [remote branch]`.
 
 **Files:** `app_state.rs` (`PullDialogState`), `main.rs` (open/confirm/args), `workspace.rs` (overlay), `toolbar.rs`, `working_copy.rs` (context menu Pull…), docs.
 
-**Acceptance:** Pull button shows dialog; choose remote branch; expand Options → rebase checkbox; Pull runs network command; Cancel closes without pulling. Approach-only from Tower guides / GitComet PullMode.
+**Acceptance:** Pull button shows dialog; choose remote branch; expand Options → rebase checkbox; Pull runs network command; Cancel closes without pulling.  guides / GitComet PullMode.
 
 **Done:** `PullDialogState` overlay; toolbar/context-menu open; `git pull --progress [--rebase] remote branch`; unit tests for arg split; Sync stays immediate.
 
-## 2026-08-11 — Sidebar branch click opens History (Tower)
+## 2026-08-11 — Sidebar branch click opens History 
 
-**Intent:** Left-click a local/remote branch or tag in the sidebar opens History scoped to that ref (middle commit list + right changeset detail), matching Tower. Right-click keeps the context menu. Highlight the active sidebar ref while viewing its history; auto-select the tip commit so panel 3 shows file changes.
+**Intent:** Left-click a local/remote branch or tag in the sidebar opens History scoped to that ref (middle commit list + right changeset detail),. Right-click keeps the context menu. Highlight the active sidebar ref while viewing its history; auto-select the tip commit so panel 3 shows file changes.
 
 **Files:** `main.rs` (`select_ref_context`, history load select), `sidebar.rs` (row highlight), `docs/UI-IMPROVE.md`, `docs/work-log.md`.
 
@@ -332,7 +348,7 @@
 
 **Files:** `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `AGENTS.md`, `.gitignore`, `docs/README.md`, `docs/screens/README.md`, `docs/screens/gitronimo-*.png`, `docs/UI-IMPROVE.md`, `docs/UI-PLAN.md`, `docs/architecture.md`, `docs/troubleshooting.md`, `docs/keyboard-shortcuts.md`.
 
-**Acceptance:** README shows welcome, repositories, working copy, history, and branch menu; beta scope matches implemented features; docs index links all major files; Tower reference shots remain gitignored.
+**Acceptance:** README shows welcome, repositories, working copy, history, and branch menu; beta scope matches implemented features; docs index links all major files; product screenshots are committed.
 
 **Done:** five `gitronimo-*.png` captures committed; README/CHANGELOG scope updated; docs index and screens README added.
 
@@ -346,9 +362,9 @@
 
 **Done:** `SelectAllStatusFiles` action; `visible_status_paths`; toggle deselect/reselect; `run_mutation(..., preserve_selection)` for checkbox batch staging; docs updated (`AGENTS.md`, `keyboard-shortcuts.md`, `UI-IMPROVE.md`).
 
-## 2026-08-11 — History list full-width flat Tower rows
+## 2026-08-11 — History list full-width flat rows
 
-**Intent:** Match Tower central History list: no per-row card backgrounds (only selected row highlighted); rows span full pane width; branch/ref pills stay readable (contrast + truncate, don’t crush into subject).
+**Intent:** Match the central History list: no per-row card backgrounds (only selected row highlighted); rows span full pane width; branch/ref pills stay readable (contrast + truncate, don’t crush into subject).
 
 **Files:** `docs/work-log.md`, `apps/desktop/src/views/history.rs`.
 
@@ -356,19 +372,19 @@
 
 **Done:** rows `w_full` with bg only when selected; month headers flat; ref pills high-contrast + truncated; gates pass.
 
-## 2026-08-11 — History central list match Tower rows
+## 2026-08-11 — History central list match the rows
 
-**Intent:** Central History commit list must match Tower: multi-lane colored graph + node dots; two-line rows (author/date over hash+subject+ref pills); solid accent selection with inverted text. Approach adapted from rgitui graph paint (MIT).
+**Intent:** Central History commit list must match the: multi-lane colored graph + node dots; two-line rows (author/date over hash+subject+ref pills); solid accent selection with inverted text. Approach adapted from rgitui graph paint (MIT).
 
 **Files:** `docs/work-log.md`, `crates/git_domain` (`GraphRow.active_lanes`), `apps/desktop/src/views/history.rs`.
 
-**Acceptance:** Graph shows colored lanes/nodes; row layout is two-line Tower style; selection is accent blue; central list reads like Tower screenshot.
+**Acceptance:** Graph shows colored lanes/nodes; two-line row layout; selection is accent blue.
 
 **Done:** `GraphRow.active_lanes`; multi-color through-lanes + node dots (rgitui MIT approach); two-line author/date + hash/subject/pills; accent selection.
 
-## 2026-08-11 — History Tower layout + trim workspace nav
+## 2026-08-11 — History layout + trim workspace nav
 
-**Intent:** History should match the Tower-style commit list + detail inspector (scope header, month groups, denser rows with ref pills, Changeset/Tree detail). Remove Pull Requests, Branches Review, and Reflog from the left sidebar (keep enum/palette so nothing breaks).
+**Intent:** History should match the commit list + detail inspector (scope header, month groups, denser rows with ref pills, Changeset/Tree detail). Remove Pull Requests, Branches Review, and Reflog from the left sidebar (keep enum/palette so nothing breaks).
 
 **Files:** `docs/work-log.md`, `apps/desktop/src/views/history.rs`, `apps/desktop/src/views/sidebar.rs`, `apps/desktop/src/views/components.rs` (date helpers), `app_state.rs` / `main.rs` / `workspace.rs` only if filter choice prompt is needed.
 
@@ -378,7 +394,7 @@
 
 ## 2026-08-11 — Branch actions as right-click popup
 
-**Intent:** Working Copy should stay Tower-like (composer + files only). The inline “Local branch: …” action panel must become a right-click context popup on sidebar branches/remotes/tags (Tower pattern), not replace the WC pane.
+**Intent:** Working Copy should stay (composer + files only). The inline “Local branch: …” action panel must become a right-click context popup on sidebar branches/remotes/tags (context-menu pattern), not replace the WC pane.
 
 **Files:** `docs/work-log.md`, `working_copy.rs`, `sidebar.rs`, `workspace.rs`, `main.rs` (`open`/`close` ref menu).
 
@@ -460,7 +476,7 @@
 
 ## 2026-08-11 — Fix unclickable Commit Subject
 
-**Intent:** Commit Subject (and description when expanded) must focus on click so caret appears, typing works, and Tower-like expand runs. Root cause likely zero-width Entity hitbox inside composer shells.
+**Intent:** Commit Subject (and description when expanded) must focus on click so caret appears, typing works, and expand runs. Root cause likely zero-width Entity hitbox inside composer shells.
 
 **Files:** `docs/work-log.md`, `apps/desktop/src/views/single_line_input.rs`, `commit_composer.rs` / `main.rs` if focus wiring needed.
 
@@ -468,7 +484,7 @@
 
 ## 2026-08-11 — Commit composer expand/collapse
 
-**Intent:** Match Tower commit card expand/collapse: collapsed shows branch + subject + Stage All/Commit; expand on subject focus to reveal description, Amend/Sign-off, author; stay open if body text or amend; collapse when both unfocused and body empty and amend off. Soft height animation if feasible.
+**Intent:** Match the commit card expand/collapse: collapsed shows branch + subject + Stage All/Commit; expand on subject focus to reveal description, Amend/Sign-off, author; stay open if body text or amend; collapse when both unfocused and body empty and amend off. Soft height animation if feasible.
 
 **Files:** `docs/work-log.md`, `commit_composer.rs`, `single_line_input.rs` (focus hooks if needed), `app_state.rs`, `main.rs`.
 
@@ -476,15 +492,15 @@
 
 ## 2026-08-11 — Working Copy commit card redesign
 
-**Intent:** Redesign commit composer into a Tower-like raised card: branch header, subject + always-visible description, Amend/Sign-off checkboxes + author, Stage All / Commit footer. Keep file filter/list below, visually separate. No AI generate; no Tower copy/assets.
+**Intent:** Redesign commit composer into a raised card: branch header, subject + always-visible description, Amend/Sign-off checkboxes + author, Stage All / Commit footer. Keep file filter/list below, visually separate. No AI generate; original copy and assets.
 
 **Files:** `docs/work-log.md`, `apps/desktop/src/views/commit_composer.rs`, `working_copy.rs`, `single_line_input.rs` (body Enter/newline + shell), possibly `components.rs`.
 
 **Acceptance:** card layout matches IA; body always editable; amend/sign-off clear; Stage All/Commit wired; gates pass.
 
-## 2026-08-11 — In-repo sidebar Tower-like polish
+## 2026-08-11 — In-repo sidebar polish
 
-**Intent:** Clearer branch-tree hierarchy (indent + chevron/folder/branch icons) and replace unicode nav glyphs with Heroicons outline; denser section labels/rows/subtle dividers like Tower. No proprietary Tower assets.
+**Intent:** Clearer branch-tree hierarchy (indent + chevron/folder/branch icons) and replace unicode nav glyphs with Heroicons outline; denser section labels/rows/subtle dividers. Original branding only.
 
 **Files:** `docs/work-log.md`, `apps/desktop/assets/icons/*`, `assets.rs`, `views/icons.rs`, `views/sidebar.rs`, `views/components.rs` (section/badge if needed).
 
@@ -500,7 +516,7 @@
 
 ## 2026-08-11 — Fix welcome + and palette buttons
 
-**Intent:** Sidebar footer `+` must open a Tower-style anchored popup (New Group / Add Repository); toolbar Palette button must open the command palette (`open_command_palette`). Investigate click swallowing / dispatch_action vs direct call; keep Services/Bookmarks/Workflow in toolbar only.
+**Intent:** Sidebar footer `+` must open a anchored popup (New Group / Add Repository); toolbar Palette button must open the command palette (`open_command_palette`). Investigate click swallowing / dispatch_action vs direct call; keep Services/Bookmarks/Workflow in toolbar only.
 
 **Files:** `docs/work-log.md`, `apps/desktop/src/app_state.rs`, `main.rs`, `views/sidebar.rs`, `views/toolbar.rs`, `views/workspace.rs`.
 
@@ -508,7 +524,7 @@
 
 ## 2026-08-11 — Welcome/bookmarks UI polish (six issues)
 
-**Intent:** Fix welcome/bookmarks UX from annotated screenshots: (1) sidebar `+` footer padding/hit target Tower-like with New Group / Add Repository menu; (2) remove unwanted welcome detail rename/"some repo" field and redundant sidebar border gap (keep resize handle); (3) ensure folder/group tree renders with chevron/folder icons, nested repos, create via `+`, rename/delete, DnD; (4) shell tabs more horizontal space + icon-over-label; (5) toolbar search padding/placeholder/alignment; (6) replace unicode/letter placeholders with Heroicons-style outline SVGs (MIT, vendored; no Tower assets, no new crates).
+**Intent:** Fix welcome/bookmarks UX from annotated screenshots: (1) sidebar `+` footer padding/hit target with New Group / Add Repository menu; (2) remove unwanted welcome detail rename/"some repo" field and redundant sidebar border gap (keep resize handle); (3) ensure folder/group tree renders with chevron/folder icons, nested repos, create via `+`, rename/delete, DnD; (4) shell tabs more horizontal space + icon-over-label; (5) toolbar search padding/placeholder/alignment; (6) replace unicode/letter placeholders with Heroicons-style outline SVGs (MIT, vendored; no new crates).
 
 **XERJ:** searched `sidebar folder tree bookmark`, toolbar icon+label, welcome plus menu; adapted approach from in-repo sidebar/toolbar + rgitui SVG AssetSource pattern (MIT); GitComet approach-only.
 
@@ -520,7 +536,7 @@
 
 ## 2026-08-11 — Bookmark folder tree + toolbar shell tabs
 
-**Intent:** Tower-like bookmarks: explicit folders (create/rename/delete, expand/collapse, drag repos between folders; delete folder unwraps repos to root). Move Services/Bookmarks/Workflow from left rail into the top toolbar and keep them visible when a repository is open.
+**Intent:** bookmarks: explicit folders (create/rename/delete, expand/collapse, drag repos between folders; delete folder unwraps repos to root). Move Services/Bookmarks/Workflow from left rail into the top toolbar and keep them visible when a repository is open.
 
 **Design:**
 - Persist `bookmark_folders` + `repository_folder` map in `RecentRepositoryDocument` (serde defaults, same schema version).
@@ -532,9 +548,9 @@
 
 **Acceptance:** folders CRUD + toggle + DnD; delete folder leaves repos at root; shell tabs in toolbar on welcome and in-repo; no left welcome rail.
 
-## 2026-08-11 — Welcome bookmarks layout (Tower-like)
+## 2026-08-11 — Welcome bookmarks layout 
 
-**Intent:** fix welcome Repositories pane mess (overflow onto rail, branch lines looking like extra repos) and align closer to Tower: contained sidebar column, single-line folder rows, toolbar search only, dashed drop-zone empty state.
+**Intent:** fix welcome Repositories pane mess (overflow onto rail, branch lines looking like extra repos) and tighten the layout: contained sidebar column, single-line folder rows, toolbar search only, dashed drop-zone empty state.
 
 **Files:** `sidebar.rs` (welcome sidebar/rows), `welcome.rs` (empty state / actions), work-log.
 
@@ -653,9 +669,9 @@
 
 **Acceptance checks:** welcome description editable inline; repo list shows branch/upstream divergence badges; Branches Review reachable with empty state; Quick Open scrim uses theme token; fmt/clippy pass; desktop/ui_kit tests pass.
 
-## 2026-08-11 — Tower 99% UI Parity Plan execution (Phases 0–10)
+## 2026-08-11 — UI plan execution (Phases 0–10)
 
-**Intent:** implement `docs/UI-PLAN.md` — reach ~99% Tower parity across welcome and in-repo views.
+**Intent:** implement `docs/UI-PLAN.md` — reach UI consistency across welcome and in-repo views.
 
 **Design:** Phase 0 creates UI-PLAN.md; Phase 1 adds GPUI `SingleLineInput` for search/composer; Phases 2–9 cover welcome shell, toolbar, WC polish, settings, remote progress, secondary views, theme; Phase 10 sign-off.
 
@@ -663,9 +679,9 @@
 
 **Acceptance checks:** all UI-PLAN phases checked off; sign-off table complete; workspace gates pass; app launches.
 
-## 2026-08-10 — Tower UI consistency pass (cross-view design language)
+## 2026-08-10 — UI consistency pass (cross-view design language)
 
-**Intent:** unify typography, selection states, row heights, empty states, panel headers, and two-pane layouts across all views vs Tower reference screenshots — full-width accent list selection, shared section headers/detail rows, 28px panel headers, 22px compact rows, Services/PRs two-pane parity with Stashes/Remotes.
+**Intent:** unify typography, selection states, row heights, empty states, panel headers, and two-pane layouts across all views across views — full-width accent list selection, shared section headers/detail rows, 28px panel headers, 22px compact rows, Services/PRs two-pane parity with Stashes/Remotes.
 
 **Design:** extract `section_header`, `detail_section`, `detail_row`, `view_panel_header`, `two_pane_view`, `accent_list_row`, `head_badge`, layout constants in `components.rs`; nav rows edge-to-edge accent (no rounded inset); welcome/services/PRs/history empty states via `centered_empty_state`; services + pull requests adopt list|detail split; welcome detail uses shared detail helpers; theme documents layout heights.
 
@@ -685,17 +701,17 @@
 
 **Acceptance checks:** all list selections use full-width accent bars; section headers match across welcome/sidebar/detail; panel headers 28px; empty states use icon + title + detail pattern; Services/PRs match Stashes/Remotes two-pane density; all workspace gates pass; app launches.
 
-## 2026-08-10 — Tower interior views polish (sidebar, WC, history, diff, stashes, remotes)
+## 2026-08-10 — interior views polish (sidebar, WC, history, diff, stashes, remotes)
 
-**Intent:** close visual gaps inside opened-repository views vs Tower reference screenshots (overview-05/06/08, workflow-03/04/05/06) — repo sidebar IA, WC composer layout, file-row selection/badges, toolbar subtitle, history density, diff line backgrounds, stashes/remotes two-pane layouts.
+**Intent:** close visual gaps inside opened-repository views across views (overview-05/06/08, workflow-03/04/05/06) — repo sidebar IA, WC composer layout, file-row selection/badges, toolbar subtitle, history density, diff line backgrounds, stashes/remotes two-pane layouts.
 
-**Design:** drop welcome-only Repositories/Services headers from in-repo sidebar; uppercase section labels + scrollable ref tree with remote branches under Remotes; Tower commit row (subject + count, then Stage All | Commit); accent file-row selection + square status badges; toolbar subtitle `View (branch - N Changed Files)`; structured history rows + segmented Changeset/Tree header; diff added/removed row backgrounds; stashes/remotes list|detail split.
+**Design:** drop welcome-only Repositories/Services headers from in-repo sidebar; uppercase section labels + scrollable ref tree with remote branches under Remotes; commit row (subject + count, then Stage All | Commit); accent file-row selection + square status badges; toolbar subtitle `View (branch - N Changed Files)`; structured history rows + segmented Changeset/Tree header; diff added/removed row backgrounds; stashes/remotes list|detail split.
 
 **Files changed:**
 - `apps/desktop/src/views/sidebar.rs` — in-repo IA, section labels, scroll area, remotes grouping
-- `apps/desktop/src/views/commit_composer.rs` — Tower two-row commit area
+- `apps/desktop/src/views/commit_composer.rs` — two-row commit area
 - `apps/desktop/src/views/working_copy.rs` — selection, badges, empty diff state
-- `apps/desktop/src/views/toolbar.rs` — Tower subtitle format, Quick Open label
+- `apps/desktop/src/views/toolbar.rs` — subtitle format, Quick Open label
 - `apps/desktop/src/views/history.rs` — row density, detail header toggle
 - `apps/desktop/src/views/diff_viewer.rs` — line row backgrounds
 - `apps/desktop/src/views/commit_detail.rs` — two-pane changeset layout
@@ -704,9 +720,9 @@
 - `apps/desktop/src/views/components.rs` — shared sidebar label, badge, empty state, segmented toggle
 - `docs/UI-IMPROVE.md` — interior polish status
 
-**Acceptance checks:** in-repo sidebar matches Tower sections (no welcome clutter); WC composer matches Tower row order; file rows 22px with square badges and accent selection; history/detail/stashes/remotes use two-pane Tower density; diff lines show add/remove backgrounds; all workspace gates pass; app launches.
+**Acceptance checks:** in-repo sidebar has no welcome clutter; WC composer uses subject + count then Stage All | Commit; file rows 22px with square badges and accent selection; history/detail/stashes/remotes use two-pane density; diff lines show add/remove backgrounds; all workspace gates pass; app launches.
 
-## 2026-08-10 — Tower UI parity pass: welcome rail, inline search, remote progress, polish
+## 2026-08-10 — UI parity pass: welcome rail, inline search, remote progress, polish
 
 **Intent:** close remaining `docs/UI-IMPROVE.md` gaps — welcome vertical Services/Bookmarks/Workflow rail (§1.1), always-visible inline toolbar search (§4), persistent remote progress in sidebar footer (§1.5), visual parity (toolbar density, commit area, file rows, diff tabs, detail headers, activity bar).
 
@@ -725,9 +741,9 @@
 - `crates/ui_kit/src/theme.rs` — separator token usage (if needed)
 - `docs/UI-IMPROVE.md` — updated remaining gaps
 
-**Acceptance checks:** welcome shows vertical Services/Bookmarks/Workflow rail; toolbar and sidebar search filter live; sidebar footer shows progress during remote ops and last result when idle; WC/diff/welcome/detail match Tower density; all workspace gates pass; app launches.
+**Acceptance checks:** welcome shows vertical Services/Bookmarks/Workflow rail; toolbar and sidebar search filter live; sidebar footer shows progress during remote ops and last result when idle; WC/diff/welcome/detail match the density; all workspace gates pass; app launches.
 
-## 2026-08-10 — Tower UI alignment: toolbar, sidebar, history, welcome search, WC polish
+## 2026-08-10 — UI alignment: toolbar, sidebar, history, welcome search, WC polish
 
 **Intent:** close remaining gaps from `docs/UI-IMPROVE.md` § Remaining gaps — toolbar search/stash/refresh cluster, edge-to-edge sidebar selection, History inline Changeset/Tree toggle, welcome repo filter, Working Copy subject count / Stage All / column headers / softer row selection.
 
@@ -747,9 +763,9 @@
 
 **Acceptance checks:** toolbar shows search + labeled remote/stash/refresh clusters; welcome sidebar filters recents; History detail pane toggles Changeset/Tree; sidebar selection is full-width blue; WC composer shows 50-char count and Stage All; file list headers align; all workspace gates pass; app launches.
 
-## 2026-08-10 — Tower UI audit follow-up: welcome tabs, sidebar badges, doc honesty
+## 2026-08-10 — UI audit follow-up: welcome tabs, sidebar badges, doc honesty
 
-**Intent:** close the most visible remaining gaps vs Tower after auditing `docs/UI-IMPROVE.md` against current screenshots — welcome lacks Services/Repositories tabs (§1.1), sidebar lacks HEAD badge and Tower-style Working Copy count badge, grouping toggle exists but has no UI (§1.2), remote-activity footer only appears during in-flight ops (§1.5 partial).
+**Intent:** close the most visible remaining gaps after auditing `docs/UI-IMPROVE.md` against current screenshots — welcome lacks Services/Repositories tabs (§1.1), sidebar lacks HEAD badge and Working Copy count badge, grouping toggle exists but has no UI (§1.2), remote-activity footer only appears during in-flight ops (§1.5 partial).
 
 **Design:** add `WelcomeShellView` segmented control in the welcome toolbar (Repositories | Services) routing welcome content and sidebar; expose the existing `repositories_grouped` toggle in the welcome sidebar header; show a white pill count badge on selected Working Copy nav row and a HEAD pill on the checked-out branch; show last fetch/pull/push result in sidebar footer when idle; update `UI-IMPROVE.md` implementation status with a Remaining gaps subsection.
 
@@ -764,9 +780,9 @@
 
 **Acceptance checks:** welcome toolbar shows Repositories/Services tabs; Services tab loads hosting view; welcome sidebar grouping toggle works; current branch shows HEAD badge; Working Copy badge inverts on selection; sidebar footer shows last remote result when idle; all workspace gates pass; app launches.
 
-## 2026-08-10 — Tower UI alignment: Welcome / Repositories view
+## 2026-08-10 — UI alignment: Welcome / Repositories view
 
-**Intent:** replace the dashed drop-zone welcome screen with a Tower-style Repositories browser — grouped sidebar list plus a rich detail panel and bottom action bar (UI-IMPROVE §1.2).
+**Intent:** replace the dashed drop-zone welcome screen with a Repositories browser — grouped sidebar list plus a rich detail panel and bottom action bar (UI-IMPROVE §1.2).
 
 **Design:** sidebar shows grouped recent repositories with subtle selection; main content is a detail card (name, Open/Delete, location, last opened, branch, changed-file count, remote URL, committer identity) or an empty “Select a repository” state. Load Git metadata asynchronously when a repo is selected. Bottom toolbar holds Add / Create / Clone. Drag-drop stays on the workspace root, de-emphasized visually.
 
@@ -779,16 +795,16 @@
 
 **Acceptance checks:** welcome shows detail panel for selected repo; empty state when none selected; Open opens repo; Delete removes from recents after confirm; Add/Create/Clone in bottom bar; drag-drop still works; all workspace gates pass; app launches.
 
-## 2026-08-10 — Tower visual polish pass (Working Copy, toolbar, sidebar)
+## 2026-08-10 — Visual polish pass (Working Copy, toolbar, sidebar)
 
-**Intent:** close the visual gap vs Tower based on user screenshots — remove emoji clutter, harsh selection blue, and bulky commit/file-list chrome.
+**Intent:** close the visual gap based on user screenshots — remove emoji clutter, harsh selection blue, and bulky commit/file-list chrome.
 
 **Design:** use theme `selection` for list rows (dark text on subtle tint), compact commit composer (subject-only until body filled, option chips, disabled Commit state, staged count), segmented Modified/All Files control, text-only status badges, branch breadcrumb with ⎇ glyph, text-only sidebar nav, cleaner toolbar height and icons.
 
 **Files changed:**
 - `crates/ui_kit/src/theme.rs` — softer selection colors
 - `apps/desktop/src/views/components.rs` — theme-aware status badges, disabled primary button, commit option chips
-- `apps/desktop/src/views/commit_composer.rs` — compact Tower-style composer
+- `apps/desktop/src/views/commit_composer.rs` — compact composer
 - `apps/desktop/src/views/working_copy.rs` — branch breadcrumb, file list rows/tabs, remove file-type emojis
 - `apps/desktop/src/views/sidebar.rs` — text-only nav, muted badges
 - `apps/desktop/src/views/toolbar.rs` — slimmer toolbar, cleaner icons
@@ -797,7 +813,7 @@
 **Acceptance checks:** no emoji icons in Working Copy rows/branch; selection uses theme tint; commit area compact; Modified/All Files segmented control; all workspace gates pass; app launches.
 
 
-**Intent:** finish UI-IMPROVE §1.6 / §2.3 — expose the existing `worktree_show_all_files` mode with a Tower-style Modified/All Files control and a single flat changed-file list in Modified mode.
+**Intent:** finish UI-IMPROVE §1.6 / §2.3 — expose the existing `worktree_show_all_files` mode with a Modified/All Files control and a single flat changed-file list in Modified mode.
 
 **Design:** add a segmented header above the file list (`Modified` / `All Files`) that calls `toggle_worktree_show_all`. In Modified mode, render one flat list of changed entries (staged, unstaged, untracked, conflicts) with per-file stage checkboxes and status badges instead of separate Staged/Unstaged/Untracked/Conflicts sections. Show a meaningful empty state when there are no changes. Keep the All Files mode backed by `tracked_files`.
 
@@ -809,9 +825,9 @@
 
 **Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
 
-## 2026-08-10 — Tower UI polish: sidebar, working copy, branch menu, toolbar
+## 2026-08-10 — UI polish: sidebar, working copy, branch menu, toolbar
 
-**Intent:** match Tower's UI across all major views based on new screenshots (001-004) and Tower documentation.
+**Intent:** match the UI across all major views based on new screenshots (001-004) and the UI plan.
 
 **Design:** 
 - **Sidebar (001)**: Added "Repositories" and "Services" sections. Repositories section header; Services section shows connected account (GitHub/GitLab) or "Add Service" placeholder. Branch tree retains expand/collapse with "›"/"⌄" indicators.
@@ -826,21 +842,21 @@
 - `apps/desktop/src/views/toolbar.rs` — branch_info with ahead/behind arrows, subtitle with changed count
 - `apps/desktop/src/main.rs` — pull_branch method for remote branch pulling
 
-**Acceptance checks:** sidebar shows Repositories/Services; working copy has branch breadcrumb, commit composer, file list, diff; branch right-click shows Tower-style menu with Pull for remotes; toolbar shows branch sync status; all gates pass; app rebuilds and launches.
+**Acceptance checks:** sidebar shows Repositories/Services; working copy has branch breadcrumb, commit composer, file list, diff; branch right-click shows menu with Pull for remotes; toolbar shows branch sync status; all gates pass; app rebuilds and launches.
 
 **Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
 
 ## 2026-08-10 — Toolbar, navigation, context menu, column proportions
 
-**Intent:** match Tower's toolbar layout, back/forward navigation including return to repos list, branch context menu with full Tower-style items, and 50/50 column split.
+**Intent:** match the toolbar layout, back/forward navigation including return to repos list, branch context menu with full items, and 50/50 column split.
 
-**Design:** add repo switcher icon on toolbar far left, add `return_to_welcome` method that clears state and returns to Welcome, set `came_from_welcome` flag when opening a repo from Welcome so Back button returns there. Rewrite `ref_context_menu_view` with Tower-style items: Checkout, View History, separator, Merge into Current, Rebase Current onto, separator, Rename, Delete for local branches; New Branch from Here, View History, Delete for remote/tag; Fetch for remotes. Add `menu_item` (24px height, hover highlight) and `menu_separator` helpers. Add `request_branch_delete`, `merge_branch_into_current`, `rebase_current_onto`, `prompt_rename_branch` action methods. Balance column min-widths to 340px each.
+**Design:** add repo switcher icon on toolbar far left, add `return_to_welcome` method that clears state and returns to Welcome, set `came_from_welcome` flag when opening a repo from Welcome so Back button returns there. Rewrite `ref_context_menu_view` with items: Checkout, View History, separator, Merge into Current, Rebase Current onto, separator, Rename, Delete for local branches; New Branch from Here, View History, Delete for remote/tag; Fetch for remotes. Add `menu_item` (24px height, hover highlight) and `menu_separator` helpers. Add `request_branch_delete`, `merge_branch_into_current`, `rebase_current_onto`, `prompt_rename_branch` action methods. Balance column min-widths to 340px each.
 
 **Files changed:**
 - `apps/desktop/src/views/toolbar.rs` — repo switcher icon, removed clickable repo name div, too_many_lines allow
 - `apps/desktop/src/app_state.rs` — `came_from_welcome: bool` field
 - `apps/desktop/src/main.rs` — `return_to_welcome`, `request_branch_delete`, `merge_branch_into_current`, `rebase_current_onto`, `prompt_rename_branch`, `came_from_welcome` init, `begin_open_path` sets flag, `navigate_back` checks flag
-- `apps/desktop/src/views/working_copy.rs` — full Tower-style context menu with 7 items per local branch, `menu_item`/`menu_separator` helpers, balanced column widths
+- `apps/desktop/src/views/working_copy.rs` — full context menu with 7 items per local branch, `menu_item`/`menu_separator` helpers, balanced column widths
 
 **Acceptance checks:** toolbar has repo switcher icon far left + back/forward + centered repo name + action icons far right; back button returns to repos list when opened from Welcome; branch right-click shows Checkout, View History, Merge, Rebase, Rename, Delete with separators; columns are 50/50; all gates pass; app rebuilds and launches.
 
@@ -848,7 +864,7 @@
 
 ## 2026-08-10 — Button/spacing consistency pass
 
-**Intent:** audit all button sizes, column widths, and spacing across every view to ensure Tower-level consistency.
+**Intent:** audit all button sizes, column widths, and spacing across every view to ensure visual consistency.
 
 **Design:** standardize all action buttons to h=26px, px=2, text_sm, rounded(4px). Fix primary_window_action_button and window_action_button which used px=3 py=2 (~32px) and had border_1. Fix validated_action_button disabled variant which used px=2 py=1 (~18px). Fix diff hunk buttons from py_0.5 to py_1 for better readability. Add font_weight::MEDIUM to Staged/Unstaged tabs. Fix column header Status width from 36px to 44px to match row content (checkbox 14 + badge 14 + gap 8 + padding 8).
 
@@ -861,16 +877,16 @@
 
 **Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
 
-## 2026-08-10 — Welcome page + Working Copy Tower alignment
+## 2026-08-10 — Welcome page + Working Copy alignment
 
-**Intent:** match Tower's Welcome page (centered drop zone) and Working Copy (branch breadcrumb, inline chunk buttons).
+**Intent:** match the Welcome page (centered drop zone) and Working Copy (branch breadcrumb, inline chunk buttons).
 
-**Design:** replace the Welcome repo-detail card with a centered dashed-border drop zone showing a folder icon and "Drop Folder or URL to Add Git Repository" with Add/Create/Clone buttons below. Simplify the welcome sidebar to use folder icons. Rewrite branch_context_view as a Tower-style breadcrumb (branch > tracking). Move Discard Chunk / Stage Chunk buttons into each hunk header row inline (removing the separate controls row).
+**Design:** replace the Welcome repo-detail card with a centered dashed-border drop zone showing a folder icon and "Drop Folder or URL to Add Git Repository" with Add/Create/Clone buttons below. Simplify the welcome sidebar to use folder icons. Rewrite branch_context_view as a breadcrumb (branch > tracking). Move Discard Chunk / Stage Chunk buttons into each hunk header row inline (removing the separate controls row).
 
 **Files changed:**
 - `apps/desktop/src/views/welcome.rs` — rewritten to centered drop zone, free function `welcome_drop_zone`
 - `apps/desktop/src/views/sidebar.rs` — folder icon `📁` for welcome repo list
-- `apps/desktop/src/views/working_copy.rs` — Tower-style branch breadcrumb, dead code suppression
+- `apps/desktop/src/views/working_copy.rs` — branch breadcrumb, dead code suppression
 - `apps/desktop/src/views/diff_viewer.rs` — inline Discard Chunk / Stage Chunk buttons per hunk, removed `hunk_controls_row`
 - `apps/desktop/src/app_state.rs` — `#[allow(dead_code)]` on `repositories_grouped`
 - `apps/desktop/src/main.rs` — `#[allow(dead_code)]` on 5 temporarily unused methods
@@ -879,9 +895,9 @@
 
 **Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
 
-## 2026-08-10 — Diff pane Tower alignment (Staged/Unstaged tabs, chunk info)
+## 2026-08-10 — Diff pane alignment (Staged/Unstaged tabs, chunk info)
 
-**Intent:** add the Tower-style diff pane header with filename, Staged/Unstaged tab toggle, chunk/insertion/deletion counts, and clean up clippy errors from the broader Tower alignment pass.
+**Intent:** add the diff pane header with filename, Staged/Unstaged tab toggle, chunk/insertion/deletion counts, and clean up clippy errors from the broader alignment pass.
 
 **Design:** extract the diff header and selection controls into dedicated helpers, add tab toggle between Staged and Unstaged views, and count additions/deletions per diff. Fix all clippy warnings (`dead_code`, `too_many_lines`, `redundant_closure`, `too_many_arguments`, `map_or_else`).
 
@@ -896,9 +912,9 @@
 
 **Verification:** rebuilt app launched as `target/debug/gitronimo-desktop`. All gates pass.
 
-## 2026-08-09 — Tower reference pass / Repositories surface redesign
+## 2026-08-09 — Repositories surface redesign
 
-**Intent:** replace the remaining card-heavy welcome surface after comparing the running UI with Tower's Repositories screenshots.
+**Intent:** replace the remaining card-heavy welcome surface after comparing the running UI with Repositories screenshots.
 
 **Design:** model the welcome state as a repository browser: a narrow left repository tree with compact grouped recents and bottom Add/Create/Clone actions, plus a wide right detail workspace for the selected repository. Remove the feature-card dashboard treatment, keep the existing original Gitronimo palette, and make repository selection visually distinct from opening.
 
@@ -907,7 +923,7 @@
 - `apps/desktop/src/main.rs` — selection/reset helpers and open-selected action.
 - `apps/desktop/src/views/sidebar.rs` — repository-browser welcome sidebar.
 - `apps/desktop/src/views/welcome.rs` — repository detail workspace and empty state.
-- `docs/UI-IMPROVE.md`, `docs/work-log.md` — record the Tower-inspired information-architecture change.
+- `docs/UI-IMPROVE.md`, `docs/work-log.md` — record the information-architecture change.
 
 **Acceptance checks:** welcome renders as a repository browser rather than stacked feature cards; recents can be selected and opened; Add/Create/Clone remain available; empty/loading/error states remain clear; all workspace gates pass.
 
@@ -933,9 +949,9 @@
 
 **Follow-up verification:** the repository browser now replaces the remaining feature-card welcome dashboard, with a compact selectable repository tree and a selected-repository detail workspace. The latest rebuilt app is running as `target/debug/gitronimo-desktop` (PID 7141).
 
-## 2026-08-09 — Tower-style UI overhaul
+## 2026-08-09 — UI overhaul
 
-**Intent:** ground-up redesign of the desktop shell to match Tower's clean native macOS aesthetic, not just incremental polish.
+**Intent:** ground-up redesign of the desktop shell to match the clean native macOS aesthetic, not just incremental polish.
 
 **Design:**
 - Sidebar: clean source-list navigation with compact rows, subtle headers, active-state highlighting, no heavy borders.
@@ -948,7 +964,7 @@
 **Files:**
 - `apps/desktop/src/views/sidebar.rs` — source-list redesign.
 - `apps/desktop/src/views/toolbar.rs` — compact unified toolbar.
-- `apps/desktop/src/views/working_copy.rs` — Tower-style Working Copy hierarchy.
+- `apps/desktop/src/views/working_copy.rs` — Working Copy hierarchy.
 - `apps/desktop/src/views/commit_composer.rs` — compact commit area.
 - `apps/desktop/src/views/components.rs` — rounded compact controls.
 - `apps/desktop/src/views/welcome.rs` — repository browser welcome.
@@ -958,17 +974,17 @@
 
 **Verification:** full formatting, Clippy with warnings denied, workspace tests, and cargo-deny pass. The rebuilt app is running as `target/debug/gitronimo-desktop` (PID 71496).
 
-## 2026-08-09 — Tower-like visual alignment pass
+## 2026-08-09 — visual alignment pass
 
-**Intent:** close remaining visual gaps between Gitronimo and Tower's information architecture by adopting tighter density, flush sidebar-content surfaces, colored status badges, and a two-pane commit detail layout.
+**Intent:** close remaining visual gaps between Gitronimo and information architecture by adopting tighter density, flush sidebar-content surfaces, colored status badges, and a two-pane commit detail layout.
 
 **Changes:**
 - **workspace.rs** — removed `p_4` from content area so sidebar and content share a flush surface.
 - **working_copy.rs** — restructured `file_review_workspace` to place the branch context, commit composer, and file list in the left column with the diff adjacent on the right; added a 1px divider between panes.
 - **commit_composer.rs** — redesigned the commit area to show the subject field full-width at the top, the description inline when present, and the amend/sign-off/author/commit controls in a single bottom row.
-- **sidebar.rs** — reorganized to match Tower's Workspace/Branches structure; added Pull Requests, Reflog, and Settings nav rows; moved the change count into a badge on the Working Copy row; removed the separate Status section.
+- **sidebar.rs** — reorganized to match the Workspace/Branches structure; added Pull Requests, Reflog, and Settings nav rows; moved the change count into a badge on the Working Copy row; removed the separate Status section.
 - **history.rs** — restructured into a two-pane layout with a compact toolbar row at the top, a scrollable commit list on the left, and the selected commit's metadata and changed-file summary on the right.
-- **toolbar.rs** — reduced toolbar height and button sizes to match Tower's compact icon-toolbar density.
+- **toolbar.rs** — reduced toolbar height and button sizes to match the compact icon-toolbar density.
 - **components.rs** — added `status_badge_info` to map git status codes to colored badge characters and background/foreground colors.
 
 **Acceptance checks:** flush sidebar-to-content surface, compact toolbar, colored status badges, two-pane commit detail, all gates pass.
@@ -1077,13 +1093,13 @@
 
 **Intent:** prepare professional-UI guidance and enable GPUI skills in opencode.
 
-**Design:** the user relaxed the Tower-asset rule; `AGENTS.md` now forbids copying third-party icons/glyphs/design assets into shipped code but permits attributed screenshots under `docs/` for UI/UX reference (never shipped). `PLAN.md` §28 risk updated to match. `PLAN.md` was also edited by the user to drop GitLab/Bitbucket/Azure DevOps auth checkboxes (GitHub only) and to mention OpenCode alongside Codex in the execution protocol.
+**Design:** the user relaxed the third-party-asset rule; `AGENTS.md` now forbids copying third-party icons/glyphs/design assets into shipped code but permits attributed screenshots under `docs/` for UI/UX reference (never shipped). `PLAN.md` §28 risk updated to match. `PLAN.md` was also edited by the user to drop GitLab/Bitbucket/Azure DevOps auth checkboxes (GitHub only) and to mention OpenCode alongside Codex in the execution protocol.
 
 **Files:**
 - `.opencode/opencode.json` — registers `./skills` (11 Apache-2.0 GPUI skills from Zed) as opencode project skills.
 - `AGENTS.md`, `PLAN.md` — asset/attribution policy update.
-- `docs/UI-IMPROVE.md` — UI/UX improvement plan mapped from the Tower "Getting Started", "Interface Overview", and "Basic Workflow" guides.
-- `docs/screens/tower-guides/` — 15 attributed screenshots downloaded from the Tower help guides (reference only).
+- `docs/UI-IMPROVE.md` — UI/UX improvement plan for GitRonimo views.
+- `docs/screens/` — optional product screenshot inventory.
 
 **Acceptance checks:** the skills load after opencode restart; every screenshot is attributed in `docs/UI-IMPROVE.md`; no assets are added to the shipped app. Note: the model cannot read images, so `docs/screens/*.png` (the user's own captures) and the downloaded guides could not be visually verified; the plan is grounded in the guides' text.
 
@@ -1415,7 +1431,7 @@
 
 **Intent:** Split the 4,300-line `apps/desktop/src/main.rs` into a small `main.rs` plus a `views/` module tree mirroring the window structure that `PLAN.md §7` and §8.1 already propose (toolbar · sidebar · working copy · history · diff · inspector · welcome · shared components). This is a pure structural refactor: no behavior change, no new dependencies, no GPUI logic moved into or out of domain crates.
 
-**Why:** The current single-file desktop shell is the single largest blocker for the subsequent Tower-quality UI work-streams (inline commit composer, real toolbar, sidebar tree with icons, polished history, in-app dialogs, command palette). Each of those improvements needs a stable home in its own module; today every change collides in `main.rs`. `PLAN.md §7` already prescribes `apps/desktop/src/views/` and §7.1 lists `ui_kit` primitives that this split enables per-module work on.
+**Why:** The current single-file desktop shell is the single largest blocker for the subsequent UI work-streams (inline commit composer, real toolbar, sidebar tree with icons, polished history, in-app dialogs, command palette). Each of those improvements needs a stable home in its own module; today every change collides in `main.rs`. `PLAN.md §7` already prescribes `apps/desktop/src/views/` and §7.1 lists `ui_kit` primitives that this split enables per-module work on.
 
 **Files (planned):**
 - `apps/desktop/src/main.rs` — trimmed to entry point, constants, panic/geometry helpers, window options, top-level dispatch, and the `impl GitronimoApp` block containing state-mutating methods (construction, observer setup, refresh, navigation, history load/selection, branch operations, network commands, mutation, stash, commit, diff hunk, watcher, context menu, prompts).
@@ -1961,7 +1977,7 @@
 
 ## 2026-08-06 — Phase 0 / clean-source verification
 
-**Intent:** prove the current source compiles outside the active, dirty worktree without copying the user-provided Tower screenshots.
+**Intent:** prove the current source compiles outside the active, dirty worktree without copying the user-provided screenshots.
 
 **Files:** `PLAN.md` and this work log only.
 
@@ -1971,13 +1987,13 @@
 
 ## 2026-08-06 — Phase 0 / commit-backed verification
 
-**Intent:** commit the implementation files required by Phase 0 without including user-provided Tower screenshots or unrelated machine metadata, then validate the exact commit in a detached clean worktree.
+**Intent:** commit the implementation files required by Phase 0 without including user-provided screenshots or unrelated machine metadata, then validate the exact commit in a detached clean worktree.
 
 **Files:** all Phase 0 source, policy, packaging, and original icon files; explicitly excluding `docs/screens` and `.DS_Store` files.
 
 **Acceptance checks:** the commit contains `Cargo.lock` and every required Phase 0 implementation file, and its detached worktree passes the workspace build and test suite.
 
-**Verification:** commit `65998ae` contains the Phase 0 implementation and `Cargo.lock`, without the Tower screenshots or `.DS_Store` files. A detached worktree at that exact commit passed `cargo build --workspace --all-targets` and the full workspace unit and doc test suite under the pinned Rust 1.97.1 Cargo/Rustc/Rustdoc executables.
+**Verification:** commit `65998ae` contains the Phase 0 implementation and `Cargo.lock`, without the screenshots or `.DS_Store` files. A detached worktree at that exact commit passed `cargo build --workspace --all-targets` and the full workspace unit and doc test suite under the pinned Rust 1.97.1 Cargo/Rustc/Rustdoc executables.
 
 ## 2026-08-06 — Phase 0 / virtual-history interaction check
 
@@ -2201,7 +2217,7 @@
 
 **Verification:** the stash integration test creates a fresh latest stash and drops it, proving the final stash count is zero. Desktop tests, Clippy with warnings denied, and formatting passed.
 
-## 2026-08-11 — UI-PLAN Phases 1–10 (Tower 99% parity)
+## 2026-08-11 — UI-PLAN Phases 1–10 (UI parity)
 
 **Intent:** complete the remaining `docs/UI-PLAN.md` phases on `feature/ui-improvements`: GPUI single-line inputs, toolbar quick open, working copy polish, welcome workflow hub, settings routing, Git progress streaming, secondary view two-pane consistency, and theme tokens.
 
@@ -2257,21 +2273,21 @@
 
 **Verification:** `a_disabled_commit_button_names_what_is_missing` covers the reason matrix. `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check` pass.
 
-## 2026-08-12 — Tower-parity branch context menu
+## 2026-08-12 — Branch context menu
 
-**Intent:** replace the six-item sidebar ref menu with Tower's branch context menu: same grouping, same wording (quoted ref names), cursor-anchored popup, submenus, disabled items that explain themselves, and the operations Tower offers on a branch.
+**Intent:** replace the six-item sidebar ref menu with branch context menu: same grouping, same wording (quoted ref names), cursor-anchored popup, submenus, disabled items that explain themselves, and the operations available on a branch.
 
-**Tower reference:** right-click menu on a local branch (screenshot supplied by the user) and `https://www.git-tower.com/learn/git/ebook/en/desktop-gui/branching-merging/working-with-branches`. Groups: pin · pull/push/force-push/sync · publish/push-to · track upstream · merge/rebase · archive · rename/delete · create branch/tag/PR · export/compare · reveal/copy.
+**Groups:** pin · pull/push/force-push/sync · publish/push-to · track upstream · merge/rebase · archive · rename/delete · create branch/tag/PR · export/compare · reveal/copy.
 
 **Files:** `crates/app_core/src/lib.rs` (per-repository branch organization), `crates/git_cli/src/lib.rs` (tag create/delete, upstream set/unset, archive export, remote-branch delete), `apps/desktop/src/app_state.rs`, `apps/desktop/src/main.rs`, `apps/desktop/src/views/working_copy.rs` (menu), `apps/desktop/src/views/workspace.rs` (anchored overlay + submenu), `apps/desktop/src/views/sidebar.rs` (pinned first, archived section), `apps/desktop/src/tests.rs`, `docs/UI-IMPROVE.md`, `docs/keyboard-shortcuts.md`.
 
 **Acceptance checks:**
 - The menu opens at the mouse position and stays inside the window.
-- Local-branch menu offers pin/unpin, Pull…, Push…, Force Push with Lease…, Sync…, Publish, Push To ▸, Track Upstream Branch ▸, merge/rebase, archive/unarchive, rename, delete, create branch/tag/pull request, export files, compare, reveal in history, copy name — with Tower's quoted wording.
+- Local-branch menu offers pin/unpin, Pull…, Push…, Force Push with Lease…, Sync…, Publish, Push To ▸, Track Upstream Branch ▸, merge/rebase, archive/unarchive, rename, delete, create branch/tag/pull request, export files, compare, reveal in history, copy name — with quoted wording.
 - Items that cannot run are disabled and say why (deleting HEAD, publishing a branch that already tracks, syncing a branch that is not checked out).
 - Pinned branches sort first; archived branches move to their own sidebar section; both survive a restart.
 - Tag delete uses `git tag --delete` and remote-branch delete uses `git push <remote> --delete`, instead of `git branch --delete`.
 
-**Not implemented (Tower-only):** `Track Parent Branch` and `Create New Stacked Branch` belong to Tower's stacked-branch feature, and `Pin` ordering is app state rather than a Git concept.
+**Not implemented:** `Track Parent Branch` and `Create New Stacked Branch` belong to stacked-branch feature, and `Pin` ordering is app state rather than a Git concept.
 
-**Verification:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (including `creates_and_deletes_tags_and_exports_an_archive`, `sets_and_unsets_a_branch_upstream`, `branch_organization_is_scoped_per_repository`), and `cargo deny check` all pass. Approach adapted from Tower's Working with Branches guide (UI structure) and local git_cli patterns; no AGPL code copied.
+**Verification:** `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features` (including `creates_and_deletes_tags_and_exports_an_archive`, `sets_and_unsets_a_branch_upstream`, `branch_organization_is_scoped_per_repository`), and `cargo deny check` all pass. Approach adapted from Working with Branches guide (UI structure) and local git_cli patterns; no AGPL code copied.

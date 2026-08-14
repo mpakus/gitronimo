@@ -12,8 +12,8 @@
 - Add tests for every Git parser and mutation; use temporary repositories for integration tests.
 - Do not log credentials, environment dumps, or unredacted command output.
 - Do not add `unsafe` without an ADR.
-- Do not copy Tower or third-party icons, glyphs, or design assets into shipped product code; keep Gitronimo's branding original.
-- Screenshots of third-party products (including Tower) may be saved under `docs/` for UI/UX reference and study, provided each is attributed to its source; never ship them in the app bundle or claim them as Gitronimo's own.
+- Do not copy third-party icons, glyphs, or design assets into shipped product code; keep Gitronimo's branding original.
+- Third-party product screenshots may be saved under `docs/` for internal study if attributed to their source; never ship them in the app bundle or claim them as Gitronimo's own.
 - Do not add a dependency, crate, or framework abstraction without a current checklist item that needs it.
 - Before completing a task, run `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`, `cargo test --workspace --all-features`, and `cargo deny check`.
 
@@ -35,8 +35,8 @@ System `cargo` older than 1.97 will fail on this workspace.
 | `docs/README.md` | Documentation index |
 | `docs/work-log.md` | Per-task intent, files, acceptance checks (write **before** coding) |
 | `docs/desktop-shell.md` | Activity bar, message history, confirms, pins, command palette, About |
-| `docs/UI-PLAN.md` | Tower parity phases and screenshot regression matrix |
-| `docs/UI-IMPROVE.md` | Tower guide patterns mapped to GitRonimo views |
+| `docs/UI-PLAN.md` | UI phases and screenshot regression matrix |
+| `docs/UI-IMPROVE.md` | GitRonimo view patterns and remaining UI gaps |
 | `docs/architecture.md` | Crate layers and mutation flow |
 | `docs/implementation-boundaries.md` | Layering constraints |
 | `docs/troubleshooting.md` | User-facing recovery and keyboard reference |
@@ -46,7 +46,7 @@ System `cargo` older than 1.97 will fail on this workspace.
 | `docs/packaging.md` | macOS Apple Silicon / Intel bundles, signing |
 | `docs/adr/` | Architecture decision records |
 
-Tower reference screenshots live under `docs/screens/` (attributed, internal study only).
+Product screenshots live under `docs/` (README hero and working-copy capture).
 
 ## GPUI agent skills
 

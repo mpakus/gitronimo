@@ -7,8 +7,9 @@ Index of project documentation. Start with [README.md](../README.md) for install
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [PLAN.md](../PLAN.md) | Contributors | Roadmap, checklist, crate boundaries |
-| [UI-PLAN.md](UI-PLAN.md) | UI contributors | Tower parity phases and screenshot matrix |
-| [UI-IMPROVE.md](UI-IMPROVE.md) | UI contributors | Tower guide patterns mapped to GitRonimo views |
+| [todo-v1.md](todo-v1.md) | Contributors | Leftover work and doc hygiene toward v1 |
+| [UI-PLAN.md](UI-PLAN.md) | UI contributors | UI phases and screenshot matrix |
+| [UI-IMPROVE.md](UI-IMPROVE.md) | UI contributors | GitRonimo view patterns and remaining gaps |
 | [work-log.md](work-log.md) | Contributors | Per-task intent, files, acceptance (write before coding) |
 | [../CHANGELOG.md](../CHANGELOG.md) | Everyone | Release notes |
 
@@ -35,12 +36,8 @@ Index of project documentation. Start with [README.md](../README.md) for install
 
 | Location | Purpose |
 |----------|---------|
-| [screens/README.md](screens/README.md) | GitRonimo captures vs Tower reference shots |
+| [screens/README.md](screens/README.md) | Product screenshot inventory |
 | `screens/gitronimo-*.png` | Committed product screenshots (README, docs) |
-| `screens/tower-guides/` | Tower help guide reference (local study, gitignored) |
-| `screens/tower-*.png` | Tower comparison captures (local study, gitignored) |
-
-Tower screenshots are © [Tower](https://www.git-tower.com/) / fournova and are never shipped in the app bundle.
 
 ## Agent and contributor setup
 
@@ -58,6 +55,6 @@ When you change user-visible behavior:
 2. Update [keyboard-shortcuts.md](keyboard-shortcuts.md) if shortcuts or selection rules change.
 3. Update [desktop-shell.md](desktop-shell.md) if activity bar, palette, confirms, branch pin/archive, or About behavior changes.
 4. Update [README.md](../README.md) screenshots if the UI changed materially.
-5. Sync [UI-IMPROVE.md](UI-IMPROVE.md) implementation status when a Tower parity item lands.
+5. Sync [UI-IMPROVE.md](UI-IMPROVE.md) implementation status when a user-visible UI pattern lands.
 6. Add a [CHANGELOG.md](../CHANGELOG.md) note when preparing a release.
 7. Bump `APP_VERSION` in `apps/desktop/src/views/about.rs` after each product release (currently **0.9.2**).

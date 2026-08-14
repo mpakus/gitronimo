@@ -181,7 +181,7 @@ pub(crate) enum ForcePushState {
     AwaitingConfirmation,
 }
 
-/// Modal confirmation for destructive or blocked Git actions (Tower-style).
+/// Modal confirmation for destructive or blocked Git actions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum AppConfirmDialog {
     /// Safe delete refused because the branch is not fully merged.
@@ -346,7 +346,7 @@ pub(crate) enum TextPromptKind {
     },
 }
 
-/// Tower-style Apply Stash options dialog.
+/// Apply Stash options dialog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StashApplyDialog {
     pub reference: String,
@@ -516,7 +516,7 @@ pub(crate) enum OverlayFocus {
     ChoicePrompt,
 }
 
-/// Tower-style Pull dialog: remote branch + optional rebase.
+/// Pull dialog: remote branch + optional rebase.
 #[derive(Clone, Debug)]
 pub(crate) struct PullDialogState {
     pub use_rebase: bool,
@@ -597,7 +597,7 @@ impl PushOption {
     }
 }
 
-/// Tower-style Push dialog: destination remote branch plus push options.
+/// Push dialog: destination remote branch plus push options.
 #[derive(Clone, Debug)]
 pub(crate) struct PushDialogState {
     /// Local HEAD branch the commits come from.
@@ -870,7 +870,7 @@ pub(crate) struct GitronimoApp {
     pub search_focus_handle: FocusHandle,
     pub commit_subject_focused: bool,
     pub commit_body_focused: bool,
-    /// Tower-like commit card: details (body/options/author) shown when expanded.
+    /// Expandable commit card: details (body/options/author) shown when expanded.
     pub commit_composer_expanded: bool,
     pub network_progress: f32,
     pub last_network_result: Option<String>,
@@ -1016,7 +1016,7 @@ pub(crate) struct GitronimoApp {
     pub command_palette_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub choice_prompt_input: gpui::Entity<crate::views::single_line_input::SingleLineInput>,
     pub show_quick_open: bool,
-    /// Anchored Tower-style menu from the welcome sidebar footer `+` button.
+    /// Anchored menu from the welcome sidebar footer `+` button.
     pub welcome_plus_menu_open: bool,
     pub last_commit_summary: Option<String>,
     pub file_diff_stats: std::collections::HashMap<git_domain::GitPath, (usize, usize)>,

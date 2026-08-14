@@ -556,7 +556,7 @@ impl GitronimoApp {
                     .text_color(label_color)
                     .cursor_pointer();
                 if selected {
-                    // Tower: full-width accent ribbon for the selected/viewed branch.
+                    // Full-width accent ribbon for the selected/viewed branch.
                     row = row.bg(colors.accent);
                 } else {
                     row = row.hover(|style| style.bg(colors.selection));

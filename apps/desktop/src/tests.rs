@@ -202,7 +202,7 @@ fn window_titles_distinguish_welcome_loading_and_drafts() {
 }
 
 #[test]
-fn divergence_arrows_match_tower_order() {
+fn divergence_arrows_use_up_then_down_order() {
     assert_eq!(format_divergence_arrows(0, 0), None);
     assert_eq!(format_divergence_arrows(1, 0).as_deref(), Some("\u{2191}1"));
     assert_eq!(format_divergence_arrows(0, 2).as_deref(), Some("\u{2193}2"));

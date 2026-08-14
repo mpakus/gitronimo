@@ -670,7 +670,7 @@ pub(crate) fn format_divergence_arrows(ahead: u32, behind: u32) -> Option<String
 
 /// Trailing `HEAD` pill for the checked-out branch, with optional `↑N` / `↓N`.
 ///
-/// Always a muted chip (Tower: gray pill on the current branch, independent of
+/// Always a muted chip on the current branch, independent of
 /// the History selection ribbon).
 pub(crate) fn head_badge(colors: &ThemeColors, ahead: u32, behind: u32) -> gpui::AnyElement {
     div()

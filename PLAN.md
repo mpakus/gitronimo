@@ -12,7 +12,7 @@
 
 ## 1. Mission
 
-Build a fast, polished, free, open-source Git desktop client for macOS, inspired by the usability and information architecture of professional clients such as Tower, while using an original visual identity and implementation.
+Build a fast, polished, free, open-source Git desktop client for macOS, with original visual identity and implementation.
 
 The application must be:
 
@@ -25,7 +25,7 @@ The application must be:
 - keyboard-friendly and accessible;
 - structured so Codex can implement it incrementally without turning the codebase into a monolith.
 
-This project is **not** a pixel-for-pixel clone of Tower. Tower is a product reference for workflow quality, not a source of assets, code, names, icons, screenshots, or proprietary interaction details.
+This project uses original branding, assets, copy, and interaction details. Do not copy another product’s icons, screenshots, names, or layout measurements into shipped code.
 
 ---
 
@@ -135,8 +135,8 @@ Do not implement these during MVP work:
 - cloud synchronization of settings;
 - repository hosting;
 - team collaboration features;
-- visual parity with Tower;
-- copying Tower icons, assets, wording, layout measurements, or branding.
+- visual parity with another commercial Git client;
+- copying third-party icons, assets, wording, layout measurements, or branding.
 
 ---
 
@@ -156,7 +156,7 @@ The MVP is considered successful when all of the following are true:
 - [ ] Every failure shows the Git command category, exit status, and useful stderr without exposing secrets.
 - [x] The application can be built as a universal or separate `arm64` and `x86_64` macOS app.
 - [x] A signed and notarized release workflow is documented.
-- [ ] No Tower copyrighted assets or trademarks are packaged with the application.
+- [ ] No third-party copyrighted assets or trademarks are packaged with the application.
 
 ---
 
@@ -1508,12 +1508,12 @@ Required semantic color tokens:
 Rules:
 
 - Do not scatter raw color values throughout views.
-- Do not copy Tower’s exact palette.
+- Do not copy another product’s exact palette.
 - Support system appearance changes.
 - Use macOS-appropriate typography and spacing while preserving an original identity.
 - Use SVG icons with a compatible open-source license.
 - Record icon attribution when required.
-- Do not package extracted Apple or Tower assets.
+- Do not package extracted Apple or third-party product assets.
 
 ---
 
@@ -2124,7 +2124,7 @@ Create a companion `AGENTS.md` containing at least:
 - Use local temporary repositories for integration tests.
 - Do not log credentials or full environment variables.
 - Do not add unsafe code without an ADR.
-- Do not copy Tower assets, text, icons, or proprietary design details.
+- Do not copy third-party product assets, text, icons, or proprietary design details.
 - Run fmt, clippy, tests, and cargo-deny before completion.
 ```
 
@@ -2348,10 +2348,9 @@ A phase is done only when all checklist items and exit criteria in that phase pa
 **Mitigation:**
 
 - original name, icon, palette, typography, and component design;
-- no Tower screenshots shipped in the app bundle; attributed third-party screenshots under `docs/` are permitted for UI/UX reference only;
-- describe product as “a Git client,” not an unofficial Tower version;
-- use Tower only as workflow research;
-- include trademark disclaimer where relevant.
+- no third-party product screenshots shipped in the app bundle;
+- describe the product as “a Git client,” not an unofficial version of another app;
+- include a trademark disclaimer where relevant.
 
 ---
 

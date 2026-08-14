@@ -1,4 +1,4 @@
-//! Per-repository Git branching conventions (Tower Workflows, approach-only).
+//! Per-repository Git branching conventions.
 
 use git_domain::MergeMethod;
 use serde::{Deserialize, Serialize};

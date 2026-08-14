@@ -1,6 +1,6 @@
-//! Tower-style right-click menu for sidebar branches, tags, and remotes.
+//! Right-click menu for sidebar branches, tags, and remotes.
 //!
-//! Labels quote the ref name the way Tower does (`Rename "main"…`). Items that
+//! Labels quote the ref name (`Rename "main"…`). Items that
 //! cannot run are disabled and carry a reason. Submenus (`Push To ▸`,
 //! `Track Upstream Branch ▸`) open as a flyout beside the parent item.
 

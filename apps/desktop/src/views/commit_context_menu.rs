@@ -1,7 +1,6 @@
-//! Tower-style right-click menu for History commits.
+//! Right-click menu for History commits.
 //!
-//! Grouping and quoted OID labels follow Tower's Commit History menus
-//! (approach-only). Chrome matches the sidebar ref context menu.
+//! Grouping and quoted OID labels. Chrome matches the sidebar ref context menu.
 
 use gpui::{AnyElement, ClickEvent, MouseButton, MouseDownEvent, div, prelude::*, px};
 use ui_kit::ThemeColors;

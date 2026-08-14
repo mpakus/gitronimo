@@ -42,7 +42,7 @@ Destructive or blocked Git outcomes use modal overlays (not only the activity fl
 
 `AppConfirmDialog` is the shared enum for blocked-action confirmations; render through `workspace` modal helpers. Domain logic stays in `main.rs`, not in `Render`.
 
-## Workflow (Tower-inspired)
+## Workflow
 
 Toolbar **Workflow** opens the in-repo Workflow view when a repository is loaded, or the welcome Workflow hub otherwise. Palette: **Show workflow**.
 
@@ -53,11 +53,9 @@ Toolbar **Workflow** opens the in-repo Workflow view when a repository is loaded
 - **Sync** merges the topic’s start (or a child base’s parent) into HEAD.
 - Deferred: Graphite CLI, git-flow CLI, stacked restack, auto-archive protection.
 
-Approach-only from [Tower Workflows](https://www.git-tower.com/help/guides/workflows/overview/mac); original Gitronimo UI.
-
 ## History commit context menu
 
-Right-click a History commit (`views/commit_context_menu.rs`) for a Tower-grouped menu (quoted short OID labels):
+Right-click a History commit (`views/commit_context_menu.rs`) for a grouped menu (quoted short OID labels):
 
 - Copy hash / info, Reveal in History, Check Out (detached), Create branch/tag, Save Patch, Export Files, Compare
 - Reset / Revert / Rebase / Delete — enabled only when History is scoped to the current HEAD branch (`Current` or that branch’s named filter); otherwise disabled with a tooltip
@@ -89,7 +87,7 @@ Searchable list (`PALETTE_COMMANDS` in `app_state.rs`); list viewport scrolls. I
 
 Dispatch is `run_palette_command` in `main.rs`. Adding a user-facing action that already has a handler should usually add a `PaletteCommand` variant + label + match arm. Selected-commit actions require a History selection; Reset/Revert also require History scoped to the HEAD branch.
 
-## Stashes (Tower-style core)
+## Stashes (core)
 
 - **Save stash** (toolbar Save, Stashes header, palette, `Command-Shift-S`): text prompt for message + Include untracked checkbox; optional pathspecs from Working Copy **Stash selected…**.
 - **Apply** (toolbar Apply, Stashes Apply…): dialog with Delete after applying (pop) and Restore staging area (`--index`).

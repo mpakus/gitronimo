@@ -77,11 +77,12 @@ cargo deny check
 | Doc | Description |
 |-----|-------------|
 | [docs/README.md](docs/README.md) | Documentation index |
+| [v1 todo](docs/todo-v1.md) | Leftover work and doc hygiene toward 1.0 |
 | [Architecture](docs/architecture.md) | Crate layers and mutation flow |
 | [Keyboard shortcuts](docs/keyboard-shortcuts.md) | Global and Working Copy shortcuts |
 | [Desktop shell](docs/desktop-shell.md) | Activity bar, palette, confirms, pins, About |
-| [UI plan](docs/UI-PLAN.md) | Tower parity phases |
-| [UI improve](docs/UI-IMPROVE.md) | Tower guide → GitRonimo mapping |
+| [UI plan](docs/UI-PLAN.md) | UI phases |
+| [UI improve](docs/UI-IMPROVE.md) | View patterns and remaining UI gaps |
 | [Work log](docs/work-log.md) | Implementation notes |
 | [Troubleshooting](docs/troubleshooting.md) | Recovery and toolchain |
 | [Packaging](docs/packaging.md) | Apple Silicon / Intel bundles, signing |
@@ -96,7 +97,7 @@ cargo deny check
 - [Third-party notices](docs/third-party-notices.md)
 - [Trademark statement](TRADEMARKS.md)
 
-GitRonimo is not affiliated with Tower or any Git hosting provider. It does not include Tower code, assets, copy, or branding.
+GitRonimo is not affiliated with any other Git client or Git hosting provider. Branding, assets, and copy are original.
 
 ## License
 

@@ -1,6 +1,6 @@
 //! Workflow tab: templates, applied bases/topics, Start / Finish / Sync.
 //!
-//! Approach-only from Tower Workflows (GitHub Flow / GitLab Flow / git-flow).
+//! Workflow view: GitHub Flow / GitLab Flow / git-flow templates.
 //! Git mutations stay in `main.rs`; this module only renders and dispatches.
 
 use gpui::{AnyElement, ClickEvent, SharedString, div, prelude::*, px};

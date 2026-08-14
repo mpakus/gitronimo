@@ -1,4 +1,4 @@
-//! Commit composer: Tower-like expandable card (subject → details on focus).
+//! Commit composer: expandable card (subject → details on focus).
 
 use std::time::Duration;
 

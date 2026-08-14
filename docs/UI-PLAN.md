@@ -1,37 +1,33 @@
-# UI-PLAN.md — Tower 99% Parity Roadmap
+# UI-PLAN.md — GitRonimo UI roadmap
 
 **Status:** complete  
 **Branch:** `feature/ui-improvements`  
-**Companion doc:** [`UI-IMPROVE.md`](UI-IMPROVE.md) (Tower guide pattern reference)
+**Companion doc:** [`UI-IMPROVE.md`](UI-IMPROVE.md) (view patterns)
 
 ---
 
 ## Goal
 
-Bring Gitronimo to **~99% Tower parity** — same information architecture, workflows, density, and visual consistency — while keeping **original Gitronimo branding** (no Tower assets, icons, fonts, or copy in shipped code).
+Bring GitRonimo to a dense, consistent Git-client information architecture with **original branding** (no third-party product assets, icons, fonts, or copy in shipped code).
 
 ---
 
-## What 99% means
+## In scope vs out of scope
 
-| In scope | Out of scope (the remaining 1%) |
-|----------|----------------------------------|
-| Welcome rail (Bookmarks / Workflow), repo detail panel | Pixel-identical layout or Tower trademark assets |
+| In scope | Out of scope |
+|----------|--------------|
+| Welcome rail (Bookmarks / Workflow), repo detail panel | Pixel-identical clone of another Git client |
 | In-repo sidebar: WORKSPACE / BRANCHES / TAGS / REMOTES | OAuth device flow, enterprise GitHub, Bitbucket/Azure |
 | Working Copy: composer + file list + diff two-pane | Branches Review, AI commit messages |
 | Toolbar: Fetch/Pull/Push/Sync, Apply/Save, Refresh, search | Built-in terminal or text editor |
 | History, Stashes, Remotes, PRs: list + detail | Cloud settings sync |
 | 22px list rows, 28px panel headers, 52px toolbar, full-width accent selection | |
 
-**Reference screenshots** (internal study only, per `AGENTS.md`):
-
-- `docs/screens/gitronimo-*.png` — committed Gitronimo product captures (see [`screens/README.md`](screens/README.md))
-- `docs/screens/tower-guides/overview-*.png`, `workflow-*.png` — Tower help guides (local, gitignored)
-- `docs/screens/tower-history.png`, `docs/screens/tower-branch-menu.png` — Tower comparison (local, gitignored)
+**Product screenshots:** `docs/screenshot.png` and `docs/logo.png` (README).
 
 ---
 
-## Current baseline (~99%)
+## Current baseline
 
 All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 
@@ -39,7 +35,7 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 - Working Copy multi-select (Command-A, Shift/Cmd-click) and batch checkbox staging
 - Welcome: vertical rail, repo detail panel, grouped/flat list, search filter
 - In-repo sidebar: WORKSPACE/BRANCHES/TAGS/REMOTES, HEAD badge, remote footer; workspace nav trimmed to WC/History/Stashes/Settings
-- Branch/ref actions via sidebar right-click context menu (Tower pattern)
+- Branch/ref actions via sidebar right-click context menu
 - Toolbar: labeled Fetch/Pull/Push/Sync, Apply/Save/Refresh, Prev/Next, search field
 - History: Changeset/Tree toggle, full-width flat rows, multi-lane graph, plain ref labels, scope header
 - Stashes, Remotes, PRs: two-pane layouts
@@ -56,17 +52,17 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 
 ## Screenshot regression matrix
 
-| Gitronimo surface | Tower reference | Primary files |
-|-------------------|-----------------|---------------|
-| Welcome / Repositories | `overview-02`, `workflow-01` | `welcome.rs`, `sidebar.rs` |
-| Working Copy | `overview-06`, `workflow-03/04/05` | `working_copy.rs`, `commit_composer.rs`, `diff_viewer.rs` |
-| Sidebar | `overview-05` | `sidebar.rs` |
-| Toolbar | Tower WC screenshot | `toolbar.rs` |
-| History | `overview-08`, `workflow-06` | `history.rs` |
-| Commit Detail | `overview-09` | `commit_detail.rs` |
-| Pull Requests | `overview-07` | `pull_requests.rs` |
-| Branch menu | `tower-branch-menu.png` | `sidebar.rs`, `workspace.rs` (`ref_context_menu_overlay`) |
-| Settings | Tower sidebar gear | `settings.rs` |
+| GitRonimo surface | Primary files |
+|-------------------|---------------|
+| Welcome / Repositories | `welcome.rs`, `sidebar.rs` |
+| Working Copy | `working_copy.rs`, `commit_composer.rs`, `diff_viewer.rs` |
+| Sidebar | `sidebar.rs` |
+| Toolbar | `toolbar.rs` |
+| History | `history.rs` |
+| Commit Detail | `commit_detail.rs` |
+| Pull Requests | `pull_requests.rs` |
+| Branch menu | `sidebar.rs`, `workspace.rs` (`ref_context_menu_overlay`) |
+| Settings | `settings.rs` |
 
 ---
 
@@ -85,8 +81,6 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 - Wire toolbar search, welcome sidebar filter, commit subject (and body when expanded)
 - Remove `osascript` commit subject prompt
 
-**Tower ref:** `workflow-05-commit.png`
-
 **Acceptance:** paste works; visible caret; live filter; no dialog fallbacks for subject
 
 | Status | |
@@ -100,8 +94,6 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 - Workflow tab: minimal hub (last commit, last fetch, open WC) — not permanent placeholder
 - Detail panel: committer avatar circle, user description field, last-commit one-liner
 - Vertical rail icon consistency (original symbols)
-
-**Tower ref:** `overview-02-repositories.png`
 
 | Status | |
 |--------|---|
@@ -128,8 +120,6 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 - Diff: current-line indicator, line numbers, hunk header polish
 - Column resize handle styling
 
-**Tower ref:** `workflow-03/04/05`
-
 | Status | |
 |--------|---|
 | [x] | |
@@ -137,7 +127,7 @@ All Phases 1–10 implemented on `feature/ui-improvements` (2026-08-11):
 ### Phase 5 — Sidebar and branch tree
 
 **Work:**
-- Branch context menu vs `tower-branch-menu.png`
+- Branch context menu
 - Remote branches nested under origin with expand/collapse
 - Settings routes to dedicated view (Phase 6)
 
@@ -255,7 +245,7 @@ Apply `two_pane_view`, `view_panel_header`, `centered_empty_state` to:
 
 ## Sign-off checklist
 
-Manual QA — compare each row to Tower screenshot (optional follow-up):
+Manual QA — optional follow-up:
 
 | View | IA match | Density | Selection | Empty state | Toolbar | Pass |
 |------|----------|---------|-----------|-------------|---------|------|
@@ -282,8 +272,8 @@ Manual QA — compare each row to Tower screenshot (optional follow-up):
 | Item | Reason |
 |------|--------|
 | OAuth / enterprise GitHub | `PLAN.md` Phase 9 hardening |
-| Branches Review (full diverged-branch workflow) | Optional Tower feature — sidebar view lists branches with upstream divergence; merge/rebase actions deferred |
-| Pixel-perfect Tower clone | `AGENTS.md` / `PLAN.md` non-goals |
+| Branches Review (full diverged-branch workflow) | Optional feature — sidebar view lists branches with upstream divergence; merge/rebase actions deferred |
+| Pixel-perfect clone of another Git client | `AGENTS.md` / `PLAN.md` non-goals |
 | Built-in editor / terminal | Product non-goal |
 
 ---
@@ -306,7 +296,7 @@ Manual QA — compare each row to Tower screenshot (optional follow-up):
 
 ## Relationship to other docs
 
-- **`UI-IMPROVE.md`** — Tower guide → Gitronimo mapping (what to adopt)
+- **`UI-IMPROVE.md`** — GitRonimo view patterns
 - **`UI-PLAN.md`** (this file) — execution roadmap and sign-off
 - **`PLAN.md`** — product scope and non-goals
 - **`work-log.md`** — per-phase implementation notes

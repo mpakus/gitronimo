@@ -5649,7 +5649,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         }
     }
 
-    /// Double-click a sidebar branch to check it out (Tower: switch on activate).
+    /// Double-click a sidebar branch to check it out.
     pub(crate) fn activate_ref_from_double_click(
         &mut self,
         context: &RefContext,

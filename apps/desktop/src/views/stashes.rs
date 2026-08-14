@@ -1,4 +1,4 @@
-//! Stash browser and safe stash actions (Tower-style core parity).
+//! Stash browser and safe stash actions.
 
 use gpui::{AnyElement, ClickEvent, SharedString, div, prelude::*, px};
 use ui_kit::ThemeColors;
