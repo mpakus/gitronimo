@@ -1,6 +1,6 @@
 # GitRonimo documentation
 
-Index of project documentation. Start with [README.md](../README.md) for install and overview. Product version **0.9** is `APP_VERSION` in `apps/desktop/src/views/about.rs` (bump after each release).
+Index of project documentation. Start with [README.md](../README.md) for install and overview. Product version **0.9.2** is `APP_VERSION` in `apps/desktop/src/views/about.rs` (bump after each release).
 
 ## Product and planning
 
@@ -60,4 +60,4 @@ When you change user-visible behavior:
 4. Update [README.md](../README.md) screenshots if the UI changed materially.
 5. Sync [UI-IMPROVE.md](UI-IMPROVE.md) implementation status when a Tower parity item lands.
 6. Add a [CHANGELOG.md](../CHANGELOG.md) note when preparing a release.
-7. Bump `APP_VERSION` in `apps/desktop/src/views/about.rs` after each product release (currently **0.9**).
+7. Bump `APP_VERSION` in `apps/desktop/src/views/about.rs` after each product release (currently **0.9.2**).

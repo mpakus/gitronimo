@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.2 — 2026-08-14
+
+Product version **0.9.2** (About GitRonimo / `APP_VERSION` and packager bundle version).
+
+- App icon from `assets/gitronimo-icon.png` (packaged as `assets/gitronimo.icns`).
+- README shows `assets/gitronimo-logo.png` and `docs/screenshot.png`.
+
+## 0.9.1 — 2026-08-14
+
+Product version **0.9.1** (About GitRonimo / `APP_VERSION` and packager bundle version). Signed, notarized **universal** macOS app (`GitRonimo-v0.9.1.zip`, arm64 + x86_64).
+
+- GitHub release publishes one universal zip (Intel is the `x86_64` slice inside the same `.app`, not a second asset).
+- Release workflow retries `notarytool --wait` on App Store Connect HTTP timeouts and uploads onto an existing tag release when present.
+- App icon is `assets/gitronimo-icon.png` (packaged as `assets/gitronimo.icns`).
+
 ## 0.9 — 2026-08-13
 
 Product version **0.9** (About GitRonimo / `APP_VERSION`). Unsigned Apple Silicon and Intel `.app` bundles; signed notarized distribution still requires the protected tag workflow.

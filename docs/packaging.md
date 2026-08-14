@@ -2,11 +2,11 @@
 
 The product name is **GitRonimo**. The crate is still `gitronimo-desktop`; the binary and `.app` executable are `GitRonimo` so the macOS application menu title matches.
 
-Product version **0.9** is the string shown in About GitRonimo (`APP_VERSION` in `apps/desktop/src/views/about.rs`) and in the bundle (`[package.metadata.packager] version` in `apps/desktop/Cargo.toml`). Bump **both** after each release. They are independent of the Cargo workspace crate version.
+Product version **0.9.2** is the string shown in About GitRonimo (`APP_VERSION` in `apps/desktop/src/views/about.rs`) and in the bundle (`[package.metadata.packager] version` in `apps/desktop/Cargo.toml`). Bump **both** after each release. They are independent of the Cargo workspace crate version.
 
 Local `.app` bundles are unsigned. Gatekeeper will not treat them as a distributable release.
 
-The app identifier is `com.gitronimo.desktop`. Keep certificate material, team IDs, and notary credentials in the release environment or CI secrets; never in this repository.
+The app identifier is `com.gitronimo.desktop`. The dock and Finder icon is `assets/gitronimo.icns`, generated from `assets/gitronimo-icon.png`. Keep certificate material, team IDs, and notary credentials in the release environment or CI secrets; never in this repository.
 
 ## Apple Silicon (arm64)
 
@@ -51,11 +51,11 @@ lipo -archs target/release-intel/GitRonimo.app/Contents/MacOS/GitRonimo
 mkdir -p target/dist
 ditto -c -k --sequesterRsrc --keepParent \
   target/release-arm/GitRonimo.app \
-  target/dist/GitRonimo-0.9-macos-arm64.zip
+  target/dist/GitRonimo-0.9.2-macos-arm64.zip
 ditto -c -k --sequesterRsrc --keepParent \
   target/release-intel/GitRonimo.app \
-  target/dist/GitRonimo-0.9-macos-x86_64.zip
-(cd target/dist && shasum -a 256 GitRonimo-0.9-macos-*.zip > SHA256SUMS.txt)
+  target/dist/GitRonimo-0.9.2-macos-x86_64.zip
+(cd target/dist && shasum -a 256 GitRonimo-0.9.2-macos-*.zip > SHA256SUMS.txt)
 ```
 
 A universal binary (lipo of both executables into one `GitRonimo.app`) is produced by `.github/workflows/release.yml` on a `v*` tag, then signed and notarized.

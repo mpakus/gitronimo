@@ -1,5 +1,31 @@
 # Implementation work log
 
+## 2026-08-14 — Bump product version to 0.9.2
+
+**Intent:** Align About / packager `APP_VERSION` and README with product version **0.9.2**.
+
+**Files:** `apps/desktop/src/views/about.rs`, `apps/desktop/Cargo.toml`, `apps/desktop/src/tests.rs`, `README.md`, `CHANGELOG.md`, current-version mentions in `docs/`.
+
+**Acceptance:** About and bundle metadata show `0.9.2`.
+
+## 2026-08-14 — App icon from gitronimo-icon.png + README logo
+
+**Intent:** Dock/app icon from `assets/gitronimo-icon.png` (regenerate `gitronimo.icns`). README shows `assets/gitronimo-logo.png` plus `docs/screenshot.png`.
+
+**Files:** `assets/gitronimo.icns`, `apps/desktop/Cargo.toml`, `README.md`, `docs/packaging.md`.
+
+**Acceptance:** Packager `icons` uses the new icns built from `gitronimo-icon.png`; README has logo then screenshot.
+
+## 2026-08-14 — Bump product version to 0.9.1
+
+**Intent:** Align About / packager `APP_VERSION` and README with the shipped GitHub tag **v0.9.1**.
+
+**Files:** `apps/desktop/src/views/about.rs`, `apps/desktop/Cargo.toml`, `apps/desktop/src/tests.rs`, `README.md`, `CHANGELOG.md`, current-version mentions in `docs/`.
+
+**Acceptance:** About and bundle metadata show `0.9.1`; README current release is 0.9.1.
+
+**Verification:** `about_dialog_uses_the_release_version`; fmt/clippy on desktop.
+
 ## 2026-08-14 — Release workflow: notary wait retry + existing GitHub release
 
 **Intent:** Latest `v0.9` job imported the cert, signed, and uploaded to notary (`036ece19-86af-4c2e-9536-111822052206`), then `notarytool --wait` hit an App Store Connect HTTP timeout. `gh release create` would also fail because `v0.9` already exists as a notes-only pre-release.

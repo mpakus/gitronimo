@@ -60,4 +60,4 @@ Local and CI development bundles are unsigned `GitRonimo.app`. macOS Gatekeeper 
 
 ## About GitRonimo
 
-**GitRonimo → About GitRonimo** (or palette **About GitRonimo**) shows product version **0.9**. After a release, bump `APP_VERSION` in `apps/desktop/src/views/about.rs`. Click outside the overlay to dismiss it.
+**GitRonimo → About GitRonimo** (or palette **About GitRonimo**) shows product version **0.9.2**. After a release, bump `APP_VERSION` in `apps/desktop/src/views/about.rs`. Click outside the overlay to dismiss it.
