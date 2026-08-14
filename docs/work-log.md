@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-14 — Message history clock time
+
+**Intent:** Message history popup shows the local hour and minute when each line was recorded (`HH:MM`), not a relative age (`24s`, `1m`).
+
+**Files:** `crates/platform_macos/src/clock.rs`, `crates/platform_macos/src/lib.rs`, `crates/platform_macos/Cargo.toml`, `apps/desktop/src/views/workspace.rs`, `apps/desktop/src/tests.rs`, `docs/desktop-shell.md`.
+
+**Acceptance:** Popup timestamps match `HH:MM`. Unit test checks the format. Click-to-select and activity coalescing are unchanged.
+
 ## 2026-08-14 — Drag Working Copy files to other macOS apps
 
 **Intent:** Drag a file (or the current multi-selection) from the Working Copy staging list onto another macOS app so that app opens the path. GPUI `on_drag` is in-window only; this uses AppKit `NSDraggingItem` file URLs (`public.file-url`). Only paths that already exist under the worktree are offered. Deleted/missing entries are skipped.

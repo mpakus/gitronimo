@@ -1696,10 +1696,14 @@ impl GitronimoApp {
                                             .child(
                                                 div()
                                                     .flex_shrink_0()
-                                                    .w(px(40.0))
+                                                    .w(px(44.0))
                                                     .text_xs()
                                                     .text_color(colors.text_muted)
-                                                    .child(format_activity_age(entry.at)),
+                                                    .child(
+                                                        platform_macos::format_local_hour_minute(
+                                                            entry.at,
+                                                        ),
+                                                    ),
                                             )
                                             .child(
                                                 div()
@@ -1761,22 +1765,6 @@ impl GitronimoApp {
                 }))
                 .into_any_element(),
         )
-    }
-}
-
-fn format_activity_age(at: std::time::SystemTime) -> String {
-    let Ok(elapsed) = std::time::SystemTime::now().duration_since(at) else {
-        return String::new();
-    };
-    let secs = elapsed.as_secs();
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else if secs < 86_400 {
-        format!("{}h", secs / 3600)
-    } else {
-        format!("{}d", secs / 86_400)
     }
 }
 

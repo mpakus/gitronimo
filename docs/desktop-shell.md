@@ -21,7 +21,7 @@ Preferences live at `~/Library/Application Support/Gitronimo/recent-repositories
 |-------|----------|
 | Status line | Current `activity` string; colored via `ActivityKind` (success / error / progress / confirm / info) |
 | Clock / history button | Toggles **Message history** popup (bottom-left) |
-| Popup | Newest-first, up to 100 entries; scrollable; colored dots + relative ages |
+| Popup | Newest-first, up to 100 entries; scrollable; colored dots + local `HH:MM` clock time |
 | Network strip | Indeterminate progress + Cancel while a `NetworkOperation` runs |
 
 All user-visible status text should go through `GitronimoApp::set_activity` so the history log stays complete. Consecutive identical lines are skipped. Consecutive working-copy refresh chatter (`Refreshing working copy…` / `Working copy refreshed…`) is **coalesced** so push completions, errors, and confirmations are not drowned out.
