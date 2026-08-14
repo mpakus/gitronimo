@@ -27,6 +27,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          : "${MACOS_CERTIFICATE_BASE64:?set repository secret MACOS_CERTIFICATE_BASE64}"
+          : "${MACOS_CERTIFICATE_PASSWORD:?set repository secret MACOS_CERTIFICATE_PASSWORD}"
+          : "${KEYCHAIN_PASSWORD:?set repository secret KEYCHAIN_PASSWORD}"
+          : "${DEVELOPER_ID_APPLICATION:?set repository secret DEVELOPER_ID_APPLICATION}"
           certificate_path="$RUNNER_TEMP/gitronimo-release.p12"
           keychain_path="$RUNNER_TEMP/gitronimo-release.keychain-db"
           printf '%s' "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$certificate_path"
@@ -57,14 +61,43 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app_path"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip
           printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$api_key_path"
-          xcrun notarytool submit target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip --key "$api_key_path" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait
+          zip_path="target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip"
+          notary_ok=0
+          for attempt in 1 2 3 4 5; do
+            echo "notarytool submit --wait attempt ${attempt}"
+            if xcrun notarytool submit "$zip_path" --key "$api_key_path" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER" --wait --timeout 1800; then
+              notary_ok=1
+              break
+            fi
+            echo "notarytool wait failed (often an App Store Connect HTTP timeout); retrying..."
+            sleep 20
+          done
+          if [[ "$notary_ok" -ne 1 ]]; then
+            echo "notarization did not finish after retries" >&2
+            exit 1
+          fi
           rm -f "$api_key_path"
           xcrun stapler staple "$app_path"
           spctl --assess --type execute --verbose=4 "$app_path"
-          rm -f target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip
-          ditto -c -k --sequesterRsrc --keepParent "$app_path" target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip
-          shasum -a 256 target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip > target/release-universal/SHA256SUMS.txt
+          rm -f "$zip_path"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$zip_path"
+          shasum -a 256 "$zip_path" > target/release-universal/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: GitRonimo-signed-macos
+          path: |
+            target/release-universal/GitRonimo-${{ github.ref_name }}.zip
+            target/release-universal/SHA256SUMS.txt
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip target/release-universal/SHA256SUMS.txt --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md
+        run: |
+          set -euo pipefail
+          zip_path="target/release-universal/GitRonimo-${GITHUB_REF_NAME}.zip"
+          sums_path="target/release-universal/SHA256SUMS.txt"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$zip_path" "$sums_path" --clobber
+            gh release edit "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md --prerelease=false
+          else
+            gh release create "$GITHUB_REF_NAME" "$zip_path" "$sums_path" --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md
+          fi

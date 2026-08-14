@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-14 — Release workflow: notary wait retry + existing GitHub release
+
+**Intent:** Latest `v0.9` job imported the cert, signed, and uploaded to notary (`036ece19-86af-4c2e-9536-111822052206`), then `notarytool --wait` hit an App Store Connect HTTP timeout. `gh release create` would also fail because `v0.9` already exists as a notes-only pre-release.
+
+**Files:** `.github/workflows/release.yml`, `docs/packaging.md`.
+
+**Acceptance:** Notary submit/wait retries on timeout; signed zip is uploaded as an Actions artifact; publish updates an existing tag release instead of failing.
+
 ## 2026-08-13 — 0.9 release prep (docs + dual-arch builds)
 
 **Intent:** Align README, AGENTS.md, and docs with shipped 0.9 product (GitRonimo menu/bundle, About overlay, Workflow, Services removed, `APP_VERSION`). Promote CHANGELOG to **0.9**. Document and produce unsigned Apple Silicon and Intel `.app` zips.

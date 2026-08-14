@@ -82,6 +82,8 @@ Pushing a `v*` tag starts `.github/workflows/release.yml`. Configure these repos
 - `APPLE_API_KEY_BASE64`: the base64-encoded App Store Connect API key `.p8` file.
 - `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`: the corresponding App Store Connect API key identifiers.
 
-The workflow builds arm64 and x86_64 bundles, creates a universal app, signs it with hardened runtime and a timestamp, notarizes and staples it, runs Gatekeeper assessment, writes `SHA256SUMS.txt`, and publishes the ZIP with `CHANGELOG.md` as the release notes.
+The workflow builds arm64 and x86_64 bundles, creates a universal app, signs it with hardened runtime and a timestamp, notarizes and staples it (retries `notarytool --wait` on App Store Connect HTTP timeouts), writes `SHA256SUMS.txt`, and publishes the ZIP with `CHANGELOG.md` as the release notes. If a GitHub release for that tag already exists, the workflow uploads the ZIP onto it instead of failing.
+
+If `notarytool` reports `The request timed out` after `Successfully uploaded file`, signing already succeeded; re-run the job. Apple sometimes takes 15–40 minutes, and a poll timeout is not a certificate problem.
 
 Unsigned per-architecture CI artifacts are also uploaded from `.github/workflows/ci.yml` (`GitRonimo-unsigned-macos-arm64` and `GitRonimo-unsigned-macos-x86_64`).
