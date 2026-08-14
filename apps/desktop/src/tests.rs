@@ -12,8 +12,9 @@ use super::crash_report_path;
 use super::window_options;
 use crate::app_state::{
     GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, OperationAction, RefContext,
-    RefContextSubmenu, RepositoryView, ShellState, eligible_trash_path, git_failure_message,
-    network_failure_message, repository_is_available, resize_width, window_title,
+    RefContextSubmenu, RepositoryView, ShellState, eligible_trash_path, files_for_status_drag,
+    git_failure_message, network_failure_message, repository_is_available, resize_width,
+    window_title,
 };
 use crate::keymap;
 use crate::menus;
@@ -334,6 +335,36 @@ fn trash_refuses_unsafe_paths_symlinks_and_nested_repositories() {
     assert!(eligible_trash_path(&root, &GitPath(b"../outside".to_vec())).is_err());
     assert!(eligible_trash_path(&root, &GitPath(b"link".to_vec())).is_err());
     assert!(eligible_trash_path(&root, &GitPath(b"nested".to_vec())).is_err());
+    std::fs::remove_dir_all(root).expect("temporary root should be removed");
+}
+
+#[test]
+fn status_file_drag_uses_existing_worktree_paths_and_multi_selection() {
+    let root =
+        std::env::temp_dir().join(format!("gitronimo-file-drag-test-{}", std::process::id()));
+    std::fs::create_dir_all(&root).expect("temporary root should exist");
+    std::fs::write(root.join("kept.txt"), b"ok").expect("kept file should exist");
+    std::fs::write(root.join("also.txt"), b"ok").expect("second file should exist");
+    let kept = GitPath(b"kept.txt".to_vec());
+    let also = GitPath(b"also.txt".to_vec());
+    let missing = GitPath(b"gone.txt".to_vec());
+    let escaped = GitPath(b"../outside".to_vec());
+
+    assert_eq!(
+        files_for_status_drag(&root, &kept, &[]),
+        vec![root.join("kept.txt")]
+    );
+    assert_eq!(
+        files_for_status_drag(&root, &kept, std::slice::from_ref(&also)),
+        vec![root.join("kept.txt")],
+        "an unselected row drags only itself"
+    );
+    assert_eq!(
+        files_for_status_drag(&root, &kept, &[kept.clone(), also.clone()]),
+        vec![root.join("kept.txt"), root.join("also.txt")]
+    );
+    assert!(files_for_status_drag(&root, &missing, &[]).is_empty());
+    assert!(files_for_status_drag(&root, &escaped, &[]).is_empty());
     std::fs::remove_dir_all(root).expect("temporary root should be removed");
 }
 

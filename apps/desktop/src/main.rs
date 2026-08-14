@@ -45,7 +45,7 @@ use gpui::{
 };
 use hosting_github::GitHubService;
 use notify::{RecursiveMode, Watcher};
-use platform_macos::MacKeychainStore;
+use platform_macos::{MacKeychainStore, begin_external_file_drag};
 use ui_kit::Appearance;
 
 use crate::actions::{
@@ -62,8 +62,8 @@ use crate::app_state::{
     StashAction, StashApplyDialog, SubmodulePushMode, TextPromptKind, ThemeMode,
     WelcomeRepoSnapshot, WelcomeShellView, appearance_from_window, branch_not_fully_merged_error,
     clamp_list_pane_width, clamp_sidebar_width, classify_activity, discard_selected,
-    git_failure_message, is_working_copy_refresh_noise, network_failure_message,
-    repository_is_available, repository_unavailable_message, resize_width,
+    files_for_status_drag, git_failure_message, is_working_copy_refresh_noise,
+    network_failure_message, repository_is_available, repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
 use crate::views::single_line_input::register_input_bindings;
@@ -397,6 +397,7 @@ impl GitronimoApp {
             selected_paths: Vec::new(),
             last_selected_path_index: None,
             file_list_select_all_toggle: None,
+            file_drag_origin: None,
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
@@ -653,6 +654,7 @@ impl GitronimoApp {
             selected_paths: Vec::new(),
             last_selected_path_index: None,
             file_list_select_all_toggle: None,
+            file_drag_origin: None,
             context_path: None,
             loaded_diff: None,
             selected_diff: None,
@@ -6249,6 +6251,34 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     fn show_status_context_menu(&mut self, path: GitPath, cx: &mut Context<Self>) {
         self.context_path = Some(path);
         cx.notify();
+    }
+
+    pub(crate) fn begin_status_file_drag(&mut self, path: &GitPath) {
+        self.file_drag_origin = None;
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let paths = files_for_status_drag(&repository.worktree_root, path, &self.selected_paths);
+        if !paths.is_empty() {
+            begin_external_file_drag(&paths);
+        }
+    }
+
+    pub(crate) fn note_status_file_drag_origin(&mut self, path: GitPath, x: f32, y: f32) {
+        self.file_drag_origin = Some((path, x, y));
+    }
+
+    pub(crate) fn clear_status_file_drag_origin(&mut self) {
+        self.file_drag_origin = None;
+    }
+
+    #[must_use]
+    pub(crate) fn status_file_drag_should_start(&self, x: f32, y: f32) -> Option<GitPath> {
+        const DRAG_THRESHOLD_SQUARED: f32 = 16.0;
+        let (path, origin_x, origin_y) = self.file_drag_origin.as_ref()?;
+        let dx = x - origin_x;
+        let dy = y - origin_y;
+        (dx * dx + dy * dy >= DRAG_THRESHOLD_SQUARED).then(|| path.clone())
     }
 
     fn toggle_path_staged(

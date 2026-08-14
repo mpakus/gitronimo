@@ -1,6 +1,9 @@
 //! Working Copy view: status groups, changes, sync, branch controls, confirmations.
 
-use gpui::{AnyElement, ClickEvent, MouseButton, div, prelude::*, px};
+use gpui::{
+    AnyElement, ClickEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, div,
+    prelude::*, px,
+};
 use ui_kit::ThemeColors;
 
 use git_domain::{GitPath, InProgressOperation, StatusEntry, WorktreeRepository};
@@ -855,7 +858,35 @@ impl GitronimoApp {
                     cx,
                 );
             }));
+        let drag_path = context_path.clone();
         row.on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |app, event: &MouseDownEvent, _, _cx| {
+                app.note_status_file_drag_origin(
+                    drag_path.clone(),
+                    f32::from(event.position.x),
+                    f32::from(event.position.y),
+                );
+            }),
+        )
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|app, _: &MouseUpEvent, _, _cx| {
+                app.clear_status_file_drag_origin();
+            }),
+        )
+        .on_mouse_move(cx.listener(|app, event: &MouseMoveEvent, _, _cx| {
+            if !event.dragging() {
+                return;
+            }
+            if let Some(path) = app.status_file_drag_should_start(
+                f32::from(event.position.x),
+                f32::from(event.position.y),
+            ) {
+                app.begin_status_file_drag(&path);
+            }
+        }))
+        .on_mouse_down(
             MouseButton::Right,
             cx.listener(move |app, _, _, cx| {
                 app.show_status_context_menu(context_path.clone(), cx);

@@ -6,6 +6,7 @@ Product version **1.0.0** (About GitRonimo / `APP_VERSION` and packager bundle v
 
 - Network progress bar follows Git `--progress` percentages when Git prints them (waiting bar until the first `%` line; no 92% cap).
 - Commit-message temp files are `0o600` and always deleted; Git activity text redacts URL passwords and `ghp_` / `github_pat_` tokens.
+- Drag a Working Copy file onto another macOS app (Zed, RubyMine, Finder, …) to open that path; a multi-selection drags every selected file that still exists.
 - About / bundle version is **1.0.0**.
 
 ### Known limitations

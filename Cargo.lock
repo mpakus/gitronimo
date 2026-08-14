@@ -3928,6 +3928,9 @@ name = "platform_macos"
 version = "0.1.0"
 dependencies = [
  "app_core",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
 ]
 
 [[package]]

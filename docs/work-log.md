@@ -1,5 +1,13 @@
 # Implementation work log
 
+## 2026-08-14 — Drag Working Copy files to other macOS apps
+
+**Intent:** Drag a file (or the current multi-selection) from the Working Copy staging list onto another macOS app so that app opens the path. GPUI `on_drag` is in-window only; this uses AppKit `NSDraggingItem` file URLs (`public.file-url`). Only paths that already exist under the worktree are offered. Deleted/missing entries are skipped.
+
+**Files:** `docs/adr/0002-macos-file-drag.md`, `crates/platform_macos/src/{lib.rs,file_drag.rs}`, `crates/platform_macos/Cargo.toml`, `apps/desktop/src/{app_state.rs,main.rs,tests.rs,views/working_copy.rs}`, `PLAN.md`, `docs/keyboard-shortcuts.md`, `docs/implementation-boundaries.md`, `CHANGELOG.md`.
+
+**Acceptance:** Unit tests cover path picking (multi-select, missing files, `..` rejection). Drag starts after a small mouse movement on a status row, not on a plain click. Cocoa FFI stays in `platform_macos`.
+
 ## 2026-08-14 — PLAN §18 temp files, textconv, URL redaction
 
 **Intent:** Close remaining 1.0.0 security checklist items: commit-message files `0o600` and always unlinked; `diff --numstat` uses `--no-ext-diff --no-textconv`; Git stderr/activity text redacts URL userinfo and token prefixes.

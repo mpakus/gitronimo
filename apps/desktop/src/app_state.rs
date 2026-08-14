@@ -899,6 +899,8 @@ pub(crate) struct GitronimoApp {
     /// Row that cleared a full selection; clicking it again re-selects every visible file.
     /// Clicking any other row selects that row alone.
     pub file_list_select_all_toggle: Option<GitPath>,
+    /// Mouse-down origin for dragging a Working Copy path to another macOS app.
+    pub file_drag_origin: Option<(GitPath, f32, f32)>,
     pub context_path: Option<GitPath>,
     pub loaded_diff: Option<LoadedDiff>,
     pub selected_diff: Option<(GitPath, bool)>,
@@ -1170,6 +1172,41 @@ pub(crate) fn eligible_trash_path(root: &Path, path: &GitPath) -> std::io::Resul
         ));
     }
     Ok(target)
+}
+
+/// Absolute worktree path that is safe to hand to another macOS app as a file URL.
+#[must_use]
+pub(crate) fn eligible_external_drag_path(root: &Path, path: &GitPath) -> Option<PathBuf> {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    if path.0.starts_with(b"/")
+        || path.0.split(|byte| *byte == b'/').any(|part| part == b"..")
+        || std::str::from_utf8(&path.0).is_err()
+    {
+        return None;
+    }
+    let target = root.join(OsString::from_vec(path.0.clone()));
+    target.symlink_metadata().ok()?;
+    Some(target)
+}
+
+/// Files to put on an `AppKit` drag: the row alone, or every selected existing path
+/// when that row is part of a multi-selection.
+#[must_use]
+pub(crate) fn files_for_status_drag(
+    root: &Path,
+    row: &GitPath,
+    selected: &[GitPath],
+) -> Vec<PathBuf> {
+    let paths: &[GitPath] = if selected.iter().any(|path| path == row) && selected.len() > 1 {
+        selected
+    } else {
+        std::slice::from_ref(row)
+    };
+    paths
+        .iter()
+        .filter_map(|path| eligible_external_drag_path(root, path))
+        .collect()
 }
 
 #[cfg(test)]

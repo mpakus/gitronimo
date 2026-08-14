@@ -50,6 +50,7 @@ When the commit subject or description field is focused, **Command-A** selects t
 - **Command-click** — add or remove a file from the selection.
 - **Shift-click** — range-select between the last clicked file and the current row.
 - **Command-A** — select all visible changed files.
+- **Drag a row** — drop the file (or the current multi-selection) on another macOS app to open those paths. Missing or deleted files are skipped.
 
 When every visible file is already selected:
 

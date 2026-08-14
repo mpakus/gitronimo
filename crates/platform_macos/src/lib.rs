@@ -4,6 +4,10 @@ use std::process::Command;
 
 use app_core::{SecretKey, SecretStore, SecretStoreError};
 
+mod file_drag;
+
+pub use file_drag::begin_external_file_drag;
+
 const KEYCHAIN_SERVICE: &str = "com.gitronimo.github";
 
 #[derive(Clone, Debug, Default)]

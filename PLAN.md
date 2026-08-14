@@ -1678,6 +1678,7 @@ Display an accurate, automatically refreshing repository status and file diff.
 - [x] Add copy path.
 - [x] Add reveal in Finder.
 - [x] Add open in external editor.
+- [x] Drag Working Copy files to other macOS apps as file URLs.
 
 ### Watcher
 

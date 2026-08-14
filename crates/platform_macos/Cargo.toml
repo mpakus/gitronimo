@@ -9,6 +9,33 @@ publish = false
 
 [dependencies]
 app_core = { path = "../app_core", version = "0.1.0" }
+objc2 = "=0.6.4"
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSDragging",
+    "NSDraggingItem",
+    "NSDraggingSession",
+    "NSEvent",
+    "NSImage",
+    "NSPasteboard",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+    "NSWorkspace",
+] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSGeometry",
+    "NSString",
+    "NSURL",
+    "NSValue",
+] }
 
-[lints]
-workspace = true
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
