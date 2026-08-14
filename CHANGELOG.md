@@ -4,8 +4,10 @@
 
 Product version **0.9.2** (About GitRonimo / `APP_VERSION` and packager bundle version).
 
-- App icon from `assets/gitronimo-icon.png` (packaged as `assets/gitronimo.icns`).
-- README shows `assets/gitronimo-logo.png` and `docs/screenshot.png`.
+- Dock/Finder icon from `icon.png` (packaged as `assets/gitronimo.icns`).
+- About overlay shows `assets/gitronimo-icon.png`.
+- README hero image is `docs/logo.png`.
+- `./bin/build` packages a local unsigned `GitRonimo.app`.
 
 ## 0.9.1 — 2026-08-14
 

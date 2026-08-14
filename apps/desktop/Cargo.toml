@@ -32,7 +32,7 @@ version = "0.9.2"
 identifier = "com.gitronimo.desktop"
 category = "DeveloperTool"
 copyright = "Copyright (c) 2026 Gitronimo contributors"
-# Dock / Finder icon. Rebuild from assets/gitronimo-icon.png with iconutil when the PNG changes.
+# Dock / Finder icon. Rebuild from ../../icon.png with iconutil when the PNG changes.
 icons = ["../../assets/gitronimo.icns"]
 
 [[package.metadata.packager.binaries]]

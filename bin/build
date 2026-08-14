@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Build an unsigned local GitRonimo.app for the host architecture.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+export PATH="${HOME}/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin:${HOME}/.rustup/toolchains/1.97.1-x86_64-apple-darwin/bin:${PATH}"
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "cargo not found. Install Rust 1.97.1 (see docs/packaging.md)." >&2
+  exit 1
+fi
+
+if ! cargo packager --version >/dev/null 2>&1; then
+  echo "installing cargo-packager 0.11.8"
+  cargo install cargo-packager --version 0.11.8 --locked
+fi
+
+echo "building gitronimo-desktop (release)"
+cargo build --release -p gitronimo-desktop
+
+host_arch="$(uname -m)"
+if [[ "${host_arch}" == "arm64" ]]; then
+  out_dir="${ROOT}/target/release-arm"
+else
+  out_dir="${ROOT}/target/release-intel"
+fi
+bin_dir="${ROOT}/target/release"
+
+mkdir -p "${out_dir}"
+cargo packager --release --formats app \
+  --manifest-path apps/desktop/Cargo.toml \
+  --out-dir "${out_dir}" \
+  --binaries-dir "${bin_dir}"
+
+app="${out_dir}/GitRonimo.app"
+if [[ ! -d "${app}" ]]; then
+  echo "expected ${app} after packager" >&2
+  exit 1
+fi
+
+echo "built ${app}"
+lipo -archs "${app}/Contents/MacOS/GitRonimo"
+echo "open with: open ${app}"

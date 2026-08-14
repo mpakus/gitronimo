@@ -1,7 +1,7 @@
 # GitRonimo
 
 <p align="center">
-  <img src="assets/gitronimo-logo.png" alt="GitRonimo" width="480">
+  <img src="docs/logo.png" alt="GitRonimo" width="480">
 </p>
 
 GitRonimo is a native macOS Git client written in Rust with [GPUI](https://gpui.rs). It keeps Git as the source of truth and uses your installed Git executable for repository operations, credential helpers, SSH, hooks, signing, and filters.
@@ -53,17 +53,12 @@ Working Copy selection and batch checkbox staging: [`docs/keyboard-shortcuts.md`
 
 Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (`GitRonimo-v0.9.2.zip` runs on Apple Silicon and Intel).
 
-To build locally (see [macOS packaging](docs/packaging.md)):
+To build a local `.app`:
 
 ```bash
-rustup toolchain install 1.97.1
-rustup target add aarch64-apple-darwin x86_64-apple-darwin
-export PATH="$HOME/.rustup/toolchains/1.97.1-aarch64-apple-darwin/bin:$PATH"
-
-cargo install cargo-packager --version 0.11.8 --locked
-cargo build --release -p gitronimo-desktop
-cargo packager --release --formats app --manifest-path apps/desktop/Cargo.toml --out-dir "$(pwd)/target/release-arm" --binaries-dir "$(pwd)/target/release"
-open target/release-arm/GitRonimo.app
+./bin/build
+open target/release-arm/GitRonimo.app   # Apple Silicon
+# open target/release-intel/GitRonimo.app  # Intel
 ```
 
 The menu bar title is **GitRonimo** (binary / bundle name). Gatekeeper will warn on unsigned builds; use the documented signing handoff for a distributable release. An installed Git executable is required.

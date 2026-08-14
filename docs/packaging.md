@@ -6,7 +6,15 @@ Product version **0.9.2** is the string shown in About GitRonimo (`APP_VERSION` 
 
 Local `.app` bundles are unsigned. Gatekeeper will not treat them as a distributable release.
 
-The app identifier is `com.gitronimo.desktop`. The dock and Finder icon is `assets/gitronimo.icns`, generated from `assets/gitronimo-icon.png`. Keep certificate material, team IDs, and notary credentials in the release environment or CI secrets; never in this repository.
+The app identifier is `com.gitronimo.desktop`. The dock and Finder icon is `assets/gitronimo.icns`, generated from `icon.png`. About GitRonimo shows `assets/gitronimo-icon.png`. Local unsigned builds: `./bin/build`. Keep certificate material, team IDs, and notary credentials in the release environment or CI secrets; never in this repository.
+
+## Local `.app`
+
+```bash
+./bin/build
+```
+
+The script installs `cargo-packager 0.11.8` if needed, builds the native architecture, and writes `target/release-arm/GitRonimo.app` (Apple Silicon) or `target/release-intel/GitRonimo.app` (Intel).
 
 ## Apple Silicon (arm64)
 

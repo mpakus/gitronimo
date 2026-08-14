@@ -105,4 +105,4 @@ Dispatch is `run_palette_command` in `main.rs`. Adding a user-facing action that
 
 ## About GitRonimo
 
-**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: app icon (`assets/gitronimo-icon.png`), name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **0.9.2**, bump after each release), “Made in Austin ✩ Texas”, and a link to https://aomega.co. Click outside to dismiss. The macOS application menu title is the process/bundle name `GitRonimo`.
+**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **0.9.2**, bump after each release), “Made in Austin ✩ Texas”, and a link to https://aomega.co. Click outside to dismiss. The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.

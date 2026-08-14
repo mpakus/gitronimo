@@ -1,5 +1,21 @@
 # Implementation work log
 
+## 2026-08-14 — Dock icon.png vs About gitronimo-icon.png
+
+**Intent:** Dock/Finder icon is repo-root `icon.png`. About overlay stays `assets/gitronimo-icon.png`.
+
+**Files:** `assets/gitronimo.icns`, `apps/desktop/Cargo.toml`, `docs/packaging.md`, `CHANGELOG.md`, `docs/desktop-shell.md`.
+
+**Acceptance:** Packaged `.app` icns is built from `icon.png`; About still embeds `assets/gitronimo-icon.png`.
+
+## 2026-08-14 — App logo.png, README docs/logo.png, bin/build
+
+**Intent:** About and dock branding use repo-root `logo.png`. README hero image is `docs/logo.png`. Add `bin/build` to produce a local unsigned `GitRonimo.app`.
+
+**Files:** `logo.png`, `docs/logo.png`, `assets/gitronimo.icns`, `apps/desktop/src/assets.rs`, `views/about.rs`, `Cargo.toml`, `README.md`, `bin/build`, packaging docs.
+
+**Acceptance:** About loads `logo.png`; README points at `docs/logo.png`; `./bin/build` packages `GitRonimo.app`.
+
 ## 2026-08-14 — Bump product version to 0.9.2
 
 **Intent:** Align About / packager `APP_VERSION` and README with product version **0.9.2**.
