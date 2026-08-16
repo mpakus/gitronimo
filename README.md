@@ -6,11 +6,11 @@
 
 GitRonimo is a native macOS Git client written in Rust with [GPUI](https://gpui.rs). It keeps Git as the source of truth. The default engine is gitoxide [`gix`](https://github.com/GitoxideLabs/gitoxide) for repository discovery, status, history, stage/commit, and HTTPS fetch/clone. Your installed Git executable remains the fallback (Settings **Use system Git**) and still handles credential helpers, SSH, hooks, signing, filters, LFS, checkout, merge, rebase, stash, and push.
 
-Product version **1.0.0** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
+Product version **2.0.0** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
 
 ![GitRonimo working copy](docs/screenshot.png)
 
-## 1.0.0 scope
+## 2.0.0 scope
 
 The current release includes:
 
@@ -22,19 +22,15 @@ The current release includes:
 - **Branches** — context menu (pin/archive/rename/delete…); pinned branches persist and sit at the top of BRANCHES; unmerged delete offers a force-confirm dialog
 - **Network** — fetch, pull, publish, and push in the background with cancellation; progress in the activity bar; Pull/Push dialogs for options
 - **Command palette / Message history** — searchable scrollable palette (`Command-Shift-P`); activity-bar history of statuses, errors, and confirmations
-- **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **1.0.0**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co))
+- **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **2.0.0**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co), **Check for updates**)
+- **Git engine** — default `gix`; Settings **Use system Git** forces the installed executable
+- **Git LFS** — Fetch / Pull from the LFS view and palette
+- **Stash extras** — file drag onto Working Copy, optional auto-stash, named snapshots
+- **In-app updates** — Settings opt-in (off by default); **Check for Updates…** on the GitRonimo menu, About, Settings, and palette. SHA-256 and Gatekeeper before replace. No check on launch
+- **AI commit messages** — Settings opt-in; **Suggest** fills the composer from the staged diff and never commits
 - **Safety** — typed Git invocation, force-with-lease confirmation, local crash reports, recovery from missing repos and stale index locks
 
 GitHub personal-access-token connect/sign-out lives in **Settings** (not a Services tab).
-
-### Unreleased (in tree)
-
-Post-1.0 work from [`docs/PLAN-v2.md`](docs/PLAN-v2.md) is in this source tree at the same **1.0.0** About version. See [CHANGELOG.md](CHANGELOG.md) Unreleased:
-
-- Default Git engine is `gix`; Settings **Use system Git** forces the installed executable
-- Git LFS **Fetch** / **Pull**; stash file drag onto Working Copy; optional auto-stash; named stash snapshots
-- Optional **In-app updates** (off by default; **Check now** verifies SHA-256 and Gatekeeper)
-- Optional **AI commit messages** (off by default; **Suggest** fills the composer from the staged diff and never commits)
 
 Not in product: OAuth / enterprise GitHub, VoiceOver roles (GPUI limitation), localization, and a built-in editor. Merge and rebase are available from menus plus continue/abort on Working Copy.
 
@@ -60,7 +56,7 @@ Working Copy selection and batch checkbox staging: [`docs/keyboard-shortcuts.md`
 
 ## Install and run
 
-Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (Apple Silicon and Intel in one zip). After the `v1.0.0` tag that file is `GitRonimo-v1.0.0.zip`.
+Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (Apple Silicon and Intel in one zip). After the `v2.0.0` tag that file is `GitRonimo-v2.0.0.zip`.
 
 To build a local `.app`:
 

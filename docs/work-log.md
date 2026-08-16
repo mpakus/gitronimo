@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-08-16 — Cut 2.0.0; About/Settings/menu Check for updates
+
+**Intent:** Bump product version to **2.0.0** (`APP_VERSION` + packager). Surface in-app update info and a **Check for updates** control on About (plus Settings installed-version row and the GitRonimo application menu). Still opt-in; no check on launch. Cargo workspace version stays `0.1.0`.
+
+**Files:** `apps/desktop/src/views/about.rs`, `settings.rs`, `workspace.rs`, `actions.rs`, `menus.rs`, `main.rs`, `tests.rs`, `apps/desktop/Cargo.toml`, CHANGELOG, README, AGENTS.md, docs.
+
+**Acceptance:** About shows `Version 2.0.0`, update status copy, and **Check for updates**. Settings UPDATES lists the installed version. Application menu has **Check for Updates…**. Tests assert `APP_VERSION`, menu item, and About button bounds. Gates green.
+
+**References:** in-tree About overlay and Settings Check now. XERJ had no usable About-update UI (GitComet hits are AGPL — approach-only). rgitui update checker is MIT link-only; install path stays original.
+
 ## 2026-08-16 — Remove unused handlers and dead_code allows
 
 **Intent:** Source still compiled only because of `#[allow(dead_code)]` on superseded osascript prompts, unused UI helpers, and a leftover `search_focus_handle` (Command-F focuses the search `SingleLineInput`). Delete unused code, drop stale clippy allows, keep live paths (in-app text prompts, context menus, Push/Fetch toolbar). Do not bump `APP_VERSION`.

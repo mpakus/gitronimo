@@ -13,10 +13,112 @@ pub(crate) const APP_TAGLINE: &str = "Made in Austin \u{2729} Texas";
 /// Product version shown in About `GitRonimo`. Bump this after each release.
 /// Keep in sync with `[package.metadata.packager] version` in `apps/desktop/Cargo.toml`.
 /// Independent of the Cargo workspace version.
-pub(crate) const APP_VERSION: &str = "1.0.0";
+pub(crate) const APP_VERSION: &str = "2.0.0";
+
+fn about_updates_copy(in_app_updates: bool) -> &'static str {
+    if in_app_updates {
+        "In-app updates are on. Check GitHub Releases for a newer notarized zip."
+    } else {
+        "In-app updates are off. Turn them on in Settings, then check."
+    }
+}
+
+fn about_brand_column() -> impl IntoElement {
+    div()
+        .w(px(160.0))
+        .flex()
+        .flex_col()
+        .items_center()
+        .gap_3()
+        .child(
+            div()
+                .size(px(96.0))
+                .rounded(px(22.0))
+                .overflow_hidden()
+                .child(
+                    img("icons/gitronimo-icon.png")
+                        .size(px(96.0))
+                        .flex_shrink_0(),
+                ),
+        )
+        .child(
+            div()
+                .text_lg()
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(0xf2_f4_f7))
+                .child(APP_DISPLAY_NAME),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(rgb(0x9a_a3_ad))
+                .child(format!("Version {APP_VERSION}")),
+        )
+}
+
+fn about_check_updates_button(cx: &mut gpui::Context<GitronimoApp>) -> impl IntoElement {
+    div()
+        .id("about-check-updates")
+        .debug_selector(|| "about-check-updates".into())
+        .h(px(26.0))
+        .px_3()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.0))
+        .bg(rgb(0x2a_2a_2a))
+        .text_sm()
+        .text_color(rgb(0xf2_f4_f7))
+        .cursor_pointer()
+        .hover(|style| style.bg(rgb(0x3a_3a_3a)))
+        .on_click(cx.listener(|app, _, _, cx| {
+            app.close_about_dialog(cx);
+            app.check_for_app_updates(cx);
+        }))
+        .child("Check for updates")
+}
 
 impl GitronimoApp {
-    pub(crate) fn about_overlay(colors: &ThemeColors, cx: &mut gpui::Context<Self>) -> AnyElement {
+    fn about_details_column(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+            .flex_1()
+            .flex()
+            .flex_col()
+            .justify_center()
+            .gap_3()
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0xf2_f4_f7))
+                    .child(APP_TAGLINE),
+            )
+            .child(
+                div()
+                    .id("about-site-link")
+                    .debug_selector(|| "about-site-link".into())
+                    .text_sm()
+                    .text_color(rgb(0x6a_b1_ff))
+                    .cursor_pointer()
+                    .hover(gpui::Styled::underline)
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.open_url(APP_SITE_URL);
+                    }))
+                    .child(APP_SITE_LABEL),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0x9a_a3_ad))
+                    .child(about_updates_copy(self.in_app_updates)),
+            )
+            .child(about_check_updates_button(cx))
+    }
+
+    pub(crate) fn about_overlay(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
         div()
             .absolute()
             .inset_0()
@@ -49,65 +151,8 @@ impl GitronimoApp {
                             cx.stop_propagation();
                         }),
                     )
-                    .child(
-                        div()
-                            .w(px(160.0))
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .size(px(96.0))
-                                    .rounded(px(22.0))
-                                    .overflow_hidden()
-                                    .child(
-                                        img("icons/gitronimo-icon.png")
-                                            .size(px(96.0))
-                                            .flex_shrink_0(),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .text_lg()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(0xf2_f4_f7))
-                                    .child(APP_DISPLAY_NAME),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(rgb(0x9a_a3_ad))
-                                    .child(format!("Version {APP_VERSION}")),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .justify_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .text_color(rgb(0xf2_f4_f7))
-                                    .child(APP_TAGLINE),
-                            )
-                            .child(
-                                div()
-                                    .id("about-site-link")
-                                    .debug_selector(|| "about-site-link".into())
-                                    .text_sm()
-                                    .text_color(rgb(0x6a_b1_ff))
-                                    .cursor_pointer()
-                                    .hover(gpui::Styled::underline)
-                                    .on_click(cx.listener(|_, _, _, cx| {
-                                        cx.open_url(APP_SITE_URL);
-                                    }))
-                                    .child(APP_SITE_LABEL),
-                            ),
-                    ),
+                    .child(about_brand_column())
+                    .child(self.about_details_column(cx)),
             )
             .into_any_element()
     }

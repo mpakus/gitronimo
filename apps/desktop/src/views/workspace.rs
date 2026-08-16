@@ -64,6 +64,7 @@ impl Render for GitronimoApp {
             .on_action(cx.listener(Self::select_all_status_files))
             .on_action(cx.listener(Self::save_stash_shortcut))
             .on_action(cx.listener(Self::show_about))
+            .on_action(cx.listener(Self::check_for_updates_menu))
             .on_drop(cx.listener(Self::dropped_paths))
             .child(self.workspace_toolbar(&colors, cx))
             .child(
@@ -165,7 +166,7 @@ impl Render for GitronimoApp {
             )
             .children(
                 self.show_about
-                    .then(|| Self::about_overlay(&colors, cx).into_any_element()),
+                    .then(|| self.about_overlay(&colors, cx).into_any_element()),
             )
     }
 }

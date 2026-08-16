@@ -2,7 +2,7 @@
 
 The product name is **GitRonimo**. The crate is still `gitronimo-desktop`; the binary and `.app` executable are `GitRonimo` so the macOS application menu title matches.
 
-Product version **1.0.0** is the string shown in About GitRonimo (`APP_VERSION` in `apps/desktop/src/views/about.rs`) and in the bundle (`[package.metadata.packager] version` in `apps/desktop/Cargo.toml`). Bump **both** after each release. They are independent of the Cargo workspace crate version.
+Product version **2.0.0** is the string shown in About GitRonimo (`APP_VERSION` in `apps/desktop/src/views/about.rs`) and in the bundle (`[package.metadata.packager] version` in `apps/desktop/Cargo.toml`). Bump **both** after each release. They are independent of the Cargo workspace crate version.
 
 Local `.app` bundles are unsigned. Gatekeeper will not treat them as a distributable release.
 
@@ -59,11 +59,11 @@ lipo -archs target/release-intel/GitRonimo.app/Contents/MacOS/GitRonimo
 mkdir -p target/dist
 ditto -c -k --sequesterRsrc --keepParent \
   target/release-arm/GitRonimo.app \
-  target/dist/GitRonimo-1.0.0-macos-arm64.zip
+  target/dist/GitRonimo-2.0.0-macos-arm64.zip
 ditto -c -k --sequesterRsrc --keepParent \
   target/release-intel/GitRonimo.app \
-  target/dist/GitRonimo-1.0.0-macos-x86_64.zip
-(cd target/dist && shasum -a 256 GitRonimo-1.0.0-macos-*.zip > SHA256SUMS.txt)
+  target/dist/GitRonimo-2.0.0-macos-x86_64.zip
+(cd target/dist && shasum -a 256 GitRonimo-2.0.0-macos-*.zip > SHA256SUMS.txt)
 ```
 
 A universal binary (lipo of both executables into one `GitRonimo.app`) is produced by `.github/workflows/release.yml` on a `v*` tag, then signed and notarized.
@@ -98,4 +98,4 @@ Unsigned per-architecture CI artifacts are also uploaded from `.github/workflows
 
 ## In-app updates
 
-Settings **In-app updates** is off until the user turns it on. There is no check on launch. **Check now** (palette **Check for updates**) GETs `https://api.github.com/repos/mpakus/gitronimo/releases/latest` without a PAT, downloads `SHA256SUMS.txt` then `GitRonimo-${tag}.zip`, verifies SHA-256 with `shasum -a 256`, unpacks with `ditto`, Gatekeeper-assesses the `.app`, then replaces the running `GitRonimo.app` (backup beside it, restored on copy failure). `cargo run` / `target/` binaries are not a bundle and are refused. Failed hash or Gatekeeper leaves the running app untouched. No telemetry.
+Settings **In-app updates** is off until the user turns it on. There is no check on launch. **Check now** (About **Check for updates**, GitRonimo menu **Check for Updates…**, palette **Check for updates**) GETs `https://api.github.com/repos/mpakus/gitronimo/releases/latest` without a PAT, downloads `SHA256SUMS.txt` then `GitRonimo-${tag}.zip`, verifies SHA-256 with `shasum -a 256`, unpacks with `ditto`, Gatekeeper-assesses the `.app`, then replaces the running `GitRonimo.app` (backup beside it, restored on copy failure). `cargo run` / `target/` binaries are not a bundle and are refused. Failed hash or Gatekeeper leaves the running app untouched. No telemetry.

@@ -258,13 +258,17 @@ fn application_menu_is_named_gitronimo_and_starts_with_about() {
         panic!("the first application menu item should be About GitRonimo");
     };
     assert_eq!(name.as_ref(), "About GitRonimo");
+    let gpui::MenuItem::Action { name, .. } = &menus[0].items[1] else {
+        panic!("the second application menu item should be Check for Updates");
+    };
+    assert_eq!(name.as_ref(), "Check for Updates…");
 }
 
 #[test]
 fn about_dialog_uses_the_release_version() {
     assert_eq!(
         crate::views::about::APP_VERSION,
-        "1.0.0",
+        "2.0.0",
         "bump APP_VERSION in views/about.rs after each release"
     );
 }
@@ -950,5 +954,9 @@ fn about_overlay_renders_from_show_about_dialog(cx: &mut TestAppContext) {
     assert!(
         cx.debug_bounds("about-gitronimo").is_some(),
         "About GitRonimo must paint the overlay"
+    );
+    assert!(
+        cx.debug_bounds("about-check-updates").is_some(),
+        "About GitRonimo must offer Check for updates"
     );
 }

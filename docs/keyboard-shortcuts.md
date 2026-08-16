@@ -8,6 +8,7 @@ Press **Command-/** in the app to toggle the in-app shortcut reference overlay. 
 |----------|--------|
 | Command-Q | Quit GitRonimo |
 | Command-H | Hide GitRonimo |
+| GitRonimo menu | **About GitRonimo**, **Check for Updates…** (same path as Settings **Check now**; opt-in, no check on launch) |
 | Command-F | Focus toolbar search |
 | Command-O | Open repository |
 | Command-R | Refresh working copy |

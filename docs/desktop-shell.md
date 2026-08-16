@@ -19,7 +19,7 @@ Preferences live at `~/Library/Application Support/Gitronimo/recent-repositories
 |---------|----------|
 | **Git engine** | Default **gix**. **System Git** forces `git_cli`. Unmigrated workflows always use the installed executable. |
 | **Auto-stash before switch and pull** | Stash dirty work, run the switch or pull, reapply. Pull uses Git `--autostash`. |
-| **In-app updates** | **Check now** (or palette **Check for updates**) can install a verified GitHub release zip. No check on launch. |
+| **In-app updates** | **Check now** (About **Check for updates**, GitRonimo menu **Check for Updates…**, or palette) can install a verified GitHub release zip. No check on launch. Settings shows the installed `APP_VERSION`. |
 | **AI commit messages** | Composer **Suggest** / palette **Suggest commit message** POSTs the redacted staged diff to an OpenAI-compatible endpoint (HTTPS, or HTTP on `127.0.0.1` / `localhost` / `[::1]`). Endpoint and model persist in prefs; API key is Keychain `com.gitronimo.ai-commit`. Fills the composer only — never commits. |
 
 ## Activity bar and message history
@@ -117,4 +117,4 @@ Palette **Show submodules**. The view lists configured submodules and **Update a
 
 ## About GitRonimo
 
-**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **1.0.0**, bump after each release), “Made in Austin ✩ Texas”, and a link to https://aomega.co. Click outside to dismiss. The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.
+**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **2.0.0**, bump after each release), “Made in Austin ✩ Texas”, https://aomega.co, in-app update status, and **Check for updates** (same handler as Settings **Check now** and **GitRonimo → Check for Updates…**). Click outside to dismiss. The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.

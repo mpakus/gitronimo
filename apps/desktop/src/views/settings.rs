@@ -176,6 +176,7 @@ impl GitronimoApp {
             .flex_col()
             .gap_3()
             .child(detail_section("UPDATES", colors))
+            .child(detail_row("Installed version", crate::views::about::APP_VERSION, colors))
             .child(detail_row("In-app updates", state, colors))
             .child(
                 div()
@@ -196,7 +197,7 @@ impl GitronimoApp {
                     .text_xs()
                     .text_color(colors.text_muted)
                     .child(
-                        "Off by default. When on, Check now downloads the notarized GitHub zip, verifies SHA-256 and Gatekeeper, then replaces this .app. No check on launch. No telemetry.",
+                        "Off by default. When on, Check now reads GitHub Releases for a newer notarized zip, verifies SHA-256 and Gatekeeper, then replaces this .app. No check on launch. No telemetry.",
                     ),
             )
             .into_any_element()

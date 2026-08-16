@@ -1,8 +1,8 @@
 use gpui::{Menu, MenuItem};
 
 use crate::actions::{
-    About, CommandPalette, FocusSearch, Hide, NavigateBack, NavigateForward, OpenRepository, Quit,
-    Refresh, ShortcutReference, ToggleAppearance,
+    About, CheckForUpdates, CommandPalette, FocusSearch, Hide, NavigateBack, NavigateForward,
+    OpenRepository, Quit, Refresh, ShortcutReference, ToggleAppearance,
 };
 
 pub fn application_menus() -> Vec<Menu> {
@@ -11,6 +11,7 @@ pub fn application_menus() -> Vec<Menu> {
             name: "GitRonimo".into(),
             items: vec![
                 MenuItem::action("About GitRonimo", About),
+                MenuItem::action("Check for Updates…", CheckForUpdates),
                 MenuItem::separator(),
                 MenuItem::action("Hide GitRonimo", Hide),
                 MenuItem::action("Quit GitRonimo", Quit),

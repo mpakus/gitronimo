@@ -20,6 +20,7 @@ actions!(
         SaveStash,
         Hide,
         About,
+        CheckForUpdates,
         Quit
     ]
 );

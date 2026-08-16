@@ -59,9 +59,9 @@ use platform_macos::{MacKeychainStore, begin_external_file_drag};
 use ui_kit::Appearance;
 
 use crate::actions::{
-    About, CommandPalette, FocusComposer, FocusSearch, Hide, HistoryNext, HistoryPrevious,
-    NavigateBack, NavigateForward, OpenRepository, Quit, Refresh, SaveStash, SelectAllStatusFiles,
-    ShortcutReference, ToggleAppearance, WidenSidebar,
+    About, CheckForUpdates, CommandPalette, FocusComposer, FocusSearch, Hide, HistoryNext,
+    HistoryPrevious, NavigateBack, NavigateForward, OpenRepository, Quit, Refresh, SaveStash,
+    SelectAllStatusFiles, ShortcutReference, ToggleAppearance, WidenSidebar,
 };
 use crate::app_state::{
     ACTIVITY_LOG_CAPACITY, ActivityLogEntry, AppConfirmDialog, ChoicePromptKind, CommitContext,
@@ -1096,7 +1096,7 @@ impl GitronimoApp {
         }
     }
 
-    fn check_for_app_updates(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn check_for_app_updates(&mut self, cx: &mut Context<Self>) {
         if !self.in_app_updates {
             self.set_activity("Turn on Updates in Settings to check GitHub Releases.");
             cx.notify();
@@ -1978,6 +1978,15 @@ return remote_url & linefeed & parent_path"#;
 
     fn show_about(&mut self, _: &About, _: &mut Window, cx: &mut Context<Self>) {
         self.show_about_dialog(cx);
+    }
+
+    fn check_for_updates_menu(
+        &mut self,
+        _: &CheckForUpdates,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.check_for_app_updates(cx);
     }
 
     pub(crate) fn show_about_dialog(&mut self, cx: &mut Context<Self>) {

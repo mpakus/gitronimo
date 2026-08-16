@@ -80,8 +80,8 @@ Read `docs/desktop-shell.md` before changing activity bar, overlays, pins, or th
 - **Confirms:** blocked/destructive Git outcomes that users must acknowledge belong in `AppConfirmDialog` (or the branch-delete pending modal), not only a flashing status line. Example: unmerged delete → Cancel / Delete force.
 - **Pins / archives:** persist via `RecentRepositoryStore::save_branch_organization`; sidebar shows pins flat atop BRANCHES (no “PINNED” label). Preference RMW is path-locked — do not reintroduce unlocked load-modify-save on that JSON.
 - **Command palette:** new user-facing commands that already have handlers should get a `PaletteCommand` + `PALETTE_COMMANDS` label + `run_palette_command` arm; keep the overlay list scrollable. Current extras include **Suggest commit message**, **Check for updates**, **Fetch Git LFS objects**, **Pull Git LFS objects**, **Save stash snapshot…**, **Apply selected stash files**.
-- **Overlays:** Git/domain work stays in `main.rs`; `views/workspace.rs` only renders and dispatches. About GitRonimo is `views/about.rs` (click outside to dismiss).
-- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs`. Bump that string after each release. It is independent of the Cargo workspace version. Do not bump it for in-tree PLAN-v2 work until cutting 2.0.0.
+- **Overlays:** Git/domain work stays in `main.rs`; `views/workspace.rs` only renders and dispatches. About GitRonimo is `views/about.rs` (click outside to dismiss; **Check for updates** closes About then runs the same handler as Settings).
+- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs` (currently **2.0.0**). Bump that string and `[package.metadata.packager] version` together after each release. Independent of the Cargo workspace version.
 - **Binary / menu name:** crate remains `gitronimo-desktop`; the macOS executable and bundle name is `GitRonimo` so the application menu title is GitRonimo (`GitRonimo.app`).
 
 ## Git engine (agent context)
@@ -105,6 +105,6 @@ Read Settings copy in `views/settings.rs` and `crates/app_core/src/ai_commit.rs`
 
 ## In-app updates (agent context)
 
-- Opt-in (`in_app_updates`, default **off**). **No check on launch.** Palette **Check for updates** / Settings **Check now** only when the toggle is on.
+- Opt-in (`in_app_updates`, default **off**). **No check on launch.** **GitRonimo → Check for Updates…**, About **Check for updates**, Settings **Check now**, and palette **Check for updates** only when the toggle is on.
 - Public GitHub Releases JSON (no PAT). Verify SHA-256, then `codesign --verify --deep --strict` and `spctl --assess --type execute`. Replace `GitRonimo.app` only; refuse `cargo run` / `target/` binaries.
 - Confirm via `AppConfirmDialog::InstallUpdate`. No telemetry. No new crates (`curl` like `hosting_github`).
