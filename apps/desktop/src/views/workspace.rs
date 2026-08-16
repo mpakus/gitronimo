@@ -419,6 +419,9 @@ impl GitronimoApp {
                 (format!("New {prefix} branch from {start}"), "Start")
             }
             TextPromptKind::CreateTag { start } => (format!("New tag from {start}"), "Create tag"),
+            TextPromptKind::CreateStash { snapshot: true, .. } => {
+                ("Save snapshot".into(), "Snapshot")
+            }
             TextPromptKind::CreateStash { .. } => ("Save stash".into(), "Save"),
             TextPromptKind::StashBranch { reference } => {
                 (format!("Branch from {reference}"), "Create branch")
@@ -517,6 +520,7 @@ impl GitronimoApp {
                             }
                             _ => String::new(),
                         };
+                        let snapshot = matches!(&kind, TextPromptKind::CreateStash { snapshot: true, .. });
                         div()
                             .px_3()
                             .pb_2()
@@ -565,9 +569,11 @@ impl GitronimoApp {
                                 div()
                                     .text_xs()
                                     .text_color(colors.text_muted)
-                                    .child(
-                                        "Including untracked files can remove ignored folders depending on ignore rules (Git behavior).",
-                                    ),
+                                    .child(if snapshot {
+                                        "Keeps your working copy. The snapshot appears in the stash list."
+                                    } else {
+                                        "Including untracked files can remove ignored folders depending on ignore rules (Git behavior)."
+                                    }),
                             )
                             .children((!path_note.is_empty()).then(|| {
                                 div()

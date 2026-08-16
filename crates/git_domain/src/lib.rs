@@ -142,10 +142,29 @@ pub enum StatusEntry {
     Ignored(GitPath),
 }
 
+/// Soft cap for diffs shown in the UI (bytes of source content considered).
+pub const MAX_DISPLAY_DIFF_BYTES: usize = 1_000_000;
+
 /// Parsed unified diff output for one or more files.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct UnifiedDiff {
     pub files: Vec<DiffFile>,
+}
+
+/// A unified diff plus whether display content was truncated.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoadedDiff {
+    pub diff: UnifiedDiff,
+    pub truncated: bool,
+}
+
+/// Composer input for creating or amending a commit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommitRequest {
+    pub subject: String,
+    pub body: String,
+    pub amend: bool,
+    pub sign_off: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

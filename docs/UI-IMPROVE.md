@@ -115,7 +115,7 @@ File list (with per-file add/del counts) on the left, full diff on the right. Fi
 - [x] Save stash dialog (message + include untracked); path-limited stash from WC
 - [x] Apply stash dialog (delete after = pop; restore staging area = `--index`)
 - [x] Stashes list shows date; selection loads paths + diff; Branch… from stash
-- [x] Mutations refresh Working Copy and stash list (auto-stash / Snapshots / DnD deferred)
+- [x] Mutations refresh Working Copy and stash list; stash files can be applied without dropping (drag onto Working Copy). Auto-stash is a Settings opt-in. Named snapshots keep the working copy.
 - [x] Sidebar HEAD pill includes `↑N` / `↓N`
 
 **Done (interior):**

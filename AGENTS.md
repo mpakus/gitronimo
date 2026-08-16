@@ -31,7 +31,8 @@ System `cargo` older than 1.97 will fail on this workspace.
 
 | Doc | Purpose |
 |-----|---------|
-| `PLAN.md` | Product roadmap and checklist — source of truth for scope |
+| `PLAN.md` | Product roadmap and checklist — source of truth for 1.0 scope |
+| `docs/PLAN-v2.md` | Post-1.0.0 roadmap (`gix` as primary Git, updater, LFS/stash, AI commits) |
 | `docs/README.md` | Documentation index |
 | `docs/work-log.md` | Per-task intent, files, acceptance checks (write **before** coding) |
 | `docs/desktop-shell.md` | Activity bar, message history, confirms, pins, command palette, About |

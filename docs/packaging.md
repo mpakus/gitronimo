@@ -94,4 +94,8 @@ The workflow builds arm64 and x86_64 bundles, creates a universal app, signs it 
 
 If `notarytool` reports `The request timed out` after `Successfully uploaded file`, signing already succeeded; re-run the job. Apple sometimes takes 15–40 minutes, and a poll timeout is not a certificate problem.
 
-Unsigned per-architecture CI artifacts are also uploaded from `.github/workflows/ci.yml` (`GitRonimo-unsigned-macos-arm64` and `GitRonimo-unsigned-macos-x86_64`).
+Unsigned per-architecture CI artifacts are also uploaded from `.github/workflows/ci.yml` (`GitRonimo-unsigned-macos-arm64` and `GitRonimo-unsigned-macos-x86_64`). The in-app updater refuses those: it only installs a zip whose extracted `GitRonimo.app` passes `codesign --verify --deep --strict` and `spctl --assess --type execute`.
+
+## In-app updates
+
+Settings **In-app updates** is off until the user turns it on. There is no check on launch. **Check now** (palette **Check for updates**) GETs `https://api.github.com/repos/mpakus/gitronimo/releases/latest` without a PAT, downloads `SHA256SUMS.txt` then `GitRonimo-${tag}.zip`, verifies SHA-256 with `shasum -a 256`, unpacks with `ditto`, Gatekeeper-assesses the `.app`, then replaces the running `GitRonimo.app` (backup beside it, restored on copy failure). `cargo run` / `target/` binaries are not a bundle and are refused. Failed hash or Gatekeeper leaves the running app untouched. No telemetry.

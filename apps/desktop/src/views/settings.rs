@@ -57,6 +57,9 @@ impl GitronimoApp {
                                 app.apply_theme_mode(None, cx);
                             })),
                     )
+                    .child(self.git_engine_settings(colors, cx))
+                    .child(self.auto_stash_settings(colors, cx))
+                    .child(self.updates_settings(colors, cx))
                     .child(detail_section("GIT IDENTITY", colors))
                     .child(detail_row("Committer", &self.author_identity, colors))
                     .child(detail_section("GITHUB", colors))
@@ -95,5 +98,106 @@ impl GitronimoApp {
                         },
                     )),
             )
+    }
+
+    fn git_engine_settings(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> gpui::AnyElement {
+        let backend = if self.use_system_git {
+            "System Git"
+        } else {
+            "gix"
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(detail_section("GIT ENGINE", colors))
+            .child(detail_row("Backend", backend, colors))
+            .child(
+                div()
+                    .flex()
+                    .gap_1()
+                    .child(file_action_button("gix", colors, cx, |app, cx| {
+                        app.set_use_system_git(false, cx);
+                    }))
+                    .child(file_action_button("System Git", colors, cx, |app, cx| {
+                        app.set_use_system_git(true, cx);
+                    })),
+            )
+            .into_any_element()
+    }
+
+    fn auto_stash_settings(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> gpui::AnyElement {
+        let state = if self.auto_stash { "On" } else { "Off" };
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(detail_section("STASHING", colors))
+            .child(detail_row("Auto-stash before switch and pull", state, colors))
+            .child(
+                div()
+                    .flex()
+                    .gap_1()
+                    .child(file_action_button("Off", colors, cx, |app, cx| {
+                        app.set_auto_stash(false, cx);
+                    }))
+                    .child(file_action_button("On", colors, cx, |app, cx| {
+                        app.set_auto_stash(true, cx);
+                    })),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child(
+                        "When on, dirty work is stashed, the switch or pull runs, then the stash is reapplied. Off by default.",
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn updates_settings(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> gpui::AnyElement {
+        let state = if self.in_app_updates { "On" } else { "Off" };
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(detail_section("UPDATES", colors))
+            .child(detail_row("In-app updates", state, colors))
+            .child(
+                div()
+                    .flex()
+                    .gap_1()
+                    .child(file_action_button("Off", colors, cx, |app, cx| {
+                        app.set_in_app_updates(false, cx);
+                    }))
+                    .child(file_action_button("On", colors, cx, |app, cx| {
+                        app.set_in_app_updates(true, cx);
+                    }))
+                    .child(file_action_button("Check now", colors, cx, |app, cx| {
+                        app.check_for_app_updates(cx);
+                    })),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child(
+                        "Off by default. When on, Check now downloads the notarized GitHub zip, verifies SHA-256 and Gatekeeper, then replaces this .app. No check on launch. No telemetry.",
+                    ),
+            )
+            .into_any_element()
     }
 }

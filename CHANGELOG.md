@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Default Git engine is gitoxide `gix` for repository discovery, HEAD, refs, working-copy status, history, tree/blob reads, unified diffs, stage/unstage/commit, and HTTPS fetch/clone. System Git remains the fallback and a Settings override (`Use system Git`); SSH/`file://` remotes, checkout/merge/rebase/stash/push, hooks, and signed commits stay on the installed Git. See [`docs/PLAN-v2.md`](docs/PLAN-v2.md) and ADR 0003.
+- Git LFS view can fetch objects and pull them into the working copy (`git lfs fetch` / `git lfs pull` on system Git), with the same cancelable network progress as remotes.
+- Stash files can be selected and dragged onto Working Copy (or applied with **Apply selected files**) to restore those paths without dropping the stash.
+- Optional **Auto-stash before switch and pull** (Settings, off by default) stashes dirty work, runs the switch or pull, then reapplies the stash. Pull uses Git `--autostash`.
+- **Save snapshot…** stores a named stash without resetting the working copy (`git stash create` + `store`, or push+apply when including untracked).
+- Optional **In-app updates** (Settings, off by default). **Check now** (or palette **Check for updates**) reads GitHub Releases, prompts, downloads the notarized zip, verifies SHA-256 and Gatekeeper (`codesign` + `spctl`), then replaces `GitRonimo.app`. No check on launch. No telemetry. Cargo/`target/` runs refuse install.
+
 ## 1.0.0 — 2026-08-14
 
 Product version **1.0.0** (About GitRonimo / `APP_VERSION` and packager bundle version). Daily Git client: working copy, history, branches, stashes, remotes, GitHub PRs (PAT), workflow templates. Tag `v1.0.0` for the notarized universal zip.

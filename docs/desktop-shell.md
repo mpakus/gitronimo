@@ -13,7 +13,7 @@ Functional reference for the repository window chrome that sits outside individu
 └─ Overlays: palette, prompts, ref/commit menus, Pull/Push, confirms, About ─┘
 ```
 
-Preferences live at `~/Library/Application Support/Gitronimo/recent-repositories.json` (schema v1).
+Preferences live at `~/Library/Application Support/Gitronimo/recent-repositories.json` (schema v1). Settings **Auto-stash before switch and pull** is off by default; when on, switch and pull stash dirty work and reapply it. Settings **In-app updates** is off by default; when on, **Check now** (or palette **Check for updates**) can install a verified GitHub release zip. There is no check on launch.
 
 ## Activity bar and message history
 
@@ -38,6 +38,7 @@ Destructive or blocked Git outcomes use modal overlays (not only the activity fl
 | History → Hard reset | Choice prompt Soft / Mixed / Hard | **Hard Reset** confirm via `AppConfirmDialog::HardReset` |
 | History → Revert / Delete | `AppConfirmDialog::RevertCommit` / `DropCommit` | — |
 | Workflow → Finish topic | `AppConfirmDialog::FinishTopic` | merge/squash/rebase into configured bases, then delete the topic |
+| Settings → Check now (updates on) | `AppConfirmDialog::InstallUpdate` | download zip, SHA-256, Gatekeeper, replace `.app` |
 | Force push | Existing force-with-lease confirmation | — |
 
 `AppConfirmDialog` is the shared enum for blocked-action confirmations; render through `workspace` modal helpers. Domain logic stays in `main.rs`, not in `Render`.
@@ -78,21 +79,23 @@ Searchable list (`PALETTE_COMMANDS` in `app_state.rs`); list viewport scrolls. I
 
 - Open repository, Fetch / Pull… / Push… / Sync, Refresh
 - Stage all / Unstage all, Focus commit composer, Amend last commit
-- Stashes: Save stash… / Save including untracked… (dialogs), Apply latest/selected… (apply dialog), Branch / Pop / Drop selected…
+- Stashes: Save stash… / Save including untracked… (dialogs), Save stash snapshot…, Apply latest/selected… (apply dialog), Apply selected stash files, Branch / Pop / Drop selected…
 - Create branch… / Create tag…
 - Show working copy / history / stashes / remotes / settings / **workflow** / pull requests / branches review / reflog / LFS / worktrees / submodules / rebase / conflicts…
+- Git LFS: status list, **Fetch Git LFS objects**, **Pull Git LFS objects** (system Git; cancellable; default remote)
 - History filter, Reveal HEAD, selected-commit copy / checkout / reset / revert / patch / export / compare / new branch
 - History tools (file history, blame, compare refs, browse tree, rebase onto, merge revision, squash/fixup/drop/reword, merge tool, signature check)
-- Quick open file, Message history, Toggle appearance, Keyboard shortcuts, Navigate back/forward, **About GitRonimo**
+- Quick open file, Message history, Toggle appearance, Keyboard shortcuts, Navigate back/forward, **About GitRonimo**, **Check for updates**
 
 Dispatch is `run_palette_command` in `main.rs`. Adding a user-facing action that already has a handler should usually add a `PaletteCommand` variant + label + match arm. Selected-commit actions require a History selection; Reset/Revert also require History scoped to the HEAD branch.
 
 ## Stashes (core)
 
 - **Save stash** (toolbar Save, Stashes header, palette, `Command-Shift-S`): text prompt for message + Include untracked checkbox; optional pathspecs from Working Copy **Stash selected…**.
+- **Save snapshot…** (Stashes header, palette): named stash that **keeps** the working copy. Include untracked is optional.
 - **Apply** (toolbar Apply, Stashes Apply…): dialog with Delete after applying (pop) and Restore staging area (`--index`).
-- Stashes detail: date + subject list; on select, changeset paths + read-only diff; Apply… / Pop… / Drop… / Branch….
-- Create/apply/pop/drop/branch refresh Working Copy and the stash list. Auto-stash, Snapshots, and DnD partial apply are deferred.
+- Stashes detail: date + subject list; on select, changeset paths + read-only diff; **Apply selected files** / Apply… / Pop… / Drop… / Branch…. Click or Cmd-click files, then drag them onto **Working Copy** in the sidebar to restore those paths without dropping the stash.
+- Create/apply/pop/drop/branch refresh Working Copy and the stash list. Settings can auto-stash before switch and pull (off by default).
 
 ## Related docs
 

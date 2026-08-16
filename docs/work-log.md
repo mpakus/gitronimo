@@ -1,5 +1,101 @@
 # Implementation work log
 
+## 2026-08-16 — Phase D: in-app updates (opt-in)
+
+**Intent:** PLAN-v2 Phase D. Settings toggle (default **off**) lets the user check GitHub Releases for a newer notarized `GitRonimo-v*.zip`, confirm, download, verify SHA-256, Gatekeeper-assess the extracted `.app`, then replace this bundle. No telemetry, no PAT, no unsigned bits, no new crates (`curl` like `hosting_github`). Do not check on launch.
+
+**Files:** `crates/hosting_github` (public latest-release JSON), `crates/app_core` (preference), `apps/desktop` (`app_update.rs`, Settings, palette, confirm), docs.
+
+**Acceptance:** Fixture tests: version compare, SHA256SUMS parse, HTTPS allowlist, release JSON assets. Preference defaults off. Disabled Check now is a no-op message. Non-`.app` runs refuse install. `codesign --verify --deep --strict` and `spctl --assess --type execute` must succeed before replace. Failed hash or Gatekeeper leaves the running app untouched.
+
+**References:** rgitui `update_checker.rs` (MIT) — GitHub latest-release check + semver compare, adapted; it only opens a download link. Install/verify is original. GitComet announce-only is AGPL — approach-only.
+
+## 2026-08-16 — Phase E: named stash snapshots
+
+**Intent:** PLAN-v2 Phase E. Named, non-destructive stash snapshots: keep the working copy, store a recovery entry in the stash list. Tracked-only uses `git stash create` + `git stash store`. Untracked/pathspec uses `stash push` then `stash apply` so the tree is restored. System Git only. Do not put Git in stash-row `Render`.
+
+**Files:** `crates/git_cli` (`create_stash_snapshot`), `apps/desktop` (prompt, Stashes header, palette), docs.
+
+**Acceptance:** Temp-repo: dirty tracked file remains after snapshot; stash list has one named entry. Include-untracked snapshot leaves the untracked file in the worktree. Empty tree and `-` messages are refused. Desktop: Save snapshot… prompt with include-untracked; palette; Stashes header. Save/apply/pop/drop unchanged.
+
+**References:** gitui/rgitui have no snapshot (XERJ). Magit snapshot is create+store (approach). GitComet is AGPL — approach-only.
+
+## 2026-08-16 — Phase E: auto-stash around switch/pull
+
+**Intent:** PLAN-v2 Phase E. Opt-in Settings toggle (default off) stashes dirty work before branch switch and pull, then reapplies it. Pull uses Git `--autostash`. Switch uses `git stash push --include-untracked` + operation + `stash pop` on system Git. Do not put Git in Settings `Render`.
+
+**Files:** `crates/app_core` (preference), `crates/git_cli` (`maybe_autostash`, pull flag), `apps/desktop` (Settings, checkout/pull/sync/workflow), docs.
+
+**Acceptance:** Preference defaults off and persists. Temp-repo: overlapping dirty switch fails without autostash and succeeds with it (WIP follows or remains as a named stash on pop conflict). Pull with `--autostash` keeps a non-overlapping dirty file. Settings Off/On; checkout, tracking checkout, detached checkout, Pull, and Sync honor the flag.
+
+**References:** gitui checkout is keep-vs-discard, not autostash (XERJ). rgitui has no autostash. Implement originally using Git `--autostash` / stash push-pop. GitComet is AGPL — approach-only.
+
+## 2026-08-16 — Phase E: stash drag-and-drop partial apply
+
+**Intent:** PLAN-v2 Phase E. Apply a subset of a stash onto the working copy without dropping the stash. Stash file rows are selectable and draggable onto the Working Copy sidebar; Git stays in `main.rs`. Mutations stay on system Git (`git restore --source=<stash> --worktree --staged -- paths`).
+
+**Files:** `crates/git_cli` (`apply_stash_paths`), `apps/desktop` (stash file selection, GPUI `StashPathDrag`, Working Copy drop target, palette), docs.
+
+**Acceptance:** Temp-repo test: two dirty files stashed, restore one path, the other stays at HEAD; `..` / absolute paths and non-stash refs are refused. Desktop: click/Cmd-click stash files, Apply selected files, drag onto Working Copy. Stash list is unchanged after a partial apply.
+
+**References:** gitui has no stash DnD (TUI apply-all). rgitui/XERJ had no stash-file drop target. Bookmark-folder `on_drag`/`on_drop` in `sidebar.rs` is the in-window pattern (adapted). GitComet is AGPL — approach-only.
+
+## 2026-08-16 — Phase E: Git LFS fetch and pull UI
+
+**Intent:** Start [`PLAN-v2.md`](PLAN-v2.md) Phase E. The Git LFS status view already lists changed paths. Add fetch (download objects) and pull (download + checkout into the worktree) on **system Git**, with the same cancellable network operation as remotes. Do not put Git in LFS-row `Render`.
+
+**Files:** `crates/git_cli` (`lfs_fetch`, `lfs_pull`), `apps/desktop` (LFS view actions, palette, `run_network_command`), docs.
+
+**Acceptance:** Typed `git lfs fetch` / `git lfs pull` with an optional remote. Temp-repo test (skip if Git LFS is missing): skip-smudge clone keeps a pointer; pull materializes content. LFS view and palette run fetch/pull against the default remote, cancellable, then refresh Working Copy and the LFS list. No new crates.
+
+**References:** gitui has no LFS (issue #2812). XERJ returned no usable gitui/rgitui fetch/pull UI; implement originally. GitComet is AGPL — approach-only.
+
+## 2026-08-16 — Phase A: gix history, trees/diffs, stage/commit, HTTPS fetch/clone
+
+**Intent:** Finish PLAN-v2 Phase A prefer-gix items. History (rev-walk), tree/blob reads and unified diffs, low-level stage/unstage/commit, and HTTPS fetch/clone use `gix`. System Git remains fallback. SSH/`file://` clone/fetch, hunks, hooks, and `commit.gpgsign` stay on `git_cli`. Fetch/clone cancel via `AtomicBool` (gix) and `GitChild` (CLI fallback).
+
+**Files:** `crates/git_domain` (`CommitRequest`, `LoadedDiff`), `crates/app_core/src/git_engine.rs` (history/object/index/network ports), `crates/git_gix` (history/objects/mutate/network + gix features), `crates/git_cli` (trait impls + re-exports), `apps/desktop` (`git_backend`, call sites, interrupt), docs.
+
+**Acceptance:** Dual-backend tests on temp repos: history page (Current + pagination), tree entries + blob bytes, file/commit diffs (hunk line kinds, not byte-identical headers), stage/unstage/commit/amend, HTTP URL routing (gix refuses ssh/file). Desktop history, Working Copy, composer, fetch, and clone use the ports. `cargo deny check` accepts the expanded `gix` graph.
+
+**References:** gitui (MIT) `asyncgit/src/sync/logwalker.rs` — `gix` rev-walk + commit-time order, adapted. GitComet history/index mappers are AGPL — approach-only.
+
+## 2026-08-16 — Phase A: gix worktree status and untracked listing
+
+**Intent:** Migrate working-copy status (index vs HEAD, index vs worktree, untracked, optional ignored) to `gix`. System Git remains fallback. `stash_count` uses the `refs/stash` reflog; `in_progress_operation` stays a git-dir file check. Do not write index stat updates from status.
+
+**Files:** `crates/app_core/src/git_engine.rs` (`GitRefQuery::worktree_status`), `crates/git_gix` (`status` feature + mapper), `crates/git_cli` (trait impl), `apps/desktop/src/git_backend.rs`, `apps/desktop/src/main.rs` (welcome snapshot + `load_working_copy`), docs.
+
+**Acceptance:** Dual-backend tests on a temp repo: untracked, unstaged/staged/both, ignored on/off, stash count, unusual filename. Entries match `git_cli` after sorting by path (document rename-score or typechange deviations if any). Desktop Working Copy and welcome snapshot use the engine port. `cargo deny check` accepts the expanded `gix` graph.
+
+**References:** gitui (MIT) `asyncgit/src/sync/status.rs` — `status().into_iter()` IndexWorktree + TreeIndex, adapted. GitComet status mapper is AGPL — approach-only.
+
+## 2026-08-16 — Phase A: gix default Git engine (discover / HEAD / refs)
+
+**Intent:** Start [`PLAN-v2.md`](PLAN-v2.md) Phase A. `gix` (gitoxide library, not the CLI) becomes the default engine for repository discovery, HEAD, and ref snapshots. System Git remains fallback and the Settings override. `git_domain` stays types-only.
+
+**Files:** `docs/adr/0003-gix-default-git-engine.md`, `crates/git_gix/`, `crates/app_core` (preference + `GitRefQuery`), `crates/git_cli` (`GitRefQuery` + `head_status`), `apps/desktop` (router, Settings), workspace `Cargo.toml` / `Cargo.lock`, docs.
+
+**Acceptance:** Dual-backend tests on a temporary repo: discover, HEAD (branch / detached / unborn), ref snapshot (local/remote/tags/ahead-behind) match `git_cli`. Settings “Use system Git” persists. `cargo deny check` accepts the pinned `gix` graph. Unmigrated operations still use `git_cli`.
+
+**References:** gitui (MIT) `gix::discover` / `references()` — adapted. GitComet gix+CLI split is approach-only.
+
+## 2026-08-16 — Narrow 2.0.0 plan to gix + D/E/G
+
+**Intent:** Replace the broad post-1.0 hosting/a11y/i18n plan with `gix` (gitoxide) as the main internal Git engine and system Git as fallback. Keep only in-app updates (D), LFS/stash extras (E), and optional AI commits (G).
+
+**Files:** `docs/PLAN-v2.md`, `docs/README.md`, `docs/todo-v1.md`, `AGENTS.md`, `PLAN.md` (pointer).
+
+**Acceptance:** `PLAN-v2.md` has phases A, D, E, G only. No product code changes.
+
+## 2026-08-16 — Save 2.0.0 plan
+
+**Intent:** Record the post-1.0.0 deferred work (OAuth, enterprise GitHub, other hosts, VoiceOver, updater, localization, LFS UI, stash extras, optional CLIs/AI) as `docs/PLAN-v2.md` so 1.0 tagging does not mix with v2 scope.
+
+**Files:** `docs/PLAN-v2.md`, `docs/README.md`, `docs/todo-v1.md`, `AGENTS.md`, `PLAN.md` (pointer).
+
+**Acceptance:** Docs index and `todo-v1.md` point at `PLAN-v2.md`. No product code changes.
+
 ## 2026-08-14 — Message history clock time
 
 **Intent:** Message history popup shows the local hour and minute when each line was recorded (`HH:MM`), not a relative age (`24s`, `1m`).

@@ -16,6 +16,7 @@ path = "src/main.rs"
 app_core = { path = "../../crates/app_core", version = "0.1.0" }
 git_cli = { path = "../../crates/git_cli", version = "0.1.0" }
 git_domain = { path = "../../crates/git_domain", version = "0.1.0" }
+git_gix = { path = "../../crates/git_gix", version = "0.1.0" }
 hosting_github = { path = "../../crates/hosting_github", version = "0.1.0" }
 gpui.workspace = true
 notify.workspace = true

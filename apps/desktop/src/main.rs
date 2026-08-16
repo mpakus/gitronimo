@@ -6,7 +6,9 @@
 
 mod actions;
 mod app_state;
+mod app_update;
 mod assets;
+mod git_backend;
 mod keymap;
 mod menus;
 #[cfg(test)]
@@ -20,7 +22,11 @@ use std::{
     os::unix::ffi::OsStringExt,
     path::{Path, PathBuf},
     process::Command,
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -28,22 +34,23 @@ use std::{
 use app_core::{
     BookmarkFolder, BookmarkOrganization, BranchOrganization, HostingError, HostingService,
     RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError, RepositoryWorkflow,
-    SecretStore, WindowGeometry, WorkflowGitStep, WorkflowKind, open_repository,
+    SecretStore, WindowGeometry, WorkflowGitStep, WorkflowKind,
 };
 use git_cli::{
-    CommitRequest, CreateStashRequest, GitExecutable, GitStatusError, ResetMode,
-    parse_git_progress_line,
+    CreateStashRequest, GitExecutable, GitStatusError, ResetMode, parse_git_progress_line,
 };
 use git_domain::{
-    ConflictSide, FileHistoryRequest, GitPath, GraphState, HeadStatus, HistoryPage,
-    HistoryReference, HistoryRequest, RefSnapshot, ReflogRequest, TreeEntry, TreeEntryKind,
-    WorktreeRepository, layout_history_graph,
+    CommitRequest, ConflictSide, FileHistoryRequest, GitPath, GraphState, HeadStatus, HistoryPage,
+    HistoryReference, HistoryRequest, MAX_DISPLAY_DIFF_BYTES, RefSnapshot, ReflogRequest,
+    TreeEntry, TreeEntryKind, WorktreeRepository, layout_history_graph,
 };
 use gpui::{
     App, Application, Bounds, ClipboardItem, Context, ExternalPaths, Focusable, ListAlignment,
     ListState, PathPromptOptions, Window, WindowBounds, WindowOptions, point, prelude::*, px, size,
 };
-use hosting_github::GitHubService;
+use hosting_github::{
+    GITRONIMO_GITHUB_REPO, GitHubService, LatestRelease, parse_product_version, version_is_newer,
+};
 use notify::{RecursiveMode, Watcher};
 use platform_macos::{MacKeychainStore, begin_external_file_drag};
 use ui_kit::Appearance;
@@ -142,14 +149,16 @@ fn discover_and_record(
     store: &RecentRepositoryStore,
 ) -> Result<OpenedRepository, RepositoryOpenError> {
     let _ = store.recover_corrupted_preferences();
-    let git = GitExecutable::discover().map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
-    let repository = open_repository(&git, path)?;
+    let use_system_git = store.load_use_system_git().unwrap_or(false);
+    let query = git_backend::open_worktree(path, use_system_git);
+    let repository = query.result?;
     let recents = store
         .record(repository.worktree_root.clone())
         .unwrap_or_default();
     Ok(OpenedRepository {
         repository,
         recents,
+        git_fallback: query.fallback_reason,
     })
 }
 
@@ -163,14 +172,17 @@ fn load_welcome_snapshot(path: &Path) -> WelcomeRepoSnapshot {
     if !path.is_dir() {
         return snapshot;
     }
-    let Ok(git) = GitExecutable::discover() else {
-        return snapshot;
-    };
-    let Ok(repository) = open_repository(&git, path) else {
+    let use_system_git = RecentRepositoryStore::new(preferences_path())
+        .load_use_system_git()
+        .unwrap_or(false);
+    let Ok(repository) = git_backend::open_worktree(path, use_system_git).result else {
         return snapshot;
     };
     snapshot.available = true;
-    if let Ok(status) = git.worktree_status(&repository, false) {
+    let Ok(git) = GitExecutable::discover() else {
+        return snapshot;
+    };
+    if let Ok(status) = git_backend::worktree_status(&repository, use_system_git, false).result {
         snapshot.branch = match status.branch.head {
             HeadStatus::Branch(name) => Some(String::from_utf8_lossy(&name.0).into_owned()),
             HeadStatus::Detached => Some("Detached HEAD".into()),
@@ -186,7 +198,7 @@ fn load_welcome_snapshot(path: &Path) -> WelcomeRepoSnapshot {
         snapshot.behind = status.branch.behind;
         snapshot.changed_files = Some(status.entries.len());
     }
-    if let Ok(refs) = git.ref_snapshot(&repository) {
+    if let Ok(refs) = git_backend::ref_snapshot(&repository, use_system_git).result {
         snapshot.remote_url = refs
             .remotes
             .iter()
@@ -198,14 +210,17 @@ fn load_welcome_snapshot(path: &Path) -> WelcomeRepoSnapshot {
         snapshot.author_name = Some(identity.name);
         snapshot.author_email = Some(identity.email);
     }
-    if let Ok(page) = git.history_page(
+    if let Ok(page) = git_backend::history_page(
         &repository,
+        use_system_git,
         &HistoryRequest {
             reference: HistoryReference::Current,
             before: None,
             limit: 1,
         },
-    ) && let Some(commit) = page.commits.first()
+    )
+    .result
+        && let Some(commit) = page.commits.first()
     {
         snapshot.last_commit_subject = Some(String::from_utf8_lossy(&commit.subject).into_owned());
     }
@@ -340,6 +355,9 @@ impl GitronimoApp {
         let workflow = selected_recent
             .and_then(|index| recents.get(index))
             .and_then(|path| store.load_workflow(path).ok().flatten());
+        let use_system_git = store.load_use_system_git().unwrap_or(false);
+        let auto_stash = store.load_auto_stash().unwrap_or(false);
+        let in_app_updates = store.load_in_app_updates().unwrap_or(false);
         let (
             welcome_search_input,
             worktree_search_input,
@@ -456,6 +474,7 @@ impl GitronimoApp {
             selected_stash: None,
             stash_selection_token: 0,
             selected_stash_paths: Vec::new(),
+            stash_apply_selection: Vec::new(),
             selected_stash_diff: None,
             pending_stash_action_ref: None,
             reflog: Vec::new(),
@@ -502,6 +521,10 @@ impl GitronimoApp {
             watcher: None,
             watch_events: None,
             store,
+            use_system_git,
+            auto_stash,
+            in_app_updates,
+            pending_app_update: None,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
             column_width,
@@ -534,14 +557,25 @@ impl GitronimoApp {
         cx: &mut Context<Self>,
     ) -> Self {
         match outcome {
-            Ok(opened) => Self::new_shell(
-                ShellState::Repository(opened.repository),
-                opened.recents,
-                "Repository opened.".into(),
-                RecentRepositoryStore::new(preferences_path()),
-                window,
-                cx,
-            ),
+            Ok(opened) => {
+                let activity = opened.git_fallback.as_deref().map_or_else(
+                    || "Repository opened.".into(),
+                    |reason| {
+                        format!(
+                            "Repository opened (system Git after gix failed: {}).",
+                            git_cli::redact_git_text(reason)
+                        )
+                    },
+                );
+                Self::new_shell(
+                    ShellState::Repository(opened.repository),
+                    opened.recents,
+                    activity,
+                    RecentRepositoryStore::new(preferences_path()),
+                    window,
+                    cx,
+                )
+            }
             Err(error) => Self::new_shell(
                 ShellState::Error(error.to_string()),
                 Vec::new(),
@@ -597,6 +631,9 @@ impl GitronimoApp {
                 .flatten(),
             _ => None,
         };
+        let use_system_git = store.load_use_system_git().unwrap_or(false);
+        let auto_stash = store.load_auto_stash().unwrap_or(false);
+        let in_app_updates = store.load_in_app_updates().unwrap_or(false);
         let (
             welcome_search_input,
             worktree_search_input,
@@ -713,6 +750,7 @@ impl GitronimoApp {
             selected_stash: None,
             stash_selection_token: 0,
             selected_stash_paths: Vec::new(),
+            stash_apply_selection: Vec::new(),
             selected_stash_diff: None,
             pending_stash_action_ref: None,
             reflog: Vec::new(),
@@ -759,6 +797,10 @@ impl GitronimoApp {
             watcher: None,
             watch_events: None,
             store,
+            use_system_git,
+            auto_stash,
+            in_app_updates,
+            pending_app_update: None,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
             column_width,
@@ -787,6 +829,163 @@ impl GitronimoApp {
             Self::schedule_poll(repository, cx);
         }
         app
+    }
+
+    fn set_use_system_git(&mut self, use_system_git: bool, cx: &mut Context<Self>) {
+        if let Err(error) = self.store.save_use_system_git(use_system_git) {
+            self.set_activity(format!("Could not save Git engine preference: {error}"));
+            cx.notify();
+            return;
+        }
+        self.use_system_git = use_system_git;
+        self.set_activity(if use_system_git {
+            "Using system Git."
+        } else {
+            "Using gix."
+        });
+        if let ShellState::Repository(repository) = &self.state {
+            Self::load_refs(repository.clone(), cx);
+        }
+        cx.notify();
+    }
+
+    fn set_auto_stash(&mut self, auto_stash: bool, cx: &mut Context<Self>) {
+        if let Err(error) = self.store.save_auto_stash(auto_stash) {
+            self.set_activity(format!("Could not save auto-stash preference: {error}"));
+            cx.notify();
+            return;
+        }
+        self.auto_stash = auto_stash;
+        self.set_activity(if auto_stash {
+            "Auto-stash before switch and pull is on."
+        } else {
+            "Auto-stash before switch and pull is off."
+        });
+        cx.notify();
+    }
+
+    fn set_in_app_updates(&mut self, in_app_updates: bool, cx: &mut Context<Self>) {
+        if let Err(error) = self.store.save_in_app_updates(in_app_updates) {
+            self.set_activity(format!("Could not save updates preference: {error}"));
+            cx.notify();
+            return;
+        }
+        self.in_app_updates = in_app_updates;
+        self.set_activity(if in_app_updates {
+            "In-app updates are on. Use Check now when you want to look for a release."
+        } else {
+            "In-app updates are off."
+        });
+        cx.notify();
+    }
+
+    fn check_for_app_updates(&mut self, cx: &mut Context<Self>) {
+        if !self.in_app_updates {
+            self.set_activity("Turn on Updates in Settings to check GitHub Releases.");
+            cx.notify();
+            return;
+        }
+        if self.mutation_in_flight {
+            self.set_activity(
+                "Wait for the current operation to finish before checking for updates.",
+            );
+            cx.notify();
+            return;
+        }
+        self.mutation_in_flight = true;
+        self.set_activity("Checking GitHub Releases for a newer GitRonimo…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async {
+                    GitHubService::default().latest_release(GITRONIMO_GITHUB_REPO)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(release) => app.offer_app_update(release, cx),
+                    Err(error) => {
+                        app.set_activity(Self::update_check_error(&error));
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn offer_app_update(&mut self, release: LatestRelease, cx: &mut Context<Self>) {
+        let Some(current) = parse_product_version(crate::views::about::APP_VERSION) else {
+            self.set_activity("Could not compare this GitRonimo version to GitHub Releases.");
+            cx.notify();
+            return;
+        };
+        if !version_is_newer(current, release.version) {
+            self.set_activity(format!(
+                "GitRonimo {} is the latest release.",
+                crate::views::about::APP_VERSION
+            ));
+            cx.notify();
+            return;
+        }
+        let version = release.version.to_string();
+        self.pending_app_update = Some(crate::app_update::PendingAppUpdate {
+            version: version.clone(),
+            zip_name: release.zip_name,
+            zip_url: release.zip_url,
+            sums_url: release.sums_url,
+        });
+        self.confirm_dialog = Some(AppConfirmDialog::InstallUpdate { version });
+        cx.notify();
+    }
+
+    fn begin_app_update_install(&mut self, cx: &mut Context<Self>) {
+        let Some(pending) = self.pending_app_update.take() else {
+            self.set_activity("The update is no longer available. Check again.");
+            cx.notify();
+            return;
+        };
+        if self.mutation_in_flight {
+            self.set_activity(
+                "Wait for the current operation to finish before installing the update.",
+            );
+            cx.notify();
+            return;
+        }
+        self.mutation_in_flight = true;
+        self.set_activity(format!("Downloading GitRonimo {}…", pending.version));
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    let exe = std::env::current_exe()
+                        .map_err(|_| "Could not locate this GitRonimo executable.".to_owned())?;
+                    crate::app_update::install_release(&pending, &exe)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok(()) => app.set_activity(
+                        "Update installed. Quit GitRonimo, then open GitRonimo.app again.",
+                    ),
+                    Err(error) => app.set_activity(error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn update_check_error(error: &HostingError) -> String {
+        match error {
+            HostingError::RateLimited { .. } => {
+                "GitHub rate-limited the update check. Try again later.".into()
+            }
+            HostingError::Network => "Could not reach GitHub Releases.".into(),
+            HostingError::Parse => "GitHub Releases returned an unexpected response.".into(),
+            HostingError::Api(message) => format!("Could not check for updates: {message}"),
+            HostingError::Authentication => "GitHub Releases refused the update check.".into(),
+        }
     }
 
     fn observe_system_appearance(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1003,6 +1202,7 @@ impl GitronimoApp {
                 self.selected_stash = None;
                 self.stash_selection_token = self.stash_selection_token.wrapping_add(1);
                 self.selected_stash_paths.clear();
+                self.stash_apply_selection.clear();
                 self.selected_stash_diff = None;
                 self.pending_stash_action_ref = None;
                 self.lfs.clear();
@@ -1260,13 +1460,16 @@ impl GitronimoApp {
         steps: Vec<WorkflowGitStep>,
         cx: &mut Context<Self>,
     ) {
+        let autostash = self.auto_stash;
         self.run_branch_command(
             label,
             move |git, repository| {
                 for step in &steps {
                     match step {
                         WorkflowGitStep::Checkout(name) => {
-                            git.checkout_branch(repository, name)?;
+                            git.maybe_autostash(repository, autostash, |git| {
+                                git.checkout_branch(repository, name)
+                            })?;
                         }
                         WorkflowGitStep::Merge(name) => {
                             git.merge_branch(repository, name)?;
@@ -1464,12 +1667,17 @@ return remote_url & linefeed & parent_path"#;
                 .unwrap_or("repository")
                 .trim_end_matches(".git");
             let destination = PathBuf::from(parent).join(name);
+            let use_system_git = store.load_use_system_git().unwrap_or(false);
             let outcome = cx
                 .background_spawn(async move {
-                    let git = GitExecutable::discover()
-                        .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
-                    git.clone_repository(&source, &destination)
-                        .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
+                    git_backend::clone_repository(
+                        &source,
+                        &destination,
+                        use_system_git,
+                        &AtomicBool::new(false),
+                    )
+                    .result
+                    .map_err(|_| RepositoryOpenError::DiscoveryFailed)?;
                     discover_and_record(&destination, &store)
                 })
                 .await;
@@ -1659,8 +1867,10 @@ return remote_url & linefeed & parent_path"#;
             }
             PaletteCommand::SaveStash => self.open_stash_save_dialog(false, Vec::new(), cx),
             PaletteCommand::SaveStashUntracked => self.open_stash_save_dialog(true, Vec::new(), cx),
+            PaletteCommand::SaveStashSnapshot => self.open_stash_snapshot_dialog(cx),
             PaletteCommand::ApplyLatestStash => self.open_apply_latest_stash_dialog(cx),
             PaletteCommand::ApplySelectedStash => self.open_stash_apply_dialog_for_selection(cx),
+            PaletteCommand::ApplySelectedStashFiles => self.apply_selected_stash_files(cx),
             PaletteCommand::BranchFromSelectedStash => self.prompt_branch_from_selected_stash(cx),
             PaletteCommand::PopSelectedStash => self.request_stash_action(StashAction::Pop, cx),
             PaletteCommand::DropSelectedStash => self.request_stash_action(StashAction::Drop, cx),
@@ -1722,6 +1932,8 @@ return remote_url & linefeed & parent_path"#;
                     self.show_lfs(repository.clone(), cx);
                 }
             }
+            PaletteCommand::FetchGitLfs => self.fetch_lfs(cx),
+            PaletteCommand::PullGitLfs => self.pull_lfs(cx),
             PaletteCommand::ShowReflog => {
                 if let ShellState::Repository(repository) = &self.state {
                     self.show_reflog(repository.clone(), cx);
@@ -1802,6 +2014,7 @@ return remote_url & linefeed & parent_path"#;
                 }
             }
             PaletteCommand::AboutGitRonimo => self.show_about_dialog(cx),
+            PaletteCommand::CheckForUpdates => self.check_for_app_updates(cx),
         }
     }
 
@@ -1960,6 +2173,12 @@ return remote_url & linefeed & parent_path"#;
     }
 
     pub(crate) fn cancel_confirm_dialog(&mut self, cx: &mut Context<Self>) {
+        if matches!(
+            self.confirm_dialog,
+            Some(AppConfirmDialog::InstallUpdate { .. })
+        ) {
+            self.pending_app_update = None;
+        }
         self.confirm_dialog = None;
         self.set_activity("Cancelled.");
         cx.notify();
@@ -1993,6 +2212,9 @@ return remote_url & linefeed & parent_path"#;
             }
             AppConfirmDialog::FinishTopic { branch, .. } => {
                 self.finish_workflow_topic(&branch, cx);
+            }
+            AppConfirmDialog::InstallUpdate { .. } => {
+                self.begin_app_update_install(cx);
             }
         }
     }
@@ -2078,6 +2300,7 @@ return remote_url & linefeed & parent_path"#;
                 );
             }
             TextPromptKind::CreateStash {
+                snapshot,
                 include_untracked,
                 paths,
             } => {
@@ -2090,6 +2313,7 @@ return remote_url & linefeed & parent_path"#;
                         include_untracked,
                         paths,
                     },
+                    snapshot,
                     cx,
                 );
             }
@@ -2293,11 +2517,13 @@ return remote_url & linefeed & parent_path"#;
             TextPromptKind::RewordBody { subject } => {
                 self.pending_text_prompt = None;
                 self.text_prompt_value.clear();
+                let use_system_git = self.use_system_git;
                 self.run_worktree_mutation(
                     "Reword last commit".to_owned(),
-                    move |git, repository| {
-                        git.commit(
+                    move |_git, repository| {
+                        git_backend::commit(
                             repository,
+                            use_system_git,
                             &CommitRequest {
                                 subject,
                                 body: value,
@@ -2305,6 +2531,8 @@ return remote_url & linefeed & parent_path"#;
                                 sign_off: false,
                             },
                         )
+                        .result
+                        .map_err(|error| GitStatusError::CommandFailed(error.to_string()))
                     },
                     cx,
                 );
@@ -3076,21 +3304,23 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let reference = self.history_reference.clone();
         let load_token = self.history_load_token;
         let initial_page = before.is_none();
+        let use_system_git = self.use_system_git;
         self.set_activity("Loading history…");
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
                     let git = GitExecutable::discover().map_err(|error| error.to_string())?;
-                    let page = git
-                        .history_page(
-                            &worker_repository,
-                            &HistoryRequest {
-                                reference,
-                                before,
-                                limit: 100,
-                            },
-                        )
-                        .map_err(|error| format!("{error:?}"))?;
+                    let page = git_backend::history_page(
+                        &worker_repository,
+                        use_system_git,
+                        &HistoryRequest {
+                            reference,
+                            before,
+                            limit: 100,
+                        },
+                    )
+                    .result
+                    .map_err(|error| error.to_string())?;
                     let decorations = git
                         .ref_decorations(&worker_repository)
                         .map_err(|error| format!("{error:?}"))?;
@@ -3357,15 +3587,14 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let load_token = self.compare_load_token;
         let left = self.compare_left.clone();
         let right = self.compare_right.clone();
+        let use_system_git = self.use_system_git;
         self.set_activity(format!("Comparing {left}…{right}…"));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
-                    let loaded = git
-                        .diff_refs(&repository, &left, &right)
-                        .map_err(|error| format!("{error:?}"))?;
-                    Ok::<_, String>(loaded)
+                    git_backend::diff_refs(&repository, use_system_git, &left, &right)
+                        .result
+                        .map_err(|error| error.to_string())
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
@@ -3403,15 +3632,14 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let load_token = self.tree_load_token;
         let oid = self.tree_oid.clone();
         let path = joined_tree_path(&self.tree_path);
+        let use_system_git = self.use_system_git;
         self.set_activity(format!("Loading tree {}…", self.tree_path_label()));
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
-                    let entries = git
-                        .tree_entries(&repository, &oid, &path)
-                        .map_err(|error| format!("{error:?}"))?;
-                    Ok::<_, String>(entries)
+                    git_backend::tree_entries(&repository, use_system_git, &oid, &path)
+                        .result
+                        .map_err(|error| error.to_string())
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
@@ -3467,15 +3695,19 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 let root = repository.worktree_root.clone();
                 let load_token = self.tree_load_token;
                 let oid = self.tree_oid.clone();
+                let use_system_git = self.use_system_git;
                 self.set_activity(format!("Reading {}", String::from_utf8_lossy(&full_path.0)));
                 cx.spawn(async move |this, cx| {
                     let result = cx
                         .background_spawn(async move {
-                            let git = GitExecutable::discover().map_err(|error| error.to_string())?;
-                            let bytes = git
-                                .file_at_revision(&repository, &oid, &full_path)
-                                .map_err(|error| format!("{error:?}"))?;
-                            Ok::<_, String>(bytes)
+                            git_backend::file_at_revision(
+                                &repository,
+                                use_system_git,
+                                &oid,
+                                &full_path,
+                            )
+                            .result
+                            .map_err(|error| error.to_string())
                         })
                         .await;
                     let _ = this.update(cx, |app, cx| {
@@ -3648,7 +3880,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                             app.reload_rebase_plan(&repository, cx);
                         }
                     }
-                    Err(error) => app.set_activity(git_failure_message(&label, &error)),
+                    Err(error) => {
+                        app.set_activity(git_failure_message(&label, &error));
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_refs(repository, cx);
+                    }
                 }
                 cx.notify();
             });
@@ -4179,6 +4415,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let repository = repository.clone();
         let worker_repository = repository.clone();
         let worker_branch = branch.clone();
+        let autostash = self.auto_stash;
         self.mutation_in_flight = true;
         self.set_activity(format!("Checking out pull request #{number}…"));
         cx.spawn(async move |this, cx| {
@@ -4188,8 +4425,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     git.fetch_pull_request(&worker_repository, &remote, number)
                         .map_err(|error| format!("{error:?}"))?;
                     let start = format!("refs/remotes/{remote}/pr/{number}");
-                    git.create_branch(&worker_repository, &worker_branch, Some(&start))
-                        .map_err(|error| format!("{error:?}"))
+                    git.maybe_autostash(&worker_repository, autostash, |git| {
+                        git.create_branch(&worker_repository, &worker_branch, Some(&start))
+                    })
+                    .map_err(|error| format!("{error:?}"))
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
@@ -4729,27 +4968,30 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             return;
         }
         let root = repository.worktree_root.clone();
+        let use_system_git = self.use_system_git;
         self.set_activity("Refreshing working copy…");
         cx.spawn(async move |this, cx| {
             let refresh = cx
                 .background_spawn(async move {
-                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
-                    let status = git
-                        .worktree_status(&repository, false)
-                        .map_err(|error| format!("{error:?}"))?;
-                    let numstat = git.diff_numstat(&repository).ok();
-                    let last_commit = git
-                        .history_page(
-                            &repository,
-                            &HistoryRequest {
-                                reference: HistoryReference::Current,
-                                before: None,
-                                limit: 1,
-                            },
-                        )
-                        .ok()
-                        .and_then(|page| page.commits.first().cloned())
-                        .map(|commit| String::from_utf8_lossy(&commit.subject).into_owned());
+                    let status = git_backend::worktree_status(&repository, use_system_git, false)
+                        .result
+                        .map_err(|error| error.to_string())?;
+                    let numstat = git_backend::diff_numstat(&repository, use_system_git)
+                        .result
+                        .ok();
+                    let last_commit = git_backend::history_page(
+                        &repository,
+                        use_system_git,
+                        &HistoryRequest {
+                            reference: HistoryReference::Current,
+                            before: None,
+                            limit: 1,
+                        },
+                    )
+                    .result
+                    .ok()
+                    .and_then(|page| page.commits.first().cloned())
+                    .map(|commit| String::from_utf8_lossy(&commit.subject).into_owned());
                     Ok::<_, String>((status, numstat, last_commit))
                 })
                 .await;
@@ -4794,10 +5036,12 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         cx.spawn(async move |this, cx| {
             let refs = cx
                 .background_spawn(async move {
-                    GitExecutable::discover()
-                        .map_err(|error| error.to_string())?
-                        .ref_snapshot(&repository)
-                        .map_err(|error| format!("{error:?}"))
+                    let use_system_git = RecentRepositoryStore::new(preferences_path())
+                        .load_use_system_git()
+                        .unwrap_or(false);
+                    git_backend::ref_snapshot(&repository, use_system_git)
+                        .result
+                        .map_err(|error| error.to_string())
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
@@ -4866,9 +5110,14 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     }
 
     fn checkout_branch(&mut self, branch: String, cx: &mut Context<Self>) {
+        let autostash = self.auto_stash;
         self.run_branch_command(
             format!("Checking out {branch}"),
-            move |git, repository| git.checkout_branch(repository, &branch),
+            move |git, repository| {
+                git.maybe_autostash(repository, autostash, |git| {
+                    git.checkout_branch(repository, &branch)
+                })
+            },
             cx,
         );
     }
@@ -5037,6 +5286,27 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         );
     }
 
+    pub(crate) fn fetch_lfs(&mut self, cx: &mut Context<Self>) {
+        self.run_lfs_network("Fetching Git LFS objects", "fetch", cx);
+    }
+
+    pub(crate) fn pull_lfs(&mut self, cx: &mut Context<Self>) {
+        self.run_lfs_network("Pulling Git LFS objects", "pull", cx);
+    }
+
+    fn run_lfs_network(&mut self, label: &str, verb: &'static str, cx: &mut Context<Self>) {
+        let Some(remote) = self.default_remote() else {
+            self.set_activity("No configured remote for Git LFS.");
+            cx.notify();
+            return;
+        };
+        self.run_network_command(
+            format!("{label} from {remote}"),
+            vec!["lfs".into(), verb.into(), remote.into()],
+            cx,
+        );
+    }
+
     #[allow(dead_code)]
     fn prompt_fetch_remote(cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
@@ -5090,11 +5360,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
 
     pub(crate) fn sync_current(&mut self, cx: &mut Context<Self>) {
         self.fetch_default_remote(cx);
-        self.run_network_command(
-            "Pulling current branch".into(),
-            vec!["pull".into(), "--progress".into()],
-            cx,
-        );
+        let mut pull = vec![OsString::from("pull"), OsString::from("--progress")];
+        if self.auto_stash {
+            pull.push(OsString::from("--autostash"));
+        }
+        self.run_network_command("Pulling current branch".into(), pull, cx);
         self.run_network_command(
             "Pushing current branch".into(),
             vec!["push".into(), "--progress".into()],
@@ -5162,7 +5432,12 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             return;
         };
         let remotes = self.configured_remote_names();
-        let args = pull_command_args(&dialog.remote_branch, dialog.use_rebase, &remotes);
+        let args = pull_command_args(
+            &dialog.remote_branch,
+            dialog.use_rebase,
+            self.auto_stash,
+            &remotes,
+        );
         let label = if dialog.remote_branch.is_empty() {
             if dialog.use_rebase {
                 "Pulling current branch (rebase)".into()
@@ -5454,10 +5729,12 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             return;
         };
         let repository = repository.clone();
+        let interrupt = Arc::new(AtomicBool::new(false));
         let operation = Arc::new(Mutex::new(NetworkOperation {
             label: label.clone(),
             child: None,
             cancelled: false,
+            interrupt: interrupt.clone(),
         }));
         let worker_operation = operation.clone();
         let worker_repository = repository.clone();
@@ -5545,7 +5822,10 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.last_network_result = Some(format!("{label} complete."));
                         app.set_activity(app.last_network_result.clone().unwrap_or_default());
                         app.load_working_copy(repository.clone(), cx);
-                        Self::load_refs(repository, cx);
+                        Self::load_refs(repository.clone(), cx);
+                        if app.repository_view == RepositoryView::Lfs {
+                            app.load_lfs(repository, cx);
+                        }
                     }
                     Err(error) if error == "cancelled" => {
                         app.last_network_result = Some(format!("{label} cancelled."));
@@ -5569,6 +5849,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         };
         let cancelled = operation.lock().is_ok_and(|mut operation| {
             operation.cancelled = true;
+            operation.interrupt.store(true, Ordering::Relaxed);
             operation
                 .child
                 .as_mut()
@@ -5615,7 +5896,11 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.load_working_copy(repository.clone(), cx);
                         Self::load_refs(repository, cx);
                     }
-                    Err(error) => app.set_activity(git_failure_message(&label, &error)),
+                    Err(error) => {
+                        app.set_activity(git_failure_message(&label, &error));
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_refs(repository, cx);
+                    }
                 }
                 cx.notify();
             });
@@ -5704,9 +5989,14 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             self.checkout_branch(short, cx);
             return;
         }
+        let autostash = self.auto_stash;
         self.run_branch_command(
             format!("Checking out {short} from {remote_branch}"),
-            move |git, repository| git.checkout_tracking_branch(repository, &remote_branch),
+            move |git, repository| {
+                git.maybe_autostash(repository, autostash, |git| {
+                    git.checkout_tracking_branch(repository, &remote_branch)
+                })
+            },
             cx,
         );
     }
@@ -5826,9 +6116,14 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     pub(crate) fn checkout_detached_commit(&mut self, oid: &str, cx: &mut Context<Self>) {
         let short = oid.chars().take(8).collect::<String>();
         let oid = oid.to_owned();
+        let autostash = self.auto_stash;
         self.run_worktree_mutation(
             format!("Checking out {short} (detached)"),
-            move |git, repository| git.checkout_detached(repository, &oid),
+            move |git, repository| {
+                git.maybe_autostash(repository, autostash, |git| {
+                    git.checkout_detached(repository, &oid)
+                })
+            },
             cx,
         );
     }
@@ -6000,6 +6295,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let selection_token = self.history_selection_token;
         self.history_paths.clear();
         self.history_diff = None;
+        let use_system_git = self.use_system_git;
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -6007,8 +6303,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok::<_, String>((
                         git.commit_paths(&repository, &worker_oid)
                             .map_err(|error| format!("{error:?}"))?,
-                        git.commit_diff(&repository, &worker_oid)
-                            .map_err(|error| format!("{error:?}"))?,
+                        git_backend::commit_diff(&repository, use_system_git, &worker_oid)
+                            .result
+                            .map_err(|error| error.to_string())?,
                     ))
                 })
                 .await;
@@ -6195,7 +6492,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                 repository.clone(),
                 self.selected_paths[0].clone(),
                 staged,
-                git_cli::MAX_DISPLAY_DIFF_BYTES,
+                MAX_DISPLAY_DIFF_BYTES,
                 cx,
             );
         }
@@ -6214,10 +6511,18 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         cx.spawn(async move |this, cx| {
             let diff = cx
                 .background_spawn(async move {
-                    GitExecutable::discover()
-                        .map_err(|error| error.to_string())?
-                        .file_diff_with_limit(&repository, &path, staged, limit)
-                        .map_err(|error| format!("{error:?}"))
+                    let use_system_git = RecentRepositoryStore::new(preferences_path())
+                        .load_use_system_git()
+                        .unwrap_or(false);
+                    git_backend::file_diff_with_limit(
+                        &repository,
+                        use_system_git,
+                        &path,
+                        staged,
+                        limit,
+                    )
+                    .result
+                    .map_err(|error| error.to_string())
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
@@ -6393,13 +6698,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok(()) => {
                         app.set_activity("Hunk staged.");
                         app.load_working_copy(repository.clone(), cx);
-                        Self::load_diff(
-                            repository,
-                            path,
-                            false,
-                            git_cli::MAX_DISPLAY_DIFF_BYTES,
-                            cx,
-                        );
+                        Self::load_diff(repository, path, false, MAX_DISPLAY_DIFF_BYTES, cx);
                     }
                     Err(error) => app.set_activity(git_failure_message("Stage hunk", &error)),
                 }
@@ -6439,13 +6738,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok(()) => {
                         app.set_activity("Hunk unstaged.");
                         app.load_working_copy(repository.clone(), cx);
-                        Self::load_diff(
-                            repository,
-                            path,
-                            true,
-                            git_cli::MAX_DISPLAY_DIFF_BYTES,
-                            cx,
-                        );
+                        Self::load_diff(repository, path, true, MAX_DISPLAY_DIFF_BYTES, cx);
                     }
                     Err(error) => app.set_activity(git_failure_message("Unstage hunk", &error)),
                 }
@@ -6587,13 +6880,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok(()) => {
                         app.set_activity("Selected lines staged.");
                         app.load_working_copy(repository.clone(), cx);
-                        Self::load_diff(
-                            repository,
-                            path,
-                            false,
-                            git_cli::MAX_DISPLAY_DIFF_BYTES,
-                            cx,
-                        );
+                        Self::load_diff(repository, path, false, MAX_DISPLAY_DIFF_BYTES, cx);
                     }
                     Err(error) => {
                         app.set_activity(git_failure_message("Stage selected lines", &error));
@@ -6654,13 +6941,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok(()) => {
                         app.set_activity("Selected lines discarded.");
                         app.load_working_copy(repository.clone(), cx);
-                        Self::load_diff(
-                            repository,
-                            path,
-                            false,
-                            git_cli::MAX_DISPLAY_DIFF_BYTES,
-                            cx,
-                        );
+                        Self::load_diff(repository, path, false, MAX_DISPLAY_DIFF_BYTES, cx);
                     }
                     Err(error) => {
                         app.set_activity(git_failure_message("Discard selected lines", &error));
@@ -6720,13 +7001,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok(()) => {
                         app.set_activity("Hunk discarded.");
                         app.load_working_copy(repository.clone(), cx);
-                        Self::load_diff(
-                            repository,
-                            path,
-                            false,
-                            git_cli::MAX_DISPLAY_DIFF_BYTES,
-                            cx,
-                        );
+                        Self::load_diff(repository, path, false, MAX_DISPLAY_DIFF_BYTES, cx);
                     }
                     Err(error) => app.set_activity(git_failure_message("Discard hunk", &error)),
                 }
@@ -6904,6 +7179,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         app.stashes = stashes;
                         app.selected_stash = None;
                         app.selected_stash_paths.clear();
+                        app.stash_apply_selection.clear();
                         app.selected_stash_diff = None;
                         app.stash_selection_token =
                             app.stash_selection_token.wrapping_add(1);
@@ -6956,8 +7232,26 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         }
         self.begin_text_prompt(
             TextPromptKind::CreateStash {
+                snapshot: false,
                 include_untracked,
                 paths,
+            },
+            "",
+            cx,
+        );
+    }
+
+    pub(crate) fn open_stash_snapshot_dialog(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.state, ShellState::Repository(_)) {
+            self.set_activity("Open a repository before saving a snapshot.");
+            cx.notify();
+            return;
+        }
+        self.begin_text_prompt(
+            TextPromptKind::CreateStash {
+                snapshot: true,
+                include_untracked: false,
+                paths: Vec::new(),
             },
             "",
             cx,
@@ -7098,7 +7392,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         self.stash_selection_token = self.stash_selection_token.wrapping_add(1);
         let selection_token = self.stash_selection_token;
         self.selected_stash_paths.clear();
+        self.stash_apply_selection.clear();
         self.selected_stash_diff = None;
+        let use_system_git = self.use_system_git;
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
@@ -7106,8 +7402,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                     Ok::<_, String>((
                         git.commit_paths(&repository, &oid)
                             .map_err(|error| format!("{error:?}"))?,
-                        git.commit_diff(&repository, &oid)
-                            .map_err(|error| format!("{error:?}"))?,
+                        git_backend::commit_diff(&repository, use_system_git, &oid)
+                            .result
+                            .map_err(|error| error.to_string())?,
                     ))
                 })
                 .await;
@@ -7129,6 +7426,72 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         })
         .detach();
         cx.notify();
+    }
+
+    pub(crate) fn toggle_stash_apply_path(
+        &mut self,
+        path: GitPath,
+        additive: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if additive {
+            if let Some(index) = self
+                .stash_apply_selection
+                .iter()
+                .position(|entry| entry == &path)
+            {
+                self.stash_apply_selection.remove(index);
+            } else {
+                self.stash_apply_selection.push(path);
+            }
+        } else if self.stash_apply_selection.len() == 1 && self.stash_apply_selection[0] == path {
+            self.stash_apply_selection.clear();
+        } else {
+            self.stash_apply_selection = vec![path];
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn apply_selected_stash_files(&mut self, cx: &mut Context<Self>) {
+        let Some((reference, _)) = self.selected_stash() else {
+            self.set_activity("Select a stash first.");
+            cx.notify();
+            return;
+        };
+        let paths = self.stash_apply_selection.clone();
+        if paths.is_empty() {
+            self.set_activity("Select stash files to apply, or drag them onto Working Copy.");
+            cx.notify();
+            return;
+        }
+        self.run_stash_path_apply(reference, paths, cx);
+    }
+
+    pub(crate) fn apply_dropped_stash_paths(
+        &mut self,
+        reference: String,
+        paths: Vec<GitPath>,
+        cx: &mut Context<Self>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        self.navigate_to(RepositoryView::WorkingCopy, cx);
+        self.run_stash_path_apply(reference, paths, cx);
+    }
+
+    fn run_stash_path_apply(
+        &mut self,
+        reference: String,
+        paths: Vec<GitPath>,
+        cx: &mut Context<Self>,
+    ) {
+        let count = paths.len();
+        self.run_worktree_mutation(
+            format!("Applying {count} path(s) from {reference}"),
+            move |git, repository| git.apply_stash_paths(repository, &reference, &paths),
+            cx,
+        );
     }
 
     pub(crate) fn request_stash_action(&mut self, action: StashAction, cx: &mut Context<Self>) {
@@ -7253,14 +7616,96 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     }
 
     fn fetch_remote(&mut self, name: String, cx: &mut Context<Self>) {
-        self.run_network_command(
-            format!("Fetching {name}"),
-            vec!["fetch".into(), "--progress".into(), name.into()],
-            cx,
-        );
+        let http = self.refs.remotes.iter().any(|remote| {
+            remote.name.0 == name.as_bytes()
+                && git_backend::uses_http_url(&String::from_utf8_lossy(&remote.fetch_url))
+        });
+        if self.use_system_git || !http {
+            self.run_network_command(
+                format!("Fetching {name}"),
+                vec!["fetch".into(), "--progress".into(), name.into()],
+                cx,
+            );
+            return;
+        }
+        self.run_gix_fetch(name, cx);
     }
 
-    fn run_create_stash(&mut self, request: CreateStashRequest, cx: &mut Context<Self>) {
+    fn run_gix_fetch(&mut self, name: String, cx: &mut Context<Self>) {
+        if self.mutation_in_flight {
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            return;
+        };
+        let repository = repository.clone();
+        let worker_repository = repository.clone();
+        let label = format!("Fetching {name}");
+        let interrupt = Arc::new(AtomicBool::new(false));
+        let operation = Arc::new(Mutex::new(NetworkOperation {
+            label: label.clone(),
+            child: None,
+            cancelled: false,
+            interrupt: interrupt.clone(),
+        }));
+        self.mutation_in_flight = true;
+        self.network_operation = Some(operation.clone());
+        self.network_progress = 0.0;
+        self.set_activity(format!("{label} in progress. You can cancel it."));
+        let use_system_git = self.use_system_git;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    git_backend::fetch_remote(
+                        &worker_repository,
+                        use_system_git,
+                        &name,
+                        interrupt.as_ref(),
+                    )
+                    .result
+                    .map_err(|error| error.to_string())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if !app
+                    .network_operation
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &operation))
+                {
+                    return;
+                }
+                app.network_operation = None;
+                app.mutation_in_flight = false;
+                app.network_progress = 0.0;
+                match result {
+                    Ok(()) => {
+                        app.last_network_result = Some(format!("{label} complete."));
+                        app.set_activity(app.last_network_result.clone().unwrap_or_default());
+                        app.load_working_copy(repository.clone(), cx);
+                        Self::load_refs(repository, cx);
+                    }
+                    Err(error) if error == "cancelled" => {
+                        app.last_network_result = Some(format!("{label} cancelled."));
+                        app.set_activity(app.last_network_result.clone().unwrap_or_default());
+                    }
+                    Err(error) => {
+                        let message = network_failure_message(&label, &error);
+                        app.last_network_result = Some(message.clone());
+                        app.set_activity(message);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn run_create_stash(
+        &mut self,
+        request: CreateStashRequest,
+        snapshot: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self.mutation_in_flight {
             return;
         }
@@ -7270,25 +7715,44 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         let repository = repository.clone();
         let worker_repository = repository.clone();
         self.mutation_in_flight = true;
-        self.set_activity("Creating stash…");
+        self.set_activity(if snapshot {
+            "Saving snapshot…"
+        } else {
+            "Creating stash…"
+        });
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    GitExecutable::discover()
-                        .map_err(|error| error.to_string())?
-                        .create_stash(&worker_repository, &request)
-                        .map_err(|error| format!("{error:?}"))
+                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
+                    if snapshot {
+                        git.create_stash_snapshot(&worker_repository, &request)
+                            .map_err(|error| format!("{error:?}"))
+                    } else {
+                        git.create_stash(&worker_repository, &request)
+                            .map_err(|error| format!("{error:?}"))
+                    }
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
                 app.mutation_in_flight = false;
                 match result {
                     Ok(()) => {
-                        app.set_activity("Stash created.");
+                        app.set_activity(if snapshot {
+                            "Snapshot saved. Working copy unchanged."
+                        } else {
+                            "Stash created."
+                        });
                         app.load_working_copy(repository.clone(), cx);
                         app.load_stashes(repository, cx);
                     }
-                    Err(error) => app.set_activity(git_failure_message("Create stash", &error)),
+                    Err(error) => app.set_activity(git_failure_message(
+                        if snapshot {
+                            "Save snapshot"
+                        } else {
+                            "Create stash"
+                        },
+                        &error,
+                    )),
                 }
                 cx.notify();
             });
@@ -7395,6 +7859,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             amend: amending,
             sign_off: self.commit_sign_off,
         };
+        let use_system_git = self.use_system_git;
         self.mutation_in_flight = true;
         self.set_activity(if amending {
             "Amending…"
@@ -7404,13 +7869,13 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
-                    git.commit(&worker_repository, &request)
-                        .map_err(|error| format!("{error:?}"))?;
-                    let oid = git
+                    git_backend::commit(&worker_repository, use_system_git, &request)
+                        .result
+                        .map_err(|error| error.to_string())?;
+                    GitExecutable::discover()
+                        .map_err(|error| error.to_string())?
                         .head_oid(&worker_repository)
-                        .map_err(|error| format!("{error:?}"))?;
-                    Ok::<_, String>(oid)
+                        .map_err(|error| format!("{error:?}"))
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
@@ -7479,20 +7944,38 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         self.mutation_in_flight = true;
         self.set_activity(format!("{}…", operation.label()));
         let worker_repository = repository.clone();
+        let use_system_git = self.use_system_git;
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_spawn(async move {
-                    let git = GitExecutable::discover().map_err(|error| error.to_string())?;
                     match operation {
-                        Mutation::StageSelected => git.stage_paths(&worker_repository, &paths),
-                        Mutation::UnstageSelected => git.unstage_paths(&worker_repository, &paths),
-                        Mutation::StageAll => git.stage_all(&worker_repository),
-                        Mutation::UnstageAll => git.unstage_all(&worker_repository),
+                        Mutation::StageSelected => {
+                            git_backend::stage_paths(&worker_repository, use_system_git, &paths)
+                                .result
+                                .map_err(|error| error.to_string())
+                        }
+                        Mutation::UnstageSelected => {
+                            git_backend::unstage_paths(&worker_repository, use_system_git, &paths)
+                                .result
+                                .map_err(|error| error.to_string())
+                        }
+                        Mutation::StageAll => {
+                            git_backend::stage_all(&worker_repository, use_system_git)
+                                .result
+                                .map_err(|error| error.to_string())
+                        }
+                        Mutation::UnstageAll => {
+                            git_backend::unstage_all(&worker_repository, use_system_git)
+                                .result
+                                .map_err(|error| error.to_string())
+                        }
                         Mutation::DiscardSelected => {
+                            let git =
+                                GitExecutable::discover().map_err(|error| error.to_string())?;
                             discard_selected(&git, &worker_repository, &paths)
+                                .map_err(|error| format!("{error:?}"))
                         }
                     }
-                    .map_err(|error| format!("{error:?}"))
                 })
                 .await;
             let _ = this.update(cx, |app, cx| {
@@ -7514,13 +7997,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
                         if preserve_selection
                             && let Some((path, staged)) = app.selected_diff.clone()
                         {
-                            Self::load_diff(
-                                repository,
-                                path,
-                                staged,
-                                git_cli::MAX_DISPLAY_DIFF_BYTES,
-                                cx,
-                            );
+                            Self::load_diff(repository, path, staged, MAX_DISPLAY_DIFF_BYTES, cx);
                         }
                     }
                     Err(error) => app.set_activity(git_failure_message(operation.label(), &error)),
@@ -7532,10 +8009,18 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     }
 }
 
-fn pull_command_args(remote_branch: &str, use_rebase: bool, remotes: &[String]) -> Vec<OsString> {
+fn pull_command_args(
+    remote_branch: &str,
+    use_rebase: bool,
+    autostash: bool,
+    remotes: &[String],
+) -> Vec<OsString> {
     let mut args = vec![OsString::from("pull"), OsString::from("--progress")];
     if use_rebase {
         args.push(OsString::from("--rebase"));
+    }
+    if autostash {
+        args.push(OsString::from("--autostash"));
     }
     if remote_branch.is_empty() {
         return args;
@@ -7642,13 +8127,24 @@ mod pull_dialog_tests {
     #[test]
     fn builds_rebase_pull_args_for_remote_branch() {
         let remotes = vec!["origin".into()];
-        let args = pull_command_args("origin/main", true, &remotes);
+        let args = pull_command_args("origin/main", true, false, &remotes);
         assert_eq!(
             args,
             vec![
                 OsString::from("pull"),
                 OsString::from("--progress"),
                 OsString::from("--rebase"),
+                OsString::from("origin"),
+                OsString::from("main"),
+            ]
+        );
+        let autostash = pull_command_args("origin/main", false, true, &remotes);
+        assert_eq!(
+            autostash,
+            vec![
+                OsString::from("pull"),
+                OsString::from("--progress"),
+                OsString::from("--autostash"),
                 OsString::from("origin"),
                 OsString::from("main"),
             ]

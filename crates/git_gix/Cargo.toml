@@ -1,0 +1,27 @@
+[package]
+name = "git_gix"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+app_core = { path = "../app_core", version = "0.1.0" }
+git_domain = { path = "../git_domain", version = "0.1.0" }
+gix = { version = "=0.86.0", default-features = false, features = [
+    "revision",
+    "sha1",
+    "status",
+    "tree-editor",
+    "worktree-mutation",
+    "blocking-http-transport-reqwest-native-tls",
+    "credentials",
+] }
+
+[dev-dependencies]
+git_cli = { path = "../git_cli", version = "0.1.0" }
+
+[lints]
+workspace = true

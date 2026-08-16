@@ -7,6 +7,7 @@ Index of project documentation. Start with [README.md](../README.md) for install
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [PLAN.md](../PLAN.md) | Contributors | Roadmap, checklist, crate boundaries |
+| [PLAN-v2.md](PLAN-v2.md) | Contributors | Post-1.0.0 work (`gix` backend, updater, LFS/stash, AI commits) |
 | [todo-v1.md](todo-v1.md) | Contributors | Leftover work and doc hygiene toward v1 |
 | [UI-PLAN.md](UI-PLAN.md) | UI contributors | UI phases and screenshot matrix |
 | [UI-IMPROVE.md](UI-IMPROVE.md) | UI contributors | GitRonimo view patterns and remaining gaps |

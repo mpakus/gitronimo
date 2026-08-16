@@ -33,17 +33,7 @@ The daily Git client is already in the app. This file is what is left **after** 
 
 ## Not 1.0.0 (do not start while tagging)
 
-| Item | Why |
-|------|-----|
-| OAuth device flow | Extra auth product |
-| Enterprise / self-hosted GitHub | Extra hosting product |
-| VoiceOver roles | Blocked on GPUI 0.2.2 |
-| In-app updater | Post-1.0 |
-| Localization | Post-1.0 |
-| AI commit messages | Post-1.0 |
-| GitLab / Bitbucket / Azure | Post-1.0 |
-| Graphite / git-flow CLI / stash DnD | Nice-to-have |
-| Git LFS fetch/pull UI | Status view only; Git LFS CLI still works |
+Tracked as **[`PLAN-v2.md`](PLAN-v2.md)** — `gix` as primary Git (system Git fallback), in-app updater, LFS fetch/pull UI and stash extras, optional AI commit messages.
 
 ---
 

@@ -1,14 +1,30 @@
 //! Stash browser and safe stash actions.
 
-use gpui::{AnyElement, ClickEvent, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, ClickEvent, Render, SharedString, Window, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
-use git_domain::DiffLineKind;
+use git_domain::{DiffLineKind, GitPath};
 
-use crate::app_state::{GitronimoApp, StashAction};
+use crate::app_state::{GitronimoApp, StashAction, StashPathDrag};
 use crate::views::components::{
     centered_empty_state, file_action_button, short_calendar_date, two_pane_view, view_panel_header,
 };
+
+impl Render for StashPathDrag {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+            .px_2()
+            .py_1()
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(self.colors.border)
+            .bg(self.colors.raised_background)
+            .shadow_lg()
+            .text_sm()
+            .text_color(self.colors.text_primary)
+            .child(self.label.clone())
+    }
+}
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -93,7 +109,7 @@ impl GitronimoApp {
         let list = if rows.is_empty() {
             centered_empty_state(
                 "No stashes",
-                "Save work in progress with Save stash.",
+                "Save work in progress with Save stash or Save snapshot.",
                 colors,
             )
         } else {
@@ -144,6 +160,12 @@ impl GitronimoApp {
                                 .flex()
                                 .flex_wrap()
                                 .gap_2()
+                                .child(file_action_button(
+                                    "Apply selected files",
+                                    colors,
+                                    cx,
+                                    GitronimoApp::apply_selected_stash_files,
+                                ))
                                 .child(file_action_button(
                                     "Apply…",
                                     colors,
@@ -211,7 +233,7 @@ impl GitronimoApp {
                                     )
                             },
                         ))
-                        .child(self.stash_changeset_detail(colors))
+                        .child(self.stash_changeset_detail(colors, cx))
                         .into_any_element()
                 },
             );
@@ -231,6 +253,14 @@ impl GitronimoApp {
                     app.open_stash_save_dialog(false, Vec::new(), cx);
                 },
             ))
+            .child(file_action_button(
+                "Save snapshot…",
+                colors,
+                cx,
+                |app, cx| {
+                    app.open_stash_snapshot_dialog(cx);
+                },
+            ))
             .into_any_element();
         two_pane_view(
             view_panel_header("Stashes", colors, Some(header_actions)),
@@ -241,7 +271,11 @@ impl GitronimoApp {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn stash_changeset_detail(&self, colors: &ThemeColors) -> AnyElement {
+    fn stash_changeset_detail(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
         let file_count = self
             .selected_stash_diff
             .as_ref()
@@ -259,7 +293,9 @@ impl GitronimoApp {
                 div()
                     .text_xs()
                     .text_color(colors.text_muted)
-                    .child(format!("Showing {file_count} file(s)")),
+                    .child(format!(
+                        "Showing {file_count} file(s). Drag onto Working Copy to apply without dropping the stash."
+                    )),
             )
             .child(
                 div()
@@ -293,27 +329,12 @@ impl GitronimoApp {
                                         .files
                                         .iter()
                                         .enumerate()
-                                        .map(|(index, file)| {
-                                            let path = file
-                                                .new_path
-                                                .as_ref()
-                                                .or(file.old_path.as_ref())
-                                                .map_or_else(
-                                                    || "(unknown)".into(),
-                                                    |path| {
-                                                        String::from_utf8_lossy(&path.0)
-                                                            .into_owned()
-                                                    },
-                                                );
-                                            div()
-                                                .id(("stash-file", index))
-                                                .px_2()
-                                                .py_1()
-                                                .text_xs()
-                                                .border_b_1()
-                                                .border_color(colors.separator)
-                                                .child(path)
-                                                .into_any_element()
+                                        .filter_map(|(index, file)| {
+                                            file.new_path.as_ref().or(file.old_path.as_ref()).map(
+                                                |path| {
+                                                    self.stash_file_row(index, path, colors, cx)
+                                                },
+                                            )
                                         })
                                         .collect()
                                 } else {
@@ -321,17 +342,7 @@ impl GitronimoApp {
                                         .iter()
                                         .enumerate()
                                         .map(|(index, path)| {
-                                            div()
-                                                .id(("stash-path", index))
-                                                .px_2()
-                                                .py_1()
-                                                .text_xs()
-                                                .border_b_1()
-                                                .border_color(colors.separator)
-                                                .child(
-                                                    String::from_utf8_lossy(&path.0).into_owned(),
-                                                )
-                                                .into_any_element()
+                                            self.stash_file_row(index, path, colors, cx)
                                         })
                                         .collect()
                                 },
@@ -345,6 +356,55 @@ impl GitronimoApp {
                             .child(self.stash_readonly_diff(colors)),
                     ),
             )
+            .into_any_element()
+    }
+
+    fn stash_file_row(
+        &self,
+        index: usize,
+        path: &GitPath,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        let selected = self.stash_apply_selection.iter().any(|entry| entry == path);
+        let Some((reference, _)) = self.selected_stash() else {
+            return div().into_any_element();
+        };
+        let drag_paths = if selected {
+            self.stash_apply_selection.clone()
+        } else {
+            vec![path.clone()]
+        };
+        let label = if drag_paths.len() == 1 {
+            String::from_utf8_lossy(&path.0).into_owned()
+        } else {
+            format!("{} files from {reference}", drag_paths.len())
+        };
+        let drag = StashPathDrag {
+            reference,
+            paths: drag_paths,
+            label,
+            colors: *colors,
+        };
+        let click_path = path.clone();
+        div()
+            .id(("stash-file", index))
+            .px_2()
+            .py_1()
+            .text_xs()
+            .border_b_1()
+            .border_color(colors.separator)
+            .bg(if selected {
+                colors.selection
+            } else {
+                colors.panel_background
+            })
+            .cursor_pointer()
+            .on_click(cx.listener(move |app, event: &ClickEvent, _, cx| {
+                app.toggle_stash_apply_path(click_path.clone(), event.modifiers().secondary(), cx);
+            }))
+            .on_drag(drag, |drag, _offset, _, cx| cx.new(|_| drag.clone()))
+            .child(String::from_utf8_lossy(&path.0).into_owned())
             .into_any_element()
     }
 

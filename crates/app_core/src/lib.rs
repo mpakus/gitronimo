@@ -14,8 +14,13 @@ use git_domain::{
 };
 use serde::{Deserialize, Serialize};
 
+mod git_engine;
 mod workflow;
 
+pub use git_engine::{
+    EngineQuery, GitBackendError, GitEngineKind, GitHistoryQuery, GitIndexMutate, GitNetwork,
+    GitObjectQuery, GitRefQuery, query_preferring,
+};
 pub use workflow::{
     RepositoryWorkflow, WorkflowBaseBranch, WorkflowGitStep, WorkflowKind, WorkflowTopicType,
 };
@@ -448,6 +453,66 @@ impl RecentRepositoryStore {
         self.with_document(|document| document.workflows.get(&key).cloned())
     }
 
+    /// Whether Settings forces the installed Git executable instead of `gix`.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_use_system_git(&self) -> Result<bool, RecentRepositoryStoreError> {
+        self.with_document(|document| document.use_system_git)
+    }
+
+    /// Persists the system-Git override while retaining other preferences.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_use_system_git(
+        &self,
+        use_system_git: bool,
+    ) -> Result<(), RecentRepositoryStoreError> {
+        self.with_mut_document(|document| {
+            document.use_system_git = use_system_git;
+        })
+    }
+
+    /// Whether Settings stashes dirty work before switch and pull.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_auto_stash(&self) -> Result<bool, RecentRepositoryStoreError> {
+        self.with_document(|document| document.auto_stash)
+    }
+
+    /// Persists auto-stash while retaining other preferences.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_auto_stash(&self, auto_stash: bool) -> Result<(), RecentRepositoryStoreError> {
+        self.with_mut_document(|document| {
+            document.auto_stash = auto_stash;
+        })
+    }
+
+    /// Whether Settings may check GitHub Releases and replace this `.app`.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_in_app_updates(&self) -> Result<bool, RecentRepositoryStoreError> {
+        self.with_document(|document| document.in_app_updates)
+    }
+
+    /// Persists the in-app updates toggle while retaining other preferences.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_in_app_updates(
+        &self,
+        in_app_updates: bool,
+    ) -> Result<(), RecentRepositoryStoreError> {
+        self.with_mut_document(|document| {
+            document.in_app_updates = in_app_updates;
+        })
+    }
+
     /// Persists the branching convention for one repository. `None` clears it.
     ///
     /// # Errors
@@ -724,6 +789,15 @@ struct RecentRepositoryDocument {
     /// Absolute repository path → branching convention.
     #[serde(default)]
     workflows: std::collections::BTreeMap<String, crate::RepositoryWorkflow>,
+    /// When true, skip `gix` and use the installed Git executable.
+    #[serde(default)]
+    use_system_git: bool,
+    /// When true, stash dirty work before switch and pull, then reapply it.
+    #[serde(default)]
+    auto_stash: bool,
+    /// When true, Settings can check GitHub Releases and install a notarized zip.
+    #[serde(default)]
+    in_app_updates: bool,
 }
 
 impl Default for RecentRepositoryDocument {
@@ -739,6 +813,9 @@ impl Default for RecentRepositoryDocument {
             repository_folders: std::collections::BTreeMap::new(),
             branch_organization: std::collections::BTreeMap::new(),
             workflows: std::collections::BTreeMap::new(),
+            use_system_git: false,
+            auto_stash: false,
+            in_app_updates: false,
         }
     }
 }
@@ -1073,6 +1150,49 @@ mod tests {
             store.load_window_geometry().expect("geometry should load"),
             Some(geometry)
         );
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn use_system_git_defaults_off_and_persists() {
+        let (directory, store) = temporary_store();
+        assert!(
+            !store
+                .load_use_system_git()
+                .expect("missing store should default off")
+        );
+        store
+            .save_use_system_git(true)
+            .expect("override should save");
+        assert!(store.load_use_system_git().expect("override should load"));
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn auto_stash_defaults_off_and_persists() {
+        let (directory, store) = temporary_store();
+        assert!(
+            !store
+                .load_auto_stash()
+                .expect("missing store should default off")
+        );
+        store.save_auto_stash(true).expect("override should save");
+        assert!(store.load_auto_stash().expect("override should load"));
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn in_app_updates_defaults_off_and_persists() {
+        let (directory, store) = temporary_store();
+        assert!(
+            !store
+                .load_in_app_updates()
+                .expect("missing store should default off")
+        );
+        store
+            .save_in_app_updates(true)
+            .expect("override should save");
+        assert!(store.load_in_app_updates().expect("override should load"));
         let _ = fs::remove_dir_all(directory);
     }
 

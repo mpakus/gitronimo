@@ -8,6 +8,8 @@
 > **Plan version:** 1.0  
 > **Research date:** 2026-08-06
 
+Post-1.0.0 work (`gix` as primary Git, updater, LFS/stash extras, optional AI commits) is in [`docs/PLAN-v2.md`](docs/PLAN-v2.md). Do not mix it into 1.0 tagging.
+
 ---
 
 ## 1. Mission
@@ -218,7 +220,7 @@ Introduce `gix` only behind a trait and only after profiling demonstrates a bene
 - repository discovery;
 - fast metadata and cache generation.
 
-Do not use `gix` for repository mutations in the MVP.
+Do not use `gix` for repository mutations in the MVP. 2.0 uses `gix` as the default engine for discovery, HEAD, refs, status, history, trees/diffs, stage/unstage/commit, and HTTPS fetch/clone ([`docs/PLAN-v2.md`](docs/PLAN-v2.md), ADR 0003); checkout, merge, rebase, stash, push, hooks, and LFS still fall back to system Git.
 
 ### Git installation policy
 

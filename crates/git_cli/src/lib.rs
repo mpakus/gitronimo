@@ -13,7 +13,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use app_core::{RepositoryDiscoverer, RepositoryOpenError};
 use git_domain::{
     BlameLine, BranchStatus, CommitIdentity, CommitSignature, CommitSignatureStatus, ConflictSide,
     DiffFile, DiffHunk, DiffLine, DiffLineKind, FileHistoryRequest, FileStatus, GitPath,
@@ -24,19 +23,17 @@ use git_domain::{
     WorktreeEntry, WorktreeRepository, WorktreeStatus, parse_hunk_header, selected_lines_patch,
 };
 
+pub use git_domain::{CommitRequest, LoadedDiff, MAX_DISPLAY_DIFF_BYTES};
+
+use app_core::{
+    GitBackendError, GitHistoryQuery, GitIndexMutate, GitNetwork, GitObjectQuery, GitRefQuery,
+    RepositoryDiscoverer, RepositoryOpenError,
+};
+
 const MACOS_GIT_PATHS: [&str; 2] = ["/opt/homebrew/bin/git", "/usr/local/bin/git"];
-pub const MAX_DISPLAY_DIFF_BYTES: usize = 1_000_000;
 pub const MAX_PROCESS_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 static MESSAGE_FILE_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CommitRequest {
-    pub subject: String,
-    pub body: String,
-    pub amend: bool,
-    pub sign_off: bool,
-}
 
 /// How far `git reset` moves the index and worktree relative to `HEAD`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +58,9 @@ pub struct AuthorIdentity {
     pub name: String,
     pub email: String,
 }
+
+/// Stash subject used when auto-stash wraps a branch switch.
+pub const AUTOSTASH_SWITCH_MESSAGE: &str = "gitronimo autostash before switch";
 
 /// Options for `git stash push`.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -205,7 +205,12 @@ impl GitExecutable {
         }
     }
 
-    fn run_env<I, E, S>(&self, directory: &Path, envs: E, args: I) -> io::Result<Output>
+    /// Runs Git with extra environment variables. Used by tests (LFS skip-smudge clone).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the process cannot be started or its output captured.
+    pub(crate) fn run_env<I, E, S>(&self, directory: &Path, envs: E, args: I) -> io::Result<Output>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
@@ -1036,6 +1041,17 @@ impl GitExecutable {
         Ok(parse_signature(&output.stdout))
     }
 
+    /// Classifies `HEAD` using porcelain-v2 branch headers.
+    ///
+    /// # Errors
+    /// Returns an error when Git cannot read the working copy.
+    pub fn head_status(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<HeadStatus, GitStatusError> {
+        Ok(self.worktree_status(repository, false)?.branch.head)
+    }
+
     /// Resolves the abbreviated-to-full object id of `HEAD`.
     ///
     /// # Errors
@@ -1431,8 +1447,16 @@ impl GitExecutable {
     ///
     /// # Errors
     /// Returns Git's actionable transport, authentication, or merge failure.
-    pub fn pull_current(&self, repository: &WorktreeRepository) -> Result<(), GitStatusError> {
-        self.mutate(repository, ["pull", "--progress"])
+    pub fn pull_current(
+        &self,
+        repository: &WorktreeRepository,
+        autostash: bool,
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![OsString::from("pull"), OsString::from("--progress")];
+        if autostash {
+            args.push(OsString::from("--autostash"));
+        }
+        self.mutate(repository, args)
     }
 
     /// Pushes the current branch without force.
@@ -1799,6 +1823,100 @@ impl GitExecutable {
         self.mutate(repository, args)
     }
 
+    /// Stores a named stash without resetting the working copy.
+    ///
+    /// Tracked-only snapshots use `git stash create` + `git stash store`.
+    /// Untracked files or pathspecs use `stash push` followed by `stash apply`.
+    ///
+    /// # Errors
+    /// Returns when there is nothing to snapshot, the message is unsafe, or Git fails.
+    pub fn create_stash_snapshot(
+        &self,
+        repository: &WorktreeRepository,
+        request: &CreateStashRequest,
+    ) -> Result<(), GitStatusError> {
+        let message = snapshot_stash_message(request.message.as_deref())?;
+        if request.include_untracked || !request.paths.is_empty() {
+            let stored = CreateStashRequest {
+                message: Some(message),
+                include_untracked: request.include_untracked,
+                paths: request.paths.clone(),
+            };
+            self.create_stash(repository, &stored)?;
+            return self.apply_stash(repository, "stash@{0}", false);
+        }
+        let output = self.run(
+            &repository.worktree_root,
+            ["stash", "create", message.as_str()],
+        )?;
+        if !output.status.success() {
+            return Err(command_error(&output));
+        }
+        let oid = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if oid.is_empty() {
+            return Err(GitStatusError::CommandFailed(
+                "No local changes to save.".into(),
+            ));
+        }
+        if !(7..=40).contains(&oid.len()) || !oid.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(GitStatusError::CommandFailed(
+                "Git did not return a stash object.".into(),
+            ));
+        }
+        self.mutate(
+            repository,
+            [
+                OsString::from("stash"),
+                OsString::from("store"),
+                OsString::from("--message"),
+                OsString::from(message),
+                OsString::from(oid),
+            ],
+        )
+    }
+    /// A clean worktree skips the stash. If `operation` fails after a stash was created,
+    /// the stash is popped to restore the original WIP.
+    ///
+    /// # Errors
+    /// Returns the operation error, a stash failure other than "no local changes",
+    /// or a conflict when reapplying the autostash after a successful operation.
+    pub fn maybe_autostash(
+        &self,
+        repository: &WorktreeRepository,
+        enabled: bool,
+        operation: impl FnOnce(&Self) -> Result<(), GitStatusError>,
+    ) -> Result<(), GitStatusError> {
+        if !enabled {
+            return operation(self);
+        }
+        let stashed = match self.create_stash(
+            repository,
+            &CreateStashRequest {
+                message: Some(AUTOSTASH_SWITCH_MESSAGE.into()),
+                include_untracked: true,
+                paths: Vec::new(),
+            },
+        ) {
+            Ok(()) => true,
+            Err(error) if is_no_local_changes(&error) => false,
+            Err(error) => return Err(error),
+        };
+        match operation(self) {
+            Ok(()) => {
+                if stashed {
+                    self.pop_stash(repository, "stash@{0}", false)?;
+                }
+                Ok(())
+            }
+            Err(error) => {
+                if stashed {
+                    let _ = self.pop_stash(repository, "stash@{0}", false);
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// Lists every stash newest-first, with selector, oid, subject, and timestamp.
     ///
     /// # Errors
@@ -1832,6 +1950,38 @@ impl GitExecutable {
         parse_lfs_status(&output.stdout)
     }
 
+    /// Downloads Git LFS objects for the current refs without checking them out.
+    ///
+    /// # Errors
+    /// Returns when Git LFS is missing, the remote is unreachable, or fetch fails.
+    pub fn lfs_fetch(
+        &self,
+        repository: &WorktreeRepository,
+        remote: Option<&str>,
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![OsString::from("lfs"), OsString::from("fetch")];
+        if let Some(remote) = remote {
+            args.push(OsString::from(remote));
+        }
+        self.mutate(repository, args)
+    }
+
+    /// Downloads Git LFS objects and checks them out into the worktree.
+    ///
+    /// # Errors
+    /// Returns when Git LFS is missing, the remote is unreachable, or pull fails.
+    pub fn lfs_pull(
+        &self,
+        repository: &WorktreeRepository,
+        remote: Option<&str>,
+    ) -> Result<(), GitStatusError> {
+        let mut args = vec![OsString::from("lfs"), OsString::from("pull")];
+        if let Some(remote) = remote {
+            args.push(OsString::from(remote));
+        }
+        self.mutate(repository, args)
+    }
+
     /// Applies the named stash (e.g. `stash@{0}`) while retaining its recovery entry.
     /// When `restore_index` is true, passes `--index` so the staging area is restored.
     ///
@@ -1848,6 +1998,43 @@ impl GitExecutable {
             args.push(OsString::from("--index"));
         }
         args.push(OsString::from(reference));
+        self.mutate(repository, args)
+    }
+
+    /// Restores selected paths from a stash into the index and worktree without dropping the stash.
+    ///
+    /// # Errors
+    /// Returns when the reference is not a stash selector or object id, a path is unsafe,
+    /// the path list is empty, or Git cannot restore the paths.
+    pub fn apply_stash_paths(
+        &self,
+        repository: &WorktreeRepository,
+        reference: &str,
+        paths: &[GitPath],
+    ) -> Result<(), GitStatusError> {
+        if !stash_apply_source_is_safe(reference) {
+            return Err(GitStatusError::UnsafePath);
+        }
+        if paths.is_empty() {
+            return Err(GitStatusError::CommandFailed(
+                "No stash paths to apply.".into(),
+            ));
+        }
+        for path in paths {
+            if path.0.starts_with(b"/")
+                || path.0.split(|byte| *byte == b'/').any(|part| part == b"..")
+            {
+                return Err(GitStatusError::UnsafePath);
+            }
+        }
+        let mut args = vec![
+            OsString::from("restore"),
+            OsString::from(format!("--source={reference}")),
+            OsString::from("--worktree"),
+            OsString::from("--staged"),
+            OsString::from("--"),
+        ];
+        args.extend(paths.iter().map(|path| OsString::from_vec(path.0.clone())));
         self.mutate(repository, args)
     }
 
@@ -2415,6 +2602,150 @@ impl RepositoryDiscoverer for GitExecutable {
     }
 }
 
+impl GitRefQuery for GitExecutable {
+    fn head_status(&self, repository: &WorktreeRepository) -> Result<HeadStatus, GitBackendError> {
+        Self::head_status(self, repository).map_err(GitBackendError::from)
+    }
+
+    fn head_oid(&self, repository: &WorktreeRepository) -> Result<String, GitBackendError> {
+        Self::head_oid(self, repository).map_err(GitBackendError::from)
+    }
+
+    fn ref_snapshot(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<RefSnapshot, GitBackendError> {
+        Self::ref_snapshot(self, repository).map_err(GitBackendError::from)
+    }
+
+    fn worktree_status(
+        &self,
+        repository: &WorktreeRepository,
+        include_ignored: bool,
+    ) -> Result<WorktreeStatus, GitBackendError> {
+        Self::worktree_status(self, repository, include_ignored).map_err(GitBackendError::from)
+    }
+}
+
+impl GitHistoryQuery for GitExecutable {
+    fn history_page(
+        &self,
+        repository: &WorktreeRepository,
+        request: &HistoryRequest,
+    ) -> Result<HistoryPage, GitBackendError> {
+        Self::history_page(self, repository, request).map_err(GitBackendError::from)
+    }
+}
+
+impl GitObjectQuery for GitExecutable {
+    fn tree_entries(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+        path: &GitPath,
+    ) -> Result<Vec<TreeEntry>, GitBackendError> {
+        Self::tree_entries(self, repository, oid, path).map_err(GitBackendError::from)
+    }
+
+    fn file_at_revision(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+        path: &GitPath,
+    ) -> Result<Vec<u8>, GitBackendError> {
+        Self::file_at_revision(self, repository, oid, path).map_err(GitBackendError::from)
+    }
+
+    fn file_diff_with_limit(
+        &self,
+        repository: &WorktreeRepository,
+        path: &GitPath,
+        staged: bool,
+        limit: usize,
+    ) -> Result<LoadedDiff, GitBackendError> {
+        Self::file_diff_with_limit(self, repository, path, staged, limit)
+            .map_err(GitBackendError::from)
+    }
+
+    fn commit_diff(
+        &self,
+        repository: &WorktreeRepository,
+        oid: &str,
+    ) -> Result<LoadedDiff, GitBackendError> {
+        Self::commit_diff(self, repository, oid).map_err(GitBackendError::from)
+    }
+
+    fn diff_refs(
+        &self,
+        repository: &WorktreeRepository,
+        left: &str,
+        right: &str,
+    ) -> Result<LoadedDiff, GitBackendError> {
+        Self::diff_refs(self, repository, left, right).map_err(GitBackendError::from)
+    }
+
+    fn diff_numstat(
+        &self,
+        repository: &WorktreeRepository,
+    ) -> Result<std::collections::HashMap<GitPath, (u64, u64)>, GitBackendError> {
+        Self::diff_numstat(self, repository).map_err(GitBackendError::from)
+    }
+}
+
+impl GitIndexMutate for GitExecutable {
+    fn stage_paths(
+        &self,
+        repository: &WorktreeRepository,
+        paths: &[GitPath],
+    ) -> Result<(), GitBackendError> {
+        Self::stage_paths(self, repository, paths).map_err(GitBackendError::from)
+    }
+
+    fn unstage_paths(
+        &self,
+        repository: &WorktreeRepository,
+        paths: &[GitPath],
+    ) -> Result<(), GitBackendError> {
+        Self::unstage_paths(self, repository, paths).map_err(GitBackendError::from)
+    }
+
+    fn stage_all(&self, repository: &WorktreeRepository) -> Result<(), GitBackendError> {
+        Self::stage_all(self, repository).map_err(GitBackendError::from)
+    }
+
+    fn unstage_all(&self, repository: &WorktreeRepository) -> Result<(), GitBackendError> {
+        Self::unstage_all(self, repository).map_err(GitBackendError::from)
+    }
+
+    fn commit(
+        &self,
+        repository: &WorktreeRepository,
+        request: &CommitRequest,
+    ) -> Result<(), GitBackendError> {
+        Self::commit(self, repository, request).map_err(GitBackendError::from)
+    }
+}
+
+impl GitNetwork for GitExecutable {
+    fn fetch_remote(
+        &self,
+        repository: &WorktreeRepository,
+        remote: &str,
+        _interrupt: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), GitBackendError> {
+        Self::fetch_remote(self, repository, remote).map_err(GitBackendError::from)
+    }
+
+    fn clone_repository(
+        &self,
+        source: &str,
+        destination: &std::path::Path,
+        _interrupt: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), GitBackendError> {
+        Self::clone_repository(self, source, destination).map_err(GitBackendError::from)
+    }
+}
+
 #[derive(Debug)]
 pub struct GitChild(Child);
 
@@ -2547,15 +2878,20 @@ fn trim_oid(bytes: &[u8]) -> Option<Vec<u8>> {
     (!oid.is_empty()).then_some(oid)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LoadedDiff {
-    pub diff: UnifiedDiff,
-    pub truncated: bool,
-}
-
 impl From<io::Error> for GitStatusError {
     fn from(error: io::Error) -> Self {
         Self::Io(error)
+    }
+}
+
+impl From<GitStatusError> for GitBackendError {
+    fn from(error: GitStatusError) -> Self {
+        let message = match error {
+            GitStatusError::CommandFailed(message) => message,
+            GitStatusError::Io(error) => error.to_string(),
+            other => format!("{other:?}"),
+        };
+        Self::from_message(message)
     }
 }
 
@@ -3181,6 +3517,43 @@ fn parse_lfs_status(bytes: &[u8]) -> Result<Vec<LfsEntry>, GitStatusError> {
         .collect()
 }
 
+fn snapshot_stash_message(message: Option<&str>) -> Result<String, GitStatusError> {
+    let trimmed = message.map_or("", str::trim);
+    if trimmed.starts_with('-') || trimmed.contains('=') || trimmed.contains('\n') {
+        return Err(GitStatusError::UnsafePath);
+    }
+    if trimmed.is_empty() {
+        return Ok("snapshot".into());
+    }
+    if trimmed == "snapshot" || trimmed.starts_with("snapshot: ") {
+        Ok(trimmed.to_owned())
+    } else {
+        Ok(format!("snapshot: {trimmed}"))
+    }
+}
+
+fn is_no_local_changes(error: &GitStatusError) -> bool {
+    match error {
+        GitStatusError::CommandFailed(message) => message
+            .to_ascii_lowercase()
+            .contains("no local changes to save"),
+        _ => false,
+    }
+}
+
+fn stash_apply_source_is_safe(reference: &str) -> bool {
+    if reference.is_empty() || reference.starts_with('-') || reference.contains('=') {
+        return false;
+    }
+    if let Some(index) = reference
+        .strip_prefix("stash@{")
+        .and_then(|value| value.strip_suffix('}'))
+    {
+        return !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit());
+    }
+    (7..=40).contains(&reference.len()) && reference.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn parse_stash_records(bytes: &[u8]) -> Result<Vec<StashEntry>, GitStatusError> {
     bytes
         .split(|byte| *byte == 0x1e)
@@ -3454,9 +3827,11 @@ fn git_candidates() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use std::{
+        ffi::OsString,
         fs,
         io::{Cursor, Read},
         os::unix::fs::PermissionsExt,
+        path::Path,
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
     };
@@ -3560,6 +3935,38 @@ stash@{1}\09f8e7d6c5b4a39281706050403020100ffeeddcc\0WIP on main: 1a2b3c first c
     fn parses_stash_list_records_with_truncated_fields() {
         let error = parse_stash_records(b"stash@{0}\0oid\0subject").expect_err("should fail");
         assert!(matches!(error, GitStatusError::ParseStash));
+    }
+
+    #[test]
+    fn stash_apply_source_rejects_path_injection() {
+        assert!(super::stash_apply_source_is_safe("stash@{0}"));
+        assert!(super::stash_apply_source_is_safe("stash@{12}"));
+        assert!(super::stash_apply_source_is_safe("abcdef0"));
+        assert!(!super::stash_apply_source_is_safe("stash@{0}^2"));
+        assert!(!super::stash_apply_source_is_safe("main"));
+        assert!(!super::stash_apply_source_is_safe("--source=HEAD"));
+        assert!(!super::stash_apply_source_is_safe("stash@{0};rm"));
+        assert!(!super::stash_apply_source_is_safe(""));
+    }
+
+    #[test]
+    fn snapshot_stash_message_prefixes_and_rejects_flags() {
+        assert_eq!(
+            super::snapshot_stash_message(None).expect("default"),
+            "snapshot"
+        );
+        assert_eq!(
+            super::snapshot_stash_message(Some("  wip  ")).expect("named"),
+            "snapshot: wip"
+        );
+        assert_eq!(
+            super::snapshot_stash_message(Some("snapshot: keep")).expect("keep"),
+            "snapshot: keep"
+        );
+        assert!(matches!(
+            super::snapshot_stash_message(Some("-m evil")).expect_err("flag"),
+            GitStatusError::UnsafePath
+        ));
     }
 
     #[test]
@@ -4508,6 +4915,90 @@ index 1111111..2222222 100644\n\
     }
 
     #[test]
+    fn stash_snapshot_keeps_the_working_copy() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("fixture.txt"), "still dirty").expect("dirty");
+        let worktree = worktree_of(&repository);
+        repository
+            .git
+            .create_stash_snapshot(
+                &worktree,
+                &CreateStashRequest {
+                    message: Some("checkpoint".into()),
+                    ..CreateStashRequest::default()
+                },
+            )
+            .expect("snapshot");
+        assert_eq!(
+            fs::read_to_string(repository.path.join("fixture.txt")).expect("file"),
+            "still dirty"
+        );
+        let stashes = repository.git.stash_list(&worktree).expect("list");
+        assert_eq!(stashes.len(), 1);
+        let subject = String::from_utf8_lossy(&stashes[0].subject);
+        assert!(
+            subject.contains("snapshot: checkpoint"),
+            "unexpected subject: {subject}"
+        );
+        assert!(matches!(
+            repository
+                .git
+                .create_stash_snapshot(
+                    &worktree,
+                    &CreateStashRequest {
+                        message: Some("-bad".into()),
+                        ..CreateStashRequest::default()
+                    },
+                )
+                .expect_err("flag messages are refused"),
+            GitStatusError::UnsafePath
+        ));
+    }
+
+    #[test]
+    fn stash_snapshot_with_untracked_restores_the_file() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("untracked.txt"), "keep me").expect("untracked");
+        let worktree = worktree_of(&repository);
+        repository
+            .git
+            .create_stash_snapshot(
+                &worktree,
+                &CreateStashRequest {
+                    message: Some("with untracked".into()),
+                    include_untracked: true,
+                    ..CreateStashRequest::default()
+                },
+            )
+            .expect("snapshot untracked");
+        assert_eq!(
+            fs::read_to_string(repository.path.join("untracked.txt")).expect("file"),
+            "keep me"
+        );
+        assert_eq!(
+            fs::read_to_string(repository.path.join("fixture.txt")).expect("tracked"),
+            "initial"
+        );
+        assert_eq!(repository.git.stash_list(&worktree).expect("list").len(), 1);
+    }
+
+    #[test]
+    fn stash_snapshot_refuses_a_clean_worktree() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        let worktree = worktree_of(&repository);
+        assert!(matches!(
+            repository
+                .git
+                .create_stash_snapshot(&worktree, &CreateStashRequest::default())
+                .expect_err("clean tree"),
+            GitStatusError::CommandFailed(message) if message.to_ascii_lowercase().contains("no local changes")
+        ));
+    }
+
+    #[test]
     fn lists_stashes_and_applies_pops_drops_by_reference() {
         let repository = Repository::new();
         repository.commit("initial");
@@ -4592,6 +5083,209 @@ index 1111111..2222222 100644\n\
             fs::read_to_string(repository.path.join("fixture.txt")).expect("file should exist"),
             "second change"
         );
+    }
+
+    #[test]
+    fn applies_selected_paths_from_a_stash_without_dropping_it() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("a.txt"), "a").expect("a");
+        fs::write(repository.path.join("b.txt"), "b").expect("b");
+        repository.success(["add", "a.txt", "b.txt"]);
+        repository.success(["commit", "-m", "two files"]);
+        fs::write(repository.path.join("a.txt"), "stashed-a").expect("a");
+        fs::write(repository.path.join("b.txt"), "stashed-b").expect("b");
+        let worktree = worktree_of(&repository);
+        repository
+            .git
+            .create_stash(
+                &worktree,
+                &CreateStashRequest {
+                    message: Some("both".into()),
+                    ..CreateStashRequest::default()
+                },
+            )
+            .expect("stash both files");
+        assert_eq!(
+            fs::read_to_string(repository.path.join("a.txt")).expect("a"),
+            "a"
+        );
+        assert_eq!(
+            fs::read_to_string(repository.path.join("b.txt")).expect("b"),
+            "b"
+        );
+        let stashes = repository.git.stash_list(&worktree).expect("list");
+        repository
+            .git
+            .apply_stash_paths(
+                &worktree,
+                &stashes[0].reference,
+                &[GitPath(b"a.txt".to_vec())],
+            )
+            .expect("partial apply");
+        assert_eq!(
+            fs::read_to_string(repository.path.join("a.txt")).expect("a"),
+            "stashed-a"
+        );
+        assert_eq!(
+            fs::read_to_string(repository.path.join("b.txt")).expect("b"),
+            "b"
+        );
+        let after = repository.git.stash_list(&worktree).expect("list after");
+        assert_eq!(after.len(), 1);
+        assert!(matches!(
+            repository
+                .git
+                .apply_stash_paths(&worktree, "main", &[GitPath(b"a.txt".to_vec())])
+                .expect_err("branch names are refused"),
+            GitStatusError::UnsafePath
+        ));
+        assert!(matches!(
+            repository
+                .git
+                .apply_stash_paths(&worktree, "stash@{0}", &[GitPath(b"../outside".to_vec())],)
+                .expect_err("parent paths are refused"),
+            GitStatusError::UnsafePath
+        ));
+    }
+
+    #[test]
+    fn autostash_switch_carries_wip_onto_the_other_branch() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("a.txt"), "a").expect("a");
+        repository.success(["add", "a.txt"]);
+        repository.success(["commit", "-m", "add a"]);
+        let worktree = worktree_of(&repository);
+        repository
+            .git
+            .create_branch(&worktree, "topic", None)
+            .expect("topic");
+        repository
+            .git
+            .checkout_branch(&worktree, "main")
+            .expect("main");
+        fs::write(repository.path.join("a.txt"), "wip").expect("wip");
+        repository
+            .git
+            .maybe_autostash(&worktree, true, |git| {
+                git.checkout_branch(&worktree, "topic")
+            })
+            .expect("autostash switch");
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status");
+        assert_eq!(
+            status.branch.head,
+            HeadStatus::Branch(GitPath(b"topic".to_vec()))
+        );
+        assert_eq!(
+            fs::read_to_string(repository.path.join("a.txt")).expect("a"),
+            "wip"
+        );
+        assert!(
+            repository
+                .git
+                .stash_list(&worktree)
+                .expect("stashes")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn autostash_switch_allows_overlapping_dirty_checkout() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("a.txt"), "shared").expect("shared");
+        repository.success(["add", "a.txt"]);
+        repository.success(["commit", "-m", "shared a"]);
+        let worktree = worktree_of(&repository);
+        repository
+            .git
+            .create_branch(&worktree, "topic", None)
+            .expect("topic");
+        fs::write(repository.path.join("a.txt"), "topic").expect("topic");
+        repository.success(["add", "a.txt"]);
+        repository.success(["commit", "-m", "topic a"]);
+        repository
+            .git
+            .checkout_branch(&worktree, "main")
+            .expect("back to main");
+        fs::write(repository.path.join("a.txt"), "wip").expect("wip");
+        assert!(
+            repository.git.checkout_branch(&worktree, "topic").is_err(),
+            "overlapping dirty checkout should fail without autostash"
+        );
+        let _ = repository.git.maybe_autostash(&worktree, true, |git| {
+            git.checkout_branch(&worktree, "topic")
+        });
+        let status = repository
+            .git
+            .worktree_status(&worktree, false)
+            .expect("status");
+        assert_eq!(
+            status.branch.head,
+            HeadStatus::Branch(GitPath(b"topic".to_vec()))
+        );
+    }
+
+    #[test]
+    fn pull_autostash_keeps_a_dirty_file_the_remote_did_not_touch() {
+        let repository = Repository::new();
+        repository.commit("initial");
+        fs::write(repository.path.join("a.txt"), "a").expect("a");
+        repository.success(["add", "a.txt"]);
+        repository.success(["commit", "-m", "add a"]);
+        let remote = repository.path.with_extension("autostash-pull.git");
+        repository.success([
+            "clone",
+            "--bare",
+            ".",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        repository.success([
+            "remote",
+            "add",
+            "origin",
+            remote.to_str().expect("temporary path is UTF-8"),
+        ]);
+        let worktree = worktree_of(&repository);
+        repository
+            .git
+            .publish_branch(&worktree, "origin", "main")
+            .expect("upstream");
+        fs::write(repository.path.join("a.txt"), "wip").expect("wip");
+        let collaborator = repository.path.with_extension("autostash-pull-collab");
+        repository.success([
+            "clone",
+            remote.to_str().expect("temporary path is UTF-8"),
+            collaborator.to_str().expect("temporary path is UTF-8"),
+        ]);
+        let collaborator_repository = Repository::at(collaborator.clone());
+        collaborator_repository.commit("remote change");
+        collaborator_repository.success(["push"]);
+        repository
+            .git
+            .pull_current(&worktree, true)
+            .expect("autostash pull");
+        assert_eq!(
+            fs::read_to_string(repository.path.join("a.txt")).expect("a"),
+            "wip"
+        );
+        assert_eq!(
+            fs::read_to_string(repository.path.join("fixture.txt")).expect("fixture"),
+            "remote change"
+        );
+        assert!(
+            repository
+                .git
+                .stash_list(&worktree)
+                .expect("stashes")
+                .is_empty()
+        );
+        let _ = fs::remove_dir_all(remote);
+        let _ = fs::remove_dir_all(collaborator);
     }
 
     #[test]
@@ -4718,6 +5412,62 @@ index 1111111..2222222 100644\n\
             .expect("modified LFS file should be listed");
         assert_eq!(entry.index_status, b' ');
         assert_eq!(entry.worktree_status, b'M');
+    }
+
+    #[test]
+    fn fetches_and_pulls_lfs_objects_from_a_local_remote() {
+        let source = Repository::new();
+        let probe = source
+            .git
+            .run(&source.path, ["lfs", "version"])
+            .expect("Git LFS probe should run");
+        if !probe.status.success() {
+            return;
+        }
+        source.success(["lfs", "track", "*.bin"]);
+        fs::write(source.path.join("large.bin"), b"lfs-payload").expect("LFS file should write");
+        source.success(["add", ".gitattributes", "large.bin"]);
+        source.success(["commit", "-m", "add LFS file"]);
+        let destination = source.path.with_extension("lfs-clone");
+        let clone = source
+            .git
+            .run_env(
+                source.path.parent().unwrap_or_else(|| Path::new(".")),
+                [(OsString::from("GIT_LFS_SKIP_SMUDGE"), OsString::from("1"))],
+                [
+                    OsString::from("clone"),
+                    source.path.as_os_str().to_os_string(),
+                    destination.as_os_str().to_os_string(),
+                ],
+            )
+            .expect("skip-smudge clone should run");
+        assert!(
+            clone.status.success(),
+            "skip-smudge clone should complete: {clone:?}"
+        );
+        let dest = Repository::at(destination);
+        let pointer = fs::read_to_string(dest.path.join("large.bin")).expect("cloned pointer");
+        assert!(
+            pointer.contains("git-lfs"),
+            "skip-smudge clone should keep an LFS pointer, got {pointer:?}"
+        );
+        let RepositoryLocation::Worktree(worktree) = dest
+            .git
+            .discover_repository(&dest.path)
+            .expect("clone should be a worktree")
+        else {
+            panic!("clone should be a working tree");
+        };
+        dest.git
+            .lfs_fetch(&worktree, Some("origin"))
+            .expect("LFS fetch should download objects");
+        dest.git
+            .lfs_pull(&worktree, Some("origin"))
+            .expect("LFS pull should check out objects");
+        assert_eq!(
+            fs::read(dest.path.join("large.bin")).expect("pulled file"),
+            b"lfs-payload"
+        );
     }
 
     #[test]
@@ -5279,7 +6029,7 @@ index 1111111..2222222 100644\n\
         collaborator_repository.success(["push"]);
         repository
             .git
-            .pull_current(&worktree)
+            .pull_current(&worktree, false)
             .expect("pull should apply the configured upstream");
         let _ = fs::remove_dir_all(remote);
         let _ = fs::remove_dir_all(collaborator);

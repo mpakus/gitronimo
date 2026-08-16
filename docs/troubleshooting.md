@@ -42,6 +42,22 @@ Full shortcut and selection rules: [`keyboard-shortcuts.md`](keyboard-shortcuts.
 
 GPUI 0.2.2 does not expose macOS accessibility roles or programmatic labels for its custom elements, so VoiceOver parity is a known beta limitation. It will need framework support before Gitronimo can provide a complete assistive-technology experience.
 
+## Git LFS fetch or pull failed
+
+The Git LFS view runs the installed `git lfs` client (`fetch` downloads objects; `pull` also checks them out). Install Git LFS if the command is missing. Operations use the first configured remote and can be cancelled from the activity bar. Credentials follow your Git helper, same as remotes.
+
+## Stash files did not apply
+
+**Apply selected files** (or dragging stash files onto Working Copy) restores those paths from the stash without dropping it. Select files in the stash changeset first. Deleted paths and some rename cases may fail because Git `restore` needs a path that exists in the stash tree. Use **Apply…** for the full stash. Parent (`..`) and absolute paths are refused.
+
+## Snapshot vs stash
+
+**Save snapshot…** keeps your working copy and adds a named entry to the stash list (subject starts with `snapshot`). **Save stash** resets the working copy. A clean tree cannot snapshot. Messages starting with `-` are refused.
+
+## Auto-stash left conflicts or a leftover stash
+
+Settings **Auto-stash before switch and pull** is off until you turn it on. Switch stashes including untracked files, then pops; pull passes Git `--autostash`. If reapplying conflicts, resolve them on Working Copy. The stash entry (subject `gitronimo autostash before switch`, or Git's autostash for pull) stays until you drop it.
+
 ## Build toolchain
 
 GitRonimo requires **Rust 1.97+** (`edition2024`). If `cargo build` fails with an edition error, install the pinned toolchain:
@@ -57,6 +73,10 @@ The debug/release binary is `target/debug/GitRonimo` (crate `gitronimo-desktop`)
 ## Unsigned app / Gatekeeper
 
 Local and CI development bundles are unsigned `GitRonimo.app`. macOS Gatekeeper may block first launch. That is expected until a Developer ID signed, notarized tag release. Do not disable Gatekeeper globally; use the signing handoff in packaging.md for distribution.
+
+## In-app update failed or refused
+
+Settings **In-app updates** stays off until you turn it on. **Check now** only runs when that toggle is on; GitRonimo does not poll GitHub on launch. Install requires a real `GitRonimo.app` (not `cargo run`). The zip must match `SHA256SUMS.txt`, and the extracted app must pass Gatekeeper. Unsigned local zips are refused. After a successful install, quit and open `GitRonimo.app` again.
 
 ## About GitRonimo
 

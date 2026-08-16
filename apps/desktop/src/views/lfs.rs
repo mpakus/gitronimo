@@ -64,6 +64,20 @@ impl GitronimoApp {
                     .text_color(colors.text_secondary)
                     .child("Changed LFS paths reported by the installed Git LFS client."),
             )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(colors.text_muted)
+                    .child(
+                        "Fetch downloads objects. Pull downloads them and checks them out into the working copy.",
+                    ),
+            )
+            .child(file_action_button("Fetch LFS", colors, cx, |app, cx| {
+                app.fetch_lfs(cx);
+            }))
+            .child(file_action_button("Pull LFS", colors, cx, |app, cx| {
+                app.pull_lfs(cx);
+            }))
             .child(file_action_button("Working Copy", colors, cx, |app, cx| {
                 app.navigate_to(RepositoryView::WorkingCopy, cx);
             }))

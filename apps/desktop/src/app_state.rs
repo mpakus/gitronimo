@@ -8,7 +8,7 @@ use std::{
     collections::{BTreeSet, VecDeque},
     path::{Path, PathBuf},
     process::Command,
-    sync::{Arc, Mutex, mpsc::Receiver},
+    sync::{Arc, Mutex, atomic::AtomicBool, mpsc::Receiver},
     time::SystemTime,
 };
 
@@ -21,7 +21,7 @@ use git_domain::{
 };
 use gpui::{FocusHandle, ListState, WindowAppearance};
 use notify::RecommendedWatcher;
-use ui_kit::Appearance;
+use ui_kit::{Appearance, ThemeColors};
 
 pub(crate) const MINIMUM_PANE_WIDTH: f32 = 180.0;
 pub(crate) const MAXIMUM_PANE_WIDTH: f32 = 440.0;
@@ -73,6 +73,7 @@ pub(crate) fn classify_activity(message: &str) -> ActivityKind {
         || lower.starts_with("unpinned ")
         || lower.starts_with("archived ")
         || lower.starts_with("unarchived ")
+        || lower.starts_with("update installed")
         || lower.ends_with(" saved.")
         || lower.ends_with(" created.")
         || lower.ends_with(" deleted.")
@@ -99,6 +100,7 @@ pub(crate) enum LastAction {
 pub(crate) struct OpenedRepository {
     pub repository: WorktreeRepository,
     pub recents: Vec<PathBuf>,
+    pub git_fallback: Option<String>,
 }
 
 /// Which welcome-screen surface is active before a repository is opened.
@@ -173,6 +175,7 @@ pub(crate) struct NetworkOperation {
     pub label: String,
     pub child: Option<git_cli::GitChild>,
     pub cancelled: bool,
+    pub interrupt: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -199,6 +202,8 @@ pub(crate) enum AppConfirmDialog {
         targets: String,
         strategy: String,
     },
+    /// Replace this GitRonimo.app with a verified GitHub release zip.
+    InstallUpdate { version: String },
 }
 
 impl AppConfirmDialog {
@@ -209,6 +214,7 @@ impl AppConfirmDialog {
             Self::RevertCommit { .. } => "Revert Commit".into(),
             Self::DropCommit { .. } => "Delete Commit".into(),
             Self::FinishTopic { .. } => "Finish Topic Branch".into(),
+            Self::InstallUpdate { .. } => "Install Update".into(),
         }
     }
 
@@ -241,6 +247,9 @@ impl AppConfirmDialog {
             } => format!(
                 "Finish {label} \"{branch}\" into {targets} using {strategy}? The topic branch is deleted after a successful finish."
             ),
+            Self::InstallUpdate { version } => format!(
+                "Download and install GitRonimo {version}? The zip is verified with SHA-256 and Gatekeeper before this app is replaced. Quit and reopen GitRonimo afterward."
+            ),
         }
     }
 
@@ -254,6 +263,7 @@ impl AppConfirmDialog {
             Self::HardReset { .. } => "Reset",
             Self::RevertCommit { .. } => "Revert",
             Self::FinishTopic { .. } => "Finish",
+            Self::InstallUpdate { .. } => "Install",
         }
     }
 }
@@ -308,8 +318,9 @@ pub(crate) enum TextPromptKind {
     CreateTag {
         start: String,
     },
-    /// Save stash: prompt value is the message; options carry untracked + paths.
+    /// Save stash or snapshot: prompt value is the message; options carry untracked + paths.
     CreateStash {
+        snapshot: bool,
         include_untracked: bool,
         paths: Vec<GitPath>,
     },
@@ -456,6 +467,7 @@ pub(crate) enum PaletteCommand {
     AmendLastCommit,
     SaveStash,
     SaveStashUntracked,
+    SaveStashSnapshot,
     ApplyLatestStash,
     CreateBranch,
     CreateTag,
@@ -473,6 +485,7 @@ pub(crate) enum PaletteCommand {
     CommitDetail,
     ShowStashes,
     ApplySelectedStash,
+    ApplySelectedStashFiles,
     BranchFromSelectedStash,
     PopSelectedStash,
     DropSelectedStash,
@@ -482,6 +495,8 @@ pub(crate) enum PaletteCommand {
     ShowPullRequests,
     ShowBranchesReview,
     GitLfsStatus,
+    FetchGitLfs,
+    PullGitLfs,
     ShowReflog,
     FileHistory,
     Blame,
@@ -507,6 +522,7 @@ pub(crate) enum PaletteCommand {
     NavigateBack,
     NavigateForward,
     AboutGitRonimo,
+    CheckForUpdates,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -646,8 +662,13 @@ pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
         "Save stash including untracked…",
         PaletteCommand::SaveStashUntracked,
     ),
+    ("Save stash snapshot…", PaletteCommand::SaveStashSnapshot),
     ("Apply latest stash…", PaletteCommand::ApplyLatestStash),
     ("Apply selected stash…", PaletteCommand::ApplySelectedStash),
+    (
+        "Apply selected stash files",
+        PaletteCommand::ApplySelectedStashFiles,
+    ),
     (
         "Branch from selected stash…",
         PaletteCommand::BranchFromSelectedStash,
@@ -699,6 +720,8 @@ pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
     ("Show pull requests", PaletteCommand::ShowPullRequests),
     ("Branches review", PaletteCommand::ShowBranchesReview),
     ("Git LFS status", PaletteCommand::GitLfsStatus),
+    ("Fetch Git LFS objects", PaletteCommand::FetchGitLfs),
+    ("Pull Git LFS objects", PaletteCommand::PullGitLfs),
     ("Show reflog", PaletteCommand::ShowReflog),
     ("File history…", PaletteCommand::FileHistory),
     ("Blame…", PaletteCommand::Blame),
@@ -730,6 +753,7 @@ pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
     ("Navigate back", PaletteCommand::NavigateBack),
     ("Navigate forward", PaletteCommand::NavigateForward),
     ("About GitRonimo", PaletteCommand::AboutGitRonimo),
+    ("Check for updates", PaletteCommand::CheckForUpdates),
 ];
 
 impl PaletteCommand {
@@ -758,7 +782,9 @@ mod palette_tests {
             "Sync",
             "Stage all",
             "Save stash…",
+            "Save stash snapshot…",
             "Apply selected stash…",
+            "Apply selected stash files",
             "Create branch…",
             "Create tag…",
             "Amend last commit",
@@ -769,6 +795,9 @@ mod palette_tests {
             "Quick open file…",
             "Message history",
             "About GitRonimo",
+            "Check for updates",
+            "Fetch Git LFS objects",
+            "Pull Git LFS objects",
         ] {
             assert!(
                 labels.contains(&expected),
@@ -836,6 +865,15 @@ impl Mutation {
 pub(crate) enum StashAction {
     Pop,
     Drop,
+}
+
+/// In-window drag payload for applying selected stash paths onto Working Copy.
+#[derive(Clone)]
+pub(crate) struct StashPathDrag {
+    pub reference: String,
+    pub paths: Vec<GitPath>,
+    pub label: String,
+    pub colors: ThemeColors,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -961,6 +999,7 @@ pub(crate) struct GitronimoApp {
     pub selected_stash: Option<usize>,
     pub stash_selection_token: u64,
     pub selected_stash_paths: Vec<GitPath>,
+    pub stash_apply_selection: Vec<GitPath>,
     pub selected_stash_diff: Option<LoadedDiff>,
     pub pending_stash_action_ref: Option<(StashAction, String, String)>,
     pub reflog: Vec<ReflogEntry>,
@@ -1007,6 +1046,13 @@ pub(crate) struct GitronimoApp {
     pub watcher: Option<RecommendedWatcher>,
     pub watch_events: Option<Receiver<()>>,
     pub store: app_core::RecentRepositoryStore,
+    /// Settings override: skip `gix` and spawn the installed Git executable.
+    pub use_system_git: bool,
+    /// Settings: stash dirty work before switch and pull, then reapply it.
+    pub auto_stash: bool,
+    /// Settings: check GitHub Releases and replace this `.app` (off by default).
+    pub in_app_updates: bool,
+    pub pending_app_update: Option<crate::app_update::PendingAppUpdate>,
     pub diagnostics: String,
     pub subscriptions: Vec<gpui::Subscription>,
     pub column_width: f32,
@@ -1279,5 +1325,17 @@ mod tests {
         assert!(dialog.body().contains("feature/login"));
         assert!(dialog.body().contains("main"));
         assert_eq!(dialog.confirm_label(), "Finish");
+    }
+
+    #[test]
+    fn install_update_dialog_copy() {
+        let dialog = AppConfirmDialog::InstallUpdate {
+            version: "1.0.1".into(),
+        };
+        assert_eq!(dialog.title(), "Install Update");
+        assert!(dialog.body().contains("1.0.1"));
+        assert!(dialog.body().contains("SHA-256"));
+        assert!(dialog.body().contains("Gatekeeper"));
+        assert_eq!(dialog.confirm_label(), "Install");
     }
 }

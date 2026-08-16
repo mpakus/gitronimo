@@ -9,7 +9,16 @@ use git_domain::{
 };
 use serde_json::Value;
 
+mod releases;
+
+pub use releases::{
+    GITRONIMO_GITHUB_REPO, LatestRelease, ProductVersion, download_url_is_allowed,
+    is_safe_asset_filename, parse_latest_release, parse_product_version, sha256_for_filename,
+    version_is_newer, zip_name_for_tag,
+};
+
 const ACCEPT_HEADER: &str = "Accept: application/vnd.github+json";
+const USER_AGENT_HEADER: &str = "User-Agent: GitRonimo";
 
 #[derive(Clone, Debug)]
 pub struct GitHubService {
@@ -31,12 +40,29 @@ impl GitHubService {
     }
 
     fn request_json(&self, token: &str, path: &str) -> Result<Value, HostingError> {
-        self.request_json_with(token, "GET", path, None)
+        self.request_json_with(Some(token), "GET", path, None)
+    }
+
+    /// Latest stable GitHub release. Unauthenticated; do not send a PAT.
+    ///
+    /// # Errors
+    /// Network, HTTP, or JSON errors from GitHub, including a missing zip/sums pair.
+    pub fn latest_release(&self, owner_repo: &str) -> Result<LatestRelease, HostingError> {
+        if !releases::is_owner_repo(owner_repo) {
+            return Err(HostingError::Parse);
+        }
+        let value = self.request_json_with(
+            None,
+            "GET",
+            &format!("/repos/{owner_repo}/releases/latest"),
+            None,
+        )?;
+        parse_latest_release(&value)
     }
 
     fn request_json_with(
         &self,
-        token: &str,
+        token: Option<&str>,
         method: &str,
         path: &str,
         body: Option<Value>,
@@ -46,7 +72,6 @@ impl GitHubService {
             self.api_base.trim_end_matches('/'),
             path.trim_start_matches('/')
         );
-        let authorization = format!("Authorization: Bearer {token}");
         let mut args = vec![
             OsString::from("--silent"),
             OsString::from("--show-error"),
@@ -56,8 +81,12 @@ impl GitHubService {
             OsString::from("--header"),
             OsString::from(ACCEPT_HEADER),
             OsString::from("--header"),
-            OsString::from(authorization),
+            OsString::from(USER_AGENT_HEADER),
         ];
+        if let Some(token) = token {
+            args.push(OsString::from("--header"));
+            args.push(OsString::from(format!("Authorization: Bearer {token}")));
+        }
         if let Some(body) = body {
             args.push(OsString::from("--header"));
             args.push(OsString::from("Content-Type: application/json"));
@@ -186,7 +215,7 @@ impl HostingService for GitHubService {
         base: &str,
     ) -> Result<PullRequestSummary, HostingError> {
         let value = self.request_json_with(
-            token,
+            Some(token),
             "POST",
             &format!("/repos/{}/pulls", repository.full_name),
             Some(serde_json::json!({
@@ -207,7 +236,7 @@ impl HostingService for GitHubService {
         body: &str,
     ) -> Result<PullRequestComment, HostingError> {
         let value = self.request_json_with(
-            token,
+            Some(token),
             "POST",
             &format!("/repos/{}/issues/{number}/comments", repository.full_name),
             Some(serde_json::json!({ "body": body })),
@@ -223,7 +252,7 @@ impl HostingService for GitHubService {
         method: MergeMethod,
     ) -> Result<(), HostingError> {
         self.request_json_with(
-            token,
+            Some(token),
             "PUT",
             &format!("/repos/{}/pulls/{number}/merge", repository.full_name),
             Some(serde_json::json!({ "merge_method": method.api_name() })),

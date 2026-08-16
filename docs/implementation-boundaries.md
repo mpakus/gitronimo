@@ -3,7 +3,8 @@
 The current crates are the boundaries required for the desktop app:
 
 - `git_domain`: pure types (no GPUI);
-- `app_core`: application use cases and ports;
+- `app_core`: application use cases and ports (`RepositoryDiscoverer`, `GitRefQuery`, `GitHistoryQuery`, `GitObjectQuery`, `GitIndexMutate`, `GitNetwork`);
+- `git_gix`: gitoxide `gix` adapter (ADR 0003; no GPUI);
 - `git_cli`: installed-Git adapter (typed `Command` arguments only);
 - `ui_kit`: project-owned GPUI primitives and theme (no `gpui-component`; see ADR 0001);
 - `platform_macos`: Keychain-backed secret store and AppKit file-URL drag-out (ADR 0002);
@@ -11,5 +12,5 @@ The current crates are the boundaries required for the desktop app:
 - `gitronimo-desktop`: macOS composition root (binary **GitRonimo**);
 - `test_support`: deterministic Git fixtures.
 
-Do not import GPUI in `git_domain`. Do not run Git or filesystem work inside GPUI `Render` implementations. GitHub tokens stay in Keychain via `platform_macos`; they are never written to preferences, activity, or crash reports.
+Do not import GPUI in `git_domain`. Do not import `gix` outside `git_gix`. Desktop talks to Git through `apps/desktop/src/git_backend.rs` for migrated ports; unmigrated operations still use `git_cli` with typed `Command` arguments. Do not run Git or filesystem work inside GPUI `Render` implementations. GitHub tokens stay in Keychain via `platform_macos`; they are never written to preferences, activity, or crash reports.
 

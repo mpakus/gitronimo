@@ -10,7 +10,8 @@ use ui_kit::ThemeColors;
 use git_domain::{HeadStatus, HistoryReference, NamedRef};
 
 use crate::app_state::{
-    ChoicePromptKind, GitronimoApp, RefContext, RefKind, WelcomeRepoSnapshot, WelcomeShellView,
+    ChoicePromptKind, GitronimoApp, RefContext, RefKind, StashPathDrag, WelcomeRepoSnapshot,
+    WelcomeShellView,
 };
 use crate::views::components::{
     NAV_ROW_HEIGHT, count_badge, format_divergence_arrows, head_badge, remote_progress_footer,
@@ -641,6 +642,11 @@ fn nav_row(
         .cursor_pointer()
         .when(!active, |row| row.hover(|style| style.bg(colors.selection)))
         .on_click(cx.listener(move |app, event, _, cx| on_click(app, event, cx)))
+        .when(id == "sidebar-working-copy", |row| {
+            row.on_drop(cx.listener(|app, drag: &StashPathDrag, _, cx| {
+                app.apply_dropped_stash_paths(drag.reference.clone(), drag.paths.clone(), cx);
+            }))
+        })
         .child(icon(kind, 14.0, icon_color))
         .child(
             div()
