@@ -34,7 +34,7 @@ Palette command **Message history** toggles the same popup. See [desktop-shell.m
 
 ## Command palette
 
-`Command-Shift-P` opens a filterable, **scrollable** command list. Besides secondary views (Reflog, Blame, Compare, Workflow, …), it includes toolbar actions: Open repository, Fetch, Pull…, Push…, Sync, Stage/Unstage all, stash Save/Apply (dialogs), Save stash snapshot…, Apply selected stash files, Apply/Branch/Pop/Drop selected stash, Create branch…, Show settings, Show workflow, Quick open file, Message history, Toggle appearance, Navigate back/forward, **About GitRonimo**.
+`Command-Shift-P` opens a filterable, **scrollable** command list. Besides secondary views (Reflog, Blame, Compare, Workflow, …), it includes toolbar actions: Open repository, Fetch, Pull…, Push…, Sync, Stage/Unstage all, stash Save/Apply (dialogs), Save stash snapshot…, Apply selected stash files, Apply/Branch/Pop/Drop selected stash, Create branch…, Show settings, Show workflow, Quick open file, Message history, Toggle appearance, Navigate back/forward, **About GitRonimo**, **Check for updates**, **Suggest commit message**, **Fetch Git LFS objects**, **Pull Git LFS objects**.
 
 ## Working Copy
 

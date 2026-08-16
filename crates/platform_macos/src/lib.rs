@@ -23,6 +23,14 @@ impl MacKeychainStore {
             account: account.into(),
         }
     }
+
+    #[must_use]
+    pub fn ai_commit_key() -> SecretKey {
+        SecretKey {
+            service: "com.gitronimo.ai-commit".into(),
+            account: "default".into(),
+        }
+    }
 }
 
 impl SecretStore for MacKeychainStore {
@@ -107,5 +115,13 @@ mod tests {
         let key = MacKeychainStore::github_key("octocat");
         assert_eq!(key.service, "com.gitronimo.github");
         assert_eq!(key.account, "octocat");
+    }
+
+    #[test]
+    fn ai_commit_key_is_separate_from_github() {
+        let key = MacKeychainStore::ai_commit_key();
+        assert_eq!(key.service, "com.gitronimo.ai-commit");
+        assert_eq!(key.account, "default");
+        assert_ne!(key.service, MacKeychainStore::github_key("default").service);
     }
 }

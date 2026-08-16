@@ -145,21 +145,6 @@ pub(crate) struct StatusGroups<'a> {
     pub conflicts: Vec<&'a StatusEntry>,
 }
 
-#[allow(dead_code)]
-pub(crate) fn workspace_section(
-    title: &'static str,
-    content: impl IntoElement,
-    colors: &ThemeColors,
-) -> gpui::AnyElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .child(div().text_xs().text_color(colors.text_muted).child(title))
-        .child(content)
-        .into_any_element()
-}
-
 pub(crate) fn mutation_button(
     label: &'static str,
     disabled: bool,
@@ -282,40 +267,6 @@ fn action_button_id(label: &'static str) -> gpui::ElementId {
     gpui::ElementId::Name(format!("action-button:{label}").into())
 }
 
-#[allow(dead_code)]
-pub(crate) fn window_action_button(
-    label: &'static str,
-    colors: &ThemeColors,
-    cx: &mut gpui::Context<GitronimoApp>,
-    on_click: impl Fn(&mut GitronimoApp, &mut Window, &mut gpui::Context<GitronimoApp>) + 'static,
-) -> gpui::AnyElement {
-    let tooltip_colors = *colors;
-    div()
-        .id(gpui::ElementId::Name(
-            format!("window-button:{label}").into(),
-        ))
-        .debug_selector(|| format!("button:{label}"))
-        .h(px(ACTION_BUTTON_HEIGHT))
-        .px_2()
-        .flex()
-        .items_center()
-        .bg(colors.raised_background)
-        .rounded(px(4.0))
-        .hover(|style| style.bg(colors.selection))
-        .cursor_pointer()
-        .tooltip(move |_, cx| {
-            cx.new(|_| ActionTooltip {
-                label,
-                colors: tooltip_colors,
-            })
-            .into()
-        })
-        .on_click(cx.listener(move |app, _, window, cx| on_click(app, window, cx)))
-        .text_sm()
-        .child(label)
-        .into_any_element()
-}
-
 #[allow(clippy::redundant_closure_for_method_calls)]
 pub(crate) fn primary_window_action_button(
     label: &'static str,
@@ -383,77 +334,6 @@ pub(crate) fn primary_window_action_button_with_reason(
         })
         .text_sm()
         .font_weight(gpui::FontWeight::MEDIUM)
-        .child(label)
-        .into_any_element()
-}
-
-#[allow(dead_code)]
-pub(crate) fn commit_option_chip(
-    label: &'static str,
-    active: bool,
-    colors: &ThemeColors,
-    cx: &mut gpui::Context<GitronimoApp>,
-    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
-) -> gpui::AnyElement {
-    div()
-        .id(gpui::ElementId::Name(
-            format!("commit-option-chip:{label}").into(),
-        ))
-        .h(px(LIST_ROW_HEIGHT))
-        .px_2()
-        .flex()
-        .items_center()
-        .rounded(px(3.0))
-        .bg(if active {
-            colors.selection
-        } else {
-            colors.panel_background
-        })
-        .text_color(if active {
-            colors.accent
-        } else {
-            colors.text_secondary
-        })
-        .cursor_pointer()
-        .on_click(cx.listener(move |app, _, _, cx| on_click(app, cx)))
-        .text_xs()
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .child(label)
-        .into_any_element()
-}
-
-#[allow(dead_code)]
-pub(crate) fn validated_action_button(
-    label: &'static str,
-    enabled: bool,
-    unavailable_reason: &'static str,
-    colors: &ThemeColors,
-    cx: &mut gpui::Context<GitronimoApp>,
-    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
-) -> gpui::AnyElement {
-    if enabled {
-        return file_action_button(label, colors, cx, on_click);
-    }
-    let tooltip_colors = *colors;
-    div()
-        .id(gpui::ElementId::Name(
-            format!("disabled-action-button:{label}").into(),
-        ))
-        .h(px(ACTION_BUTTON_HEIGHT))
-        .px_2()
-        .flex()
-        .items_center()
-        .bg(colors.raised_background)
-        .rounded(px(4.0))
-        .text_color(colors.text_muted)
-        .tooltip(move |_, cx| {
-            cx.new(|_| ActionTooltip {
-                label: unavailable_reason,
-                colors: tooltip_colors,
-            })
-            .into()
-        })
-        .text_sm()
         .child(label)
         .into_any_element()
 }
@@ -861,17 +741,6 @@ pub(crate) fn state_panel(
                 .child(message.to_owned()),
         )
         .into_any_element()
-}
-
-#[allow(dead_code)]
-pub(crate) fn empty_status_message(title: &str) -> &'static str {
-    match title {
-        "Staged" => "No staged files. Select a change, then stage it when it is ready to commit.",
-        "Unstaged" => "No unstaged changes.",
-        "Untracked" => "No untracked files.",
-        "Conflicts" => "No merge conflicts.",
-        _ => "Nothing here yet.",
-    }
 }
 
 pub(crate) fn activity_color(activity: &str, colors: &ThemeColors) -> gpui::Rgba {

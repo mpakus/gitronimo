@@ -8,6 +8,7 @@
 - Optional **Auto-stash before switch and pull** (Settings, off by default) stashes dirty work, runs the switch or pull, then reapplies the stash. Pull uses Git `--autostash`.
 - **Save snapshot…** stores a named stash without resetting the working copy (`git stash create` + `store`, or push+apply when including untracked).
 - Optional **In-app updates** (Settings, off by default). **Check now** (or palette **Check for updates**) reads GitHub Releases, prompts, downloads the notarized zip, verifies SHA-256 and Gatekeeper (`codesign` + `spctl`), then replaces `GitRonimo.app`. No check on launch. No telemetry. Cargo/`target/` runs refuse install.
+- Optional **AI commit messages** (Settings, off by default). **Suggest** (composer or palette) sends only the redacted staged diff to a configured OpenAI-compatible endpoint (HTTPS, or HTTP on `127.0.0.1` / `localhost` / `[::1]`). The API key is Keychain `com.gitronimo.ai-commit`, not the GitHub PAT. The reply fills the composer; you still edit and click Commit. Failure leaves the composer unchanged.
 
 ## 1.0.0 — 2026-08-14
 

@@ -7,7 +7,7 @@ Index of project documentation. Start with [README.md](../README.md) for install
 | Document | Audience | Purpose |
 |----------|----------|---------|
 | [PLAN.md](../PLAN.md) | Contributors | Roadmap, checklist, crate boundaries |
-| [PLAN-v2.md](PLAN-v2.md) | Contributors | Post-1.0.0 work (`gix` backend, updater, LFS/stash, AI commits) |
+| [PLAN-v2.md](PLAN-v2.md) | Contributors | Post-1.0.0 work. A/E/D/G are in tree; remaining boxes are `gix` fallback migrations |
 | [todo-v1.md](todo-v1.md) | Contributors | Leftover work and doc hygiene toward v1 |
 | [UI-PLAN.md](UI-PLAN.md) | UI contributors | UI phases and screenshot matrix |
 | [UI-IMPROVE.md](UI-IMPROVE.md) | UI contributors | GitRonimo view patterns and remaining gaps |
@@ -54,7 +54,7 @@ When you change user-visible behavior:
 
 1. Add or update an entry in [work-log.md](work-log.md) **before** coding.
 2. Update [keyboard-shortcuts.md](keyboard-shortcuts.md) if shortcuts or selection rules change.
-3. Update [desktop-shell.md](desktop-shell.md) if activity bar, palette, confirms, branch pin/archive, or About behavior changes.
+3. Update [desktop-shell.md](desktop-shell.md) if activity bar, palette, confirms, branch pin/archive, Settings opt-ins, or About behavior changes.
 4. Update [README.md](../README.md) screenshots if the UI changed materially.
 5. Sync [UI-IMPROVE.md](UI-IMPROVE.md) implementation status when a user-visible UI pattern lands.
 6. Add a [CHANGELOG.md](../CHANGELOG.md) note when preparing a release.

@@ -14,9 +14,15 @@ use git_domain::{
 };
 use serde::{Deserialize, Serialize};
 
+mod ai_commit;
 mod git_engine;
 mod workflow;
 
+pub use ai_commit::{
+    DEFAULT_AI_COMMIT_ENDPOINT, DEFAULT_AI_COMMIT_MODEL, MAX_AI_COMMIT_DIFF_BYTES,
+    ai_commit_requires_api_key, build_commit_suggestion_prompt, chat_completions_request_body,
+    chat_completions_url, parse_chat_completion, split_commit_message,
+};
 pub use git_engine::{
     EngineQuery, GitBackendError, GitEngineKind, GitHistoryQuery, GitIndexMutate, GitNetwork,
     GitObjectQuery, GitRefQuery, query_preferring,
@@ -513,6 +519,69 @@ impl RecentRepositoryStore {
         })
     }
 
+    /// Whether Settings may request an AI commit-message suggestion.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_ai_commit_messages(&self) -> Result<bool, RecentRepositoryStoreError> {
+        self.with_document(|document| document.ai_commit_messages)
+    }
+
+    /// Persists the AI commit-message toggle while retaining other preferences.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_ai_commit_messages(
+        &self,
+        ai_commit_messages: bool,
+    ) -> Result<(), RecentRepositoryStoreError> {
+        self.with_mut_document(|document| {
+            document.ai_commit_messages = ai_commit_messages;
+        })
+    }
+
+    /// OpenAI-compatible API base from Settings.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_ai_commit_endpoint(&self) -> Result<String, RecentRepositoryStoreError> {
+        self.with_document(|document| document.ai_commit_endpoint.clone())
+    }
+
+    /// Persists the AI endpoint while retaining other preferences.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_ai_commit_endpoint(
+        &self,
+        endpoint: impl Into<String>,
+    ) -> Result<(), RecentRepositoryStoreError> {
+        self.with_mut_document(|document| {
+            document.ai_commit_endpoint = endpoint.into();
+        })
+    }
+
+    /// Chat model name from Settings.
+    ///
+    /// # Errors
+    /// Returns the same schema and read errors as [`Self::load`].
+    pub fn load_ai_commit_model(&self) -> Result<String, RecentRepositoryStoreError> {
+        self.with_document(|document| document.ai_commit_model.clone())
+    }
+
+    /// Persists the AI model while retaining other preferences.
+    ///
+    /// # Errors
+    /// Does not overwrite a newer or malformed document.
+    pub fn save_ai_commit_model(
+        &self,
+        model: impl Into<String>,
+    ) -> Result<(), RecentRepositoryStoreError> {
+        self.with_mut_document(|document| {
+            document.ai_commit_model = model.into();
+        })
+    }
+
     /// Persists the branching convention for one repository. `None` clears it.
     ///
     /// # Errors
@@ -768,6 +837,7 @@ pub struct BookmarkOrganization {
 }
 
 #[derive(Deserialize, Serialize)]
+#[allow(clippy::struct_excessive_bools)]
 struct RecentRepositoryDocument {
     schema_version: u32,
     recent_repositories: Vec<PathBuf>,
@@ -798,6 +868,15 @@ struct RecentRepositoryDocument {
     /// When true, Settings can check GitHub Releases and install a notarized zip.
     #[serde(default)]
     in_app_updates: bool,
+    /// When true, the commit composer may request an AI suggestion.
+    #[serde(default)]
+    ai_commit_messages: bool,
+    /// OpenAI-compatible API base. Empty means [`DEFAULT_AI_COMMIT_ENDPOINT`].
+    #[serde(default)]
+    ai_commit_endpoint: String,
+    /// Chat model name. Empty means [`DEFAULT_AI_COMMIT_MODEL`].
+    #[serde(default)]
+    ai_commit_model: String,
 }
 
 impl Default for RecentRepositoryDocument {
@@ -816,6 +895,9 @@ impl Default for RecentRepositoryDocument {
             use_system_git: false,
             auto_stash: false,
             in_app_updates: false,
+            ai_commit_messages: false,
+            ai_commit_endpoint: String::new(),
+            ai_commit_model: String::new(),
         }
     }
 }
@@ -1193,6 +1275,43 @@ mod tests {
             .save_in_app_updates(true)
             .expect("override should save");
         assert!(store.load_in_app_updates().expect("override should load"));
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn ai_commit_messages_default_off_and_endpoint_persists() {
+        let (directory, store) = temporary_store();
+        assert!(
+            !store
+                .load_ai_commit_messages()
+                .expect("missing store should default off")
+        );
+        assert!(
+            store
+                .load_ai_commit_endpoint()
+                .expect("endpoint")
+                .is_empty()
+        );
+        store
+            .save_ai_commit_messages(true)
+            .expect("toggle should save");
+        store
+            .save_ai_commit_endpoint("http://127.0.0.1:11434/v1")
+            .expect("endpoint should save");
+        store
+            .save_ai_commit_model("llama3")
+            .expect("model should save");
+        assert!(store.load_ai_commit_messages().expect("toggle should load"));
+        assert_eq!(
+            store
+                .load_ai_commit_endpoint()
+                .expect("endpoint should load"),
+            "http://127.0.0.1:11434/v1"
+        );
+        assert_eq!(
+            store.load_ai_commit_model().expect("model should load"),
+            "llama3"
+        );
         let _ = fs::remove_dir_all(directory);
     }
 

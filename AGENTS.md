@@ -2,7 +2,7 @@
 
 - Read `PLAN.md` and this file before editing code.
 - Before non-trivial implementation, use XERJ reference coding: search `gitronimo-*` indices on `http://127.0.0.1:9200` (see `.cursor/rules/xerj-reference-coding.mdc`); GitComet is AGPL — approach-only.
-- Work on one unchecked `PLAN.md` checkbox group at a time.
+- Work on one unchecked `PLAN.md` or `docs/PLAN-v2.md` checkbox group at a time. 1.0 scope is tagged in `PLAN.md`. Post-1.0 A/E/D/G are in tree; remaining PLAN-v2 boxes are `gix` fallback migrations (checkout, merge, rebase, stash, push, hooks).
 - Record the intended files and acceptance checks in `docs/work-log.md` before coding.
 - Never build Git commands with shell strings; use typed `std::process::Command` arguments.
 - Never place Git or domain logic in GPUI render implementations.
@@ -32,7 +32,7 @@ System `cargo` older than 1.97 will fail on this workspace.
 | Doc | Purpose |
 |-----|---------|
 | `PLAN.md` | Product roadmap and checklist — source of truth for 1.0 scope |
-| `docs/PLAN-v2.md` | Post-1.0.0 roadmap (`gix` as primary Git, updater, LFS/stash, AI commits) |
+| `docs/PLAN-v2.md` | Post-1.0.0 roadmap. A (`gix` default), E (LFS/stash extras), D (updater), G (AI commits) are in tree; remaining boxes are system-Git fallbacks until `gix` gains the workflow |
 | `docs/README.md` | Documentation index |
 | `docs/work-log.md` | Per-task intent, files, acceptance checks (write **before** coding) |
 | `docs/desktop-shell.md` | Activity bar, message history, confirms, pins, command palette, About |
@@ -79,7 +79,32 @@ Read `docs/desktop-shell.md` before changing activity bar, overlays, pins, or th
 - **Status text:** always use `set_activity(...)` (never assign `self.activity` alone) so Message history stays populated. Refresh chatter is coalesced; do not log secrets or raw Git dumps.
 - **Confirms:** blocked/destructive Git outcomes that users must acknowledge belong in `AppConfirmDialog` (or the branch-delete pending modal), not only a flashing status line. Example: unmerged delete → Cancel / Delete force.
 - **Pins / archives:** persist via `RecentRepositoryStore::save_branch_organization`; sidebar shows pins flat atop BRANCHES (no “PINNED” label). Preference RMW is path-locked — do not reintroduce unlocked load-modify-save on that JSON.
-- **Command palette:** new user-facing commands that already have handlers should get a `PaletteCommand` + `PALETTE_COMMANDS` label + `run_palette_command` arm; keep the overlay list scrollable.
+- **Command palette:** new user-facing commands that already have handlers should get a `PaletteCommand` + `PALETTE_COMMANDS` label + `run_palette_command` arm; keep the overlay list scrollable. Current extras include **Suggest commit message**, **Check for updates**, **Fetch Git LFS objects**, **Pull Git LFS objects**, **Save stash snapshot…**, **Apply selected stash files**.
 - **Overlays:** Git/domain work stays in `main.rs`; `views/workspace.rs` only renders and dispatches. About GitRonimo is `views/about.rs` (click outside to dismiss).
-- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs`. Bump that string after each release. It is independent of the Cargo workspace version.
+- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs`. Bump that string after each release. It is independent of the Cargo workspace version. Do not bump it for in-tree PLAN-v2 work until cutting 2.0.0.
 - **Binary / menu name:** crate remains `gitronimo-desktop`; the macOS executable and bundle name is `GitRonimo` so the application menu title is GitRonimo (`GitRonimo.app`).
+
+## Git engine (agent context)
+
+Read ADR `docs/adr/0003-gix-default-git-engine.md` before changing discovery, status, history, diffs, stage/commit, or fetch/clone.
+
+- Default engine is gitoxide **`gix`** via `apps/desktop/src/git_backend.rs`. Settings **Use system Git** forces `git_cli`. Automatic fallback when `gix` lacks the workflow or errors; log a redacted reason with `set_activity`.
+- Do not import `gix` outside `crates/git_gix`. Do not import GPUI in `git_domain`. Desktop must not call `gix` or build Git command lines inside `Render`.
+- Still on system Git: checkout/switch/restore/reset, merge/cherry-pick/revert, rebase, stash mutations, push, hooks, signed commits/tags, LFS smudge/fetch, mergetool, submodules, worktree add/remove, SSH/`file://` clone/fetch, hunk/line stage and discard.
+- Dual-backend tests on temporary repositories for every migrated operation.
+
+## AI commit messages (agent context)
+
+Read Settings copy in `views/settings.rs` and `crates/app_core/src/ai_commit.rs` before changing Suggest.
+
+- Opt-in (`ai_commit_messages`, default **off**). No network until the user turns it on and runs **Suggest** (composer) or palette **Suggest commit message**.
+- Prompt is the **staged unified diff only** (`unified_diff_prompt_text`, cap `MAX_AI_COMMIT_DIFF_BYTES`, then `git_cli::redact_git_text`). Never send the GitHub PAT, the AI Keychain secret, unredacted command output, README/CLAUDE.md, or the full repo.
+- Fill subject/body and expand the composer. **Never** call commit from Suggest. The user edits and clicks Commit.
+- API key is Keychain `com.gitronimo.ai-commit` / account `default`, separate from `com.gitronimo.github`. HTTPS (including empty endpoint → OpenAI default) requires a key. HTTP is allowlisted only for `127.0.0.1`, `localhost`, and `[::1]`.
+- No HTTP/AI crate: typed `curl` in `apps/desktop/src/ai_commit.rs`; prompt/JSON/parse in `app_core`. Failure leaves the composer unchanged and uses `set_activity` with a redacted sentence.
+
+## In-app updates (agent context)
+
+- Opt-in (`in_app_updates`, default **off**). **No check on launch.** Palette **Check for updates** / Settings **Check now** only when the toggle is on.
+- Public GitHub Releases JSON (no PAT). Verify SHA-256, then `codesign --verify --deep --strict` and `spctl --assess --type execute`. Replace `GitRonimo.app` only; refuse `cargo run` / `target/` binaries.
+- Confirm via `AppConfirmDialog::InstallUpdate`. No telemetry. No new crates (`curl` like `hosting_github`).

@@ -14,7 +14,6 @@ use crate::views::components::{
 use crate::views::icons::{IconKind, icon};
 
 impl GitronimoApp {
-    #[allow(clippy::unused_self)]
     pub(crate) fn welcome_view(
         &self,
         colors: &ThemeColors,

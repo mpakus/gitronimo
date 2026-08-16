@@ -33,7 +33,7 @@ The daily Git client is already in the app. This file is what is left **after** 
 
 ## Not 1.0.0 (do not start while tagging)
 
-Tracked as **[`PLAN-v2.md`](PLAN-v2.md)** — `gix` as primary Git (system Git fallback), in-app updater, LFS fetch/pull UI and stash extras, optional AI commit messages.
+Tracked as **[`PLAN-v2.md`](PLAN-v2.md)**. In tree after the 1.0.0 bump: `gix` as primary Git (system Git fallback), in-app updater, LFS fetch/pull UI and stash extras, optional AI commit messages. Remaining PLAN-v2 checkboxes are workflows that still run on system Git until `gix` orchestrates them.
 
 ---
 

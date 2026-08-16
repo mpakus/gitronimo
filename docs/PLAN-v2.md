@@ -1,6 +1,6 @@
 # PLAN-v2.md — GitRonimo 2.0.0
 
-**Status:** Phase A prefer-gix complete; Phase E complete (LFS, stash partial apply, auto-stash, snapshots); Phase D complete (opt-in in-app updates). Checkout/merge/rebase/push/hooks stay on system Git.  
+**Status:** Phase A prefer-gix complete; Phase E complete (LFS, stash partial apply, auto-stash, snapshots); Phase D complete (opt-in in-app updates); Phase G complete (optional AI commit messages). Checkout/merge/rebase/push/hooks stay on system Git.  
 **As of:** 2026-08-16  
 **Product today:** **1.0.0** (`APP_VERSION` / packager). Architecture and crate rules stay in [`PLAN.md`](../PLAN.md) unless an item below supersedes them.
 
@@ -113,10 +113,12 @@ Keep stash save/apply/pop/drop/branch from 1.0. Do not put Git in stash-row `Ren
 
 ## Phase G — AI commit messages (optional)
 
-- [ ] Opt-in Settings; no default network
-- [ ] Prompt uses only staged diff the user can see; never send secrets, PAT, or full repo
-- [ ] User must edit/accept before commit (gix or system Git, whichever backend is active)
-- [ ] Failure is a composer no-op with a redacted error
+- [x] Opt-in Settings; no default network
+- [x] Prompt uses only staged diff the user can see; never send secrets, PAT, or full repo
+- [x] User must edit/accept before commit (gix or system Git, whichever backend is active)
+- [x] Failure is a composer no-op with a redacted error
+
+Shipped without a new HTTP/AI crate: typed `curl` in `apps/desktop/src/ai_commit.rs`, prompt/JSON/parse in `app_core`, Keychain `com.gitronimo.ai-commit`. HTTPS (including the empty OpenAI default) requires an API key; HTTP is allowlisted only on `127.0.0.1` / `localhost` / `[::1]`.
 
 Requires a current checklist item before adding any HTTP/AI crate ([`dependency-policy.md`](dependency-policy.md)).
 
@@ -132,7 +134,7 @@ Same as 1.0 [`PLAN.md`](../PLAN.md) §23 and [`AGENTS.md`](../AGENTS.md):
 4. Gates: `fmt --check`, clippy `-D warnings`, `cargo test --workspace --all-features`, `cargo deny check`.
 5. Bump `APP_VERSION` and packager version together when cutting 2.0.0.
 
-Suggested order: **A → E → D** (done), with **G** last and optional.
+Suggested order: **A → E → D → G** (all checkbox groups done).
 
 ---
 

@@ -8,7 +8,9 @@ use ui_kit::ThemeColors;
 use git_domain::HeadStatus;
 
 use crate::app_state::{GitronimoApp, Mutation};
-use crate::views::components::{mutation_button, primary_window_action_button_with_reason};
+use crate::views::components::{
+    file_action_button, mutation_button, primary_window_action_button_with_reason,
+};
 use crate::views::icons::{IconKind, icon};
 use crate::views::single_line_input::{
     COMPOSER_BODY_HEIGHT, composer_multiline_shell, composer_subject_shell,
@@ -210,6 +212,11 @@ impl GitronimoApp {
                     colors,
                     cx,
                 ))
+                .children(self.ai_commit_messages.then(|| {
+                    file_action_button("Suggest", colors, cx, |app, cx| {
+                        app.suggest_commit_message(cx);
+                    })
+                }))
                 .child(
                     div()
                         .flex_1()

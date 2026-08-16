@@ -2360,7 +2360,7 @@ Product version is `APP_VERSION` in `apps/desktop/src/views/about.rs` and `[pack
 
 - `0001-ui-component-library.md`
 - `0002-git-cli-as-canonical-backend.md`
-- `0003-gix-read-optimization-boundary.md`
+- `0003-gix-default-git-engine.md`
 - `0004-gpui-task-model.md`
 - `0005-repository-mutation-serialization.md`
 - `0006-path-byte-handling.md`

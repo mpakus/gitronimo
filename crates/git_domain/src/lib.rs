@@ -158,6 +158,78 @@ pub struct LoadedDiff {
     pub truncated: bool,
 }
 
+/// Renders a parsed diff as text for an AI commit-message prompt.
+///
+/// Binary files are named only. Output is capped at `limit` bytes.
+#[must_use]
+pub fn unified_diff_prompt_text(diff: &UnifiedDiff, limit: usize) -> String {
+    let mut output = String::new();
+    let mut capped = false;
+    for file in &diff.files {
+        if output.len() >= limit {
+            capped = true;
+            break;
+        }
+        let path = file
+            .new_path
+            .as_ref()
+            .or(file.old_path.as_ref())
+            .map_or_else(
+                || "unknown".into(),
+                |path| String::from_utf8_lossy(&path.0).into_owned(),
+            );
+        if file.binary {
+            capped |= !push_limited(&mut output, &format!("Binary file {path} differs\n"), limit);
+            continue;
+        }
+        capped |= !push_limited(
+            &mut output,
+            &format!("diff --git a/{path} b/{path}\n"),
+            limit,
+        );
+        for hunk in &file.hunks {
+            if output.len() >= limit {
+                capped = true;
+                break;
+            }
+            let header = String::from_utf8_lossy(&hunk.header);
+            capped |= !push_limited(&mut output, &format!("{header}\n"), limit);
+            for line in &hunk.lines {
+                if output.len() >= limit {
+                    capped = true;
+                    break;
+                }
+                let prefix = match line.kind {
+                    DiffLineKind::Context => ' ',
+                    DiffLineKind::Addition => '+',
+                    DiffLineKind::Removal => '-',
+                };
+                let content = String::from_utf8_lossy(&line.content);
+                capped |= !push_limited(&mut output, &format!("{prefix}{content}\n"), limit);
+            }
+        }
+    }
+    if capped {
+        output.push_str("\n[truncated]\n");
+    }
+    output
+}
+
+/// Returns `false` when `chunk` was truncated to fit `limit`.
+fn push_limited(output: &mut String, chunk: &str, limit: usize) -> bool {
+    let remaining = limit.saturating_sub(output.len());
+    if remaining == 0 {
+        return false;
+    }
+    if chunk.len() <= remaining {
+        output.push_str(chunk);
+        true
+    } else {
+        output.push_str(&chunk[..remaining]);
+        false
+    }
+}
+
 /// Composer input for creating or amending a commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CommitRequest {
@@ -823,8 +895,9 @@ pub fn layout_history_graph(commits: &[HistoryCommit], state: &mut GraphState) -
 #[cfg(test)]
 mod tests {
     use super::{
-        CommitIdentity, DiffHunk, DiffLine, DiffLineKind, GraphState, HistoryCommit,
-        layout_history_graph, parse_hunk_header, selected_lines_patch,
+        CommitIdentity, DiffFile, DiffHunk, DiffLine, DiffLineKind, GitPath, GraphState,
+        HistoryCommit, UnifiedDiff, layout_history_graph, parse_hunk_header, selected_lines_patch,
+        unified_diff_prompt_text,
     };
 
     fn diff_line(kind: DiffLineKind, content: &str) -> DiffLine {
@@ -972,5 +1045,39 @@ mod tests {
             )[0]
             .octopus
         );
+    }
+
+    #[test]
+    fn unified_diff_prompt_text_includes_hunks_and_names_binaries() {
+        let diff = UnifiedDiff {
+            files: vec![
+                DiffFile {
+                    old_path: Some(GitPath(b"a.rs".to_vec())),
+                    new_path: Some(GitPath(b"a.rs".to_vec())),
+                    binary: false,
+                    hunks: vec![DiffHunk {
+                        header: b"@@ -1 +1 @@".to_vec(),
+                        lines: vec![
+                            diff_line(DiffLineKind::Removal, "old"),
+                            diff_line(DiffLineKind::Addition, "new"),
+                        ],
+                    }],
+                },
+                DiffFile {
+                    old_path: Some(GitPath(b"pic.png".to_vec())),
+                    new_path: Some(GitPath(b"pic.png".to_vec())),
+                    binary: true,
+                    hunks: Vec::new(),
+                },
+            ],
+        };
+        let text = unified_diff_prompt_text(&diff, 10_000);
+        assert!(text.contains("diff --git a/a.rs b/a.rs"));
+        assert!(text.contains("-old"));
+        assert!(text.contains("+new"));
+        assert!(text.contains("Binary file pic.png differs"));
+        assert!(!text.contains("[truncated]"));
+        let tiny = unified_diff_prompt_text(&diff, 20);
+        assert!(tiny.contains("[truncated]"));
     }
 }

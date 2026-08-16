@@ -42,6 +42,10 @@ Full shortcut and selection rules: [`keyboard-shortcuts.md`](keyboard-shortcuts.
 
 GPUI 0.2.2 does not expose macOS accessibility roles or programmatic labels for its custom elements, so VoiceOver parity is a known beta limitation. It will need framework support before Gitronimo can provide a complete assistive-technology experience.
 
+## Git engine (gix vs System Git)
+
+Settings **Git engine** defaults to **gix**. Discovery, status, history, stage/commit, and HTTPS fetch/clone use `gix` unless you choose **System Git** or `gix` fails (then GitRonimo falls back and shows a redacted status line). Checkout, merge, rebase, stash, push, hooks, signing, LFS, and SSH remotes always use the installed Git executable.
+
 ## Git LFS fetch or pull failed
 
 The Git LFS view runs the installed `git lfs` client (`fetch` downloads objects; `pull` also checks them out). Install Git LFS if the command is missing. Operations use the first configured remote and can be cancelled from the activity bar. Credentials follow your Git helper, same as remotes.
@@ -77,6 +81,10 @@ Local and CI development bundles are unsigned `GitRonimo.app`. macOS Gatekeeper 
 ## In-app update failed or refused
 
 Settings **In-app updates** stays off until you turn it on. **Check now** only runs when that toggle is on; GitRonimo does not poll GitHub on launch. Install requires a real `GitRonimo.app` (not `cargo run`). The zip must match `SHA256SUMS.txt`, and the extracted app must pass Gatekeeper. Unsigned local zips are refused. After a successful install, quit and open `GitRonimo.app` again.
+
+## AI commit suggestion failed or did nothing
+
+Settings **AI commit messages** stays off until you turn it on. **Suggest** (Working Copy composer, or palette **Suggest commit message**) sends only the staged diff, with tokens/URL passwords redacted, to the endpoint you configured. It never commits. Stage at least one path first. HTTPS endpoints (including the empty default `https://api.openai.com/v1`) need an API key in Keychain (**API key…** in Settings); that key is not the GitHub PAT. Loopback HTTP (`127.0.0.1`, `localhost`, `[::1]`) is allowed for a local model without a key. A failed request leaves the composer as it was. Turn the toggle off, or an empty staged list, does not call the network.
 
 ## About GitRonimo
 

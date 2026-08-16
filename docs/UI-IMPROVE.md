@@ -79,7 +79,7 @@ File list (with per-file add/del counts) on the left, full diff on the right. Fi
 - Welcome offers open, add, create (`git init`), and clone.
 - File editing happens in an external editor; the watcher refreshes status.
 - File list + diff; per-file checkbox; left = staged / right = unstaged affordance; hunk and line staging in the diff viewer.
-- Composer: subject + optional body, then Commit. Stay on Working Copy after commit; remember the new OID for History reveal.
+- Composer: subject + optional body, then Commit. Optional **Suggest** (Settings **AI commit messages**) fills those fields from the staged diff and does not commit. Stay on Working Copy after commit; remember the new OID for History reveal.
 - History graph + detail confirms the new commit.
 
 ---
@@ -88,7 +88,7 @@ File list (with per-file add/del counts) on the left, full diff on the right. Fi
 
 **Done (functional):**
 
-- [x] Working Copy composer above file list, Modified/All Files toggle, per-file stage checkbox, staged/unstaged badges
+- [x] Working Copy composer above file list, Modified/All Files toggle, per-file stage checkbox, staged/unstaged badges. **Suggest** appears on the composer when Settings **AI commit messages** is on.
 - [x] Working Copy multi-select: Command-A select all visible files; toggle deselect/reselect on row click when all selected; batch stage/unstage via checkbox on multi-selection
 - [x] Visible Back/Forward (Prev/Next) toolbar navigation with disabled state
 - [x] Remember new commit OID for History reveal; stay on Working Copy after commit (no auto-redirect)
@@ -97,7 +97,7 @@ File list (with per-file add/del counts) on the left, full diff on the right. Fi
 - [x] Repositories welcome view: grouped/flat recents, detail panel, Add/Create/Clone actions
 - [x] Pull Requests list/detail workflow (Phase 9 baseline)
 - [x] Welcome toolbar Bookmarks / Workflow tabs (templates, Start / Finish / Sync)
-- [x] Services tab and view removed; GitHub connect lives in Settings
+- [x] Services tab and view removed; GitHub connect lives in Settings. Settings also has Git engine (gix / System Git), auto-stash, in-app updates, and AI commit messages (all extra toggles default off).
 - [x] Always-visible inline toolbar/sidebar search filtering repos and files
 - [x] Sidebar remote-activity progress bar during fetch/pull/push + last-result footer when idle
 - [x] Visual polish pass: welcome detail headers, commit focus border, diff tabs/hunk headers, HEAD badge, activity bar
@@ -138,7 +138,8 @@ See [`keyboard-shortcuts.md`](keyboard-shortcuts.md) and [`desktop-shell.md`](de
 
 ### Delivery notes
 
-- GitHub Cloud uses a personal access token entered through an obscured macOS dialog and stored only in Keychain (Settings).
+- GitHub Cloud uses a personal access token entered through an obscured macOS dialog and stored only in Keychain (Settings, service `com.gitronimo.github`).
+- Optional AI commit API keys use a separate Keychain item (`com.gitronimo.ai-commit`). Suggest never auto-commits.
 - Enterprise/self-hosted GitHub and OAuth device flow remain separate hardening work in `PLAN.md`.
 - Pull Request mutations require the selected hosted repository and use explicit merge-method confirmation.
 

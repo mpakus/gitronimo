@@ -19,10 +19,10 @@ use crate::app_state::{
 use crate::keymap;
 use crate::menus;
 use crate::views::commit_composer::commit_unavailable_reason;
-use crate::views::components::{
-    activity_label, empty_status_message, format_divergence_arrows, head_badge_text,
+use crate::views::components::{activity_label, format_divergence_arrows, head_badge_text};
+use crate::views::working_copy::{
+    WORKING_COPY_CLEAN_DETAIL, WORKING_COPY_CLEAN_TITLE, operation_conflict_overview,
 };
-use crate::views::working_copy::operation_conflict_overview;
 
 #[test]
 fn a_disabled_commit_button_names_what_is_missing() {
@@ -184,11 +184,15 @@ fn network_failures_are_actionable_without_echoing_remote_output() {
 
 #[test]
 fn workspace_empty_and_loading_copy_explain_the_next_state() {
-    assert!(empty_status_message("Staged").contains("stage"));
-    assert_eq!(empty_status_message("Conflicts"), "No merge conflicts.");
+    assert_eq!(WORKING_COPY_CLEAN_TITLE, "Working tree clean");
+    assert!(WORKING_COPY_CLEAN_DETAIL.contains("editor"));
     assert_eq!(
         activity_label("Fetching origin in progress. You can cancel it."),
         "● Fetching origin in progress. You can cancel it."
+    );
+    assert_eq!(
+        activity_label(WORKING_COPY_CLEAN_TITLE),
+        WORKING_COPY_CLEAN_TITLE
     );
 }
 

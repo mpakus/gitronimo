@@ -18,7 +18,7 @@ Bring GitRonimo to a dense, consistent Git-client information architecture with 
 |----------|--------------|
 | Welcome rail (Bookmarks / Workflow), repo detail panel | Pixel-identical clone of another Git client |
 | In-repo sidebar: WORKSPACE / BRANCHES / TAGS / REMOTES | OAuth device flow, enterprise GitHub, Bitbucket/Azure |
-| Working Copy: composer + file list + diff two-pane | Branches Review, AI commit messages |
+| Working Copy: composer + file list + diff two-pane; **Suggest** when AI commits are on | Branches Review as a primary sidebar item |
 | Toolbar: Fetch/Pull/Push/Sync, Apply/Save, Refresh, search | Built-in terminal or text editor |
 | History, Stashes, Remotes, PRs: list + detail | Cloud settings sync |
 | 22px list rows, 28px panel headers, 52px toolbar, full-width accent selection | |

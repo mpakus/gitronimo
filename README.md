@@ -4,7 +4,7 @@
   <img src="docs/logo.png" alt="GitRonimo" width="480">
 </p>
 
-GitRonimo is a native macOS Git client written in Rust with [GPUI](https://gpui.rs). It keeps Git as the source of truth and uses your installed Git executable for repository operations, credential helpers, SSH, hooks, signing, and filters.
+GitRonimo is a native macOS Git client written in Rust with [GPUI](https://gpui.rs). It keeps Git as the source of truth. The default engine is gitoxide [`gix`](https://github.com/GitoxideLabs/gitoxide) for repository discovery, status, history, stage/commit, and HTTPS fetch/clone. Your installed Git executable remains the fallback (Settings **Use system Git**) and still handles credential helpers, SSH, hooks, signing, filters, LFS, checkout, merge, rebase, stash, and push.
 
 Product version **1.0.0** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
 
@@ -27,7 +27,16 @@ The current release includes:
 
 GitHub personal-access-token connect/sign-out lives in **Settings** (not a Services tab).
 
-Not in 1.0.0: OAuth / enterprise GitHub, VoiceOver roles (GPUI limitation), in-app updates, localization, AI commit messages, and a built-in editor. Merge and rebase are available from menus plus continue/abort on Working Copy.
+### Unreleased (in tree)
+
+Post-1.0 work from [`docs/PLAN-v2.md`](docs/PLAN-v2.md) is in this source tree at the same **1.0.0** About version. See [CHANGELOG.md](CHANGELOG.md) Unreleased:
+
+- Default Git engine is `gix`; Settings **Use system Git** forces the installed executable
+- Git LFS **Fetch** / **Pull**; stash file drag onto Working Copy; optional auto-stash; named stash snapshots
+- Optional **In-app updates** (off by default; **Check now** verifies SHA-256 and Gatekeeper)
+- Optional **AI commit messages** (off by default; **Suggest** fills the composer from the staged diff and never commits)
+
+Not in product: OAuth / enterprise GitHub, VoiceOver roles (GPUI limitation), localization, and a built-in editor. Merge and rebase are available from menus plus continue/abort on Working Copy.
 
 See [PLAN.md](PLAN.md) for the full implementation contract and [CHANGELOG.md](CHANGELOG.md) for release notes.
 
@@ -77,6 +86,7 @@ cargo deny check
 | Doc | Description |
 |-----|-------------|
 | [docs/README.md](docs/README.md) | Documentation index |
+| [PLAN-v2](docs/PLAN-v2.md) | Post-1.0 `gix`, updater, LFS/stash, AI commits (A/E/D/G in tree) |
 | [v1 todo](docs/todo-v1.md) | Leftover work and doc hygiene toward 1.0 |
 | [Architecture](docs/architecture.md) | Crate layers and mutation flow |
 | [Keyboard shortcuts](docs/keyboard-shortcuts.md) | Global and Working Copy shortcuts |

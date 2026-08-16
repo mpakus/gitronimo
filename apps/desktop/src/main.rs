@@ -5,6 +5,7 @@
 //! rule that Git and domain logic do not appear in GPUI render implementations.
 
 mod actions;
+mod ai_commit;
 mod app_state;
 mod app_update;
 mod assets;
@@ -32,9 +33,11 @@ use std::{
 };
 
 use app_core::{
-    BookmarkFolder, BookmarkOrganization, BranchOrganization, HostingError, HostingService,
+    BookmarkFolder, BookmarkOrganization, BranchOrganization, DEFAULT_AI_COMMIT_ENDPOINT,
+    DEFAULT_AI_COMMIT_MODEL, HostingError, HostingService, MAX_AI_COMMIT_DIFF_BYTES,
     RecentRepositoryStore, RecoveryJournalStore, RepositoryOpenError, RepositoryWorkflow,
-    SecretStore, WindowGeometry, WorkflowGitStep, WorkflowKind,
+    SecretStore, WindowGeometry, WorkflowGitStep, WorkflowKind, ai_commit_requires_api_key,
+    build_commit_suggestion_prompt, chat_completions_request_body, split_commit_message,
 };
 use git_cli::{
     CreateStashRequest, GitExecutable, GitStatusError, ResetMode, parse_git_progress_line,
@@ -42,7 +45,7 @@ use git_cli::{
 use git_domain::{
     CommitRequest, ConflictSide, FileHistoryRequest, GitPath, GraphState, HeadStatus, HistoryPage,
     HistoryReference, HistoryRequest, MAX_DISPLAY_DIFF_BYTES, RefSnapshot, ReflogRequest,
-    TreeEntry, TreeEntryKind, WorktreeRepository, layout_history_graph,
+    TreeEntry, TreeEntryKind, WorktreeRepository, layout_history_graph, unified_diff_prompt_text,
 };
 use gpui::{
     App, Application, Bounds, ClipboardItem, Context, ExternalPaths, Focusable, ListAlignment,
@@ -358,6 +361,9 @@ impl GitronimoApp {
         let use_system_git = store.load_use_system_git().unwrap_or(false);
         let auto_stash = store.load_auto_stash().unwrap_or(false);
         let in_app_updates = store.load_in_app_updates().unwrap_or(false);
+        let ai_commit_messages = store.load_ai_commit_messages().unwrap_or(false);
+        let ai_commit_endpoint = store.load_ai_commit_endpoint().unwrap_or_default();
+        let ai_commit_model = store.load_ai_commit_model().unwrap_or_default();
         let (
             welcome_search_input,
             worktree_search_input,
@@ -387,7 +393,6 @@ impl GitronimoApp {
             repository_folders,
             welcome_repo_search: String::new(),
             worktree_file_search: String::new(),
-            search_focus_handle: cx.focus_handle(),
             commit_subject_focused: false,
             commit_body_focused: false,
             commit_composer_expanded: false,
@@ -525,6 +530,9 @@ impl GitronimoApp {
             auto_stash,
             in_app_updates,
             pending_app_update: None,
+            ai_commit_messages,
+            ai_commit_endpoint,
+            ai_commit_model,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
             column_width,
@@ -634,6 +642,9 @@ impl GitronimoApp {
         let use_system_git = store.load_use_system_git().unwrap_or(false);
         let auto_stash = store.load_auto_stash().unwrap_or(false);
         let in_app_updates = store.load_in_app_updates().unwrap_or(false);
+        let ai_commit_messages = store.load_ai_commit_messages().unwrap_or(false);
+        let ai_commit_endpoint = store.load_ai_commit_endpoint().unwrap_or_default();
+        let ai_commit_model = store.load_ai_commit_model().unwrap_or_default();
         let (
             welcome_search_input,
             worktree_search_input,
@@ -663,7 +674,6 @@ impl GitronimoApp {
             repository_folders,
             welcome_repo_search: String::new(),
             worktree_file_search: String::new(),
-            search_focus_handle: cx.focus_handle(),
             commit_subject_focused: false,
             commit_body_focused: false,
             commit_composer_expanded: false,
@@ -801,6 +811,9 @@ impl GitronimoApp {
             auto_stash,
             in_app_updates,
             pending_app_update: None,
+            ai_commit_messages,
+            ai_commit_endpoint,
+            ai_commit_model,
             diagnostics: "Checking Git installation…".into(),
             subscriptions: Vec::new(),
             column_width,
@@ -877,6 +890,210 @@ impl GitronimoApp {
             "In-app updates are off."
         });
         cx.notify();
+    }
+
+    fn set_ai_commit_messages(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if let Err(error) = self.store.save_ai_commit_messages(enabled) {
+            self.set_activity(format!("Could not save AI commit preference: {error}"));
+            cx.notify();
+            return;
+        }
+        self.ai_commit_messages = enabled;
+        self.set_activity(if enabled {
+            "AI commit messages are on. Suggestions fill the composer; you still commit."
+        } else {
+            "AI commit messages are off."
+        });
+        cx.notify();
+    }
+
+    fn prompt_ai_commit_endpoint(&mut self, cx: &mut Context<Self>) {
+        let initial = if self.ai_commit_endpoint.is_empty() {
+            DEFAULT_AI_COMMIT_ENDPOINT.to_owned()
+        } else {
+            self.ai_commit_endpoint.clone()
+        };
+        self.begin_text_prompt(TextPromptKind::AiCommitEndpoint, initial, cx);
+    }
+
+    fn prompt_ai_commit_model(&mut self, cx: &mut Context<Self>) {
+        let initial = if self.ai_commit_model.is_empty() {
+            DEFAULT_AI_COMMIT_MODEL.to_owned()
+        } else {
+            self.ai_commit_model.clone()
+        };
+        self.begin_text_prompt(TextPromptKind::AiCommitModel, initial, cx);
+    }
+
+    fn prompt_ai_commit_key(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let token = cx
+                .background_spawn(async {
+                    Command::new("osascript")
+                        .args(["-e", "text returned of (display dialog \"AI API key (OpenAI-compatible)\" default answer \"\" with hidden answer true)"])
+                        .output()
+                        .ok()
+                        .filter(|output| output.status.success())
+                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
+                        .filter(|token| !token.is_empty())
+                })
+                .await;
+            let Some(token) = token else {
+                return;
+            };
+            let result = cx
+                .background_spawn(async move {
+                    MacKeychainStore
+                        .write(&MacKeychainStore::ai_commit_key(), &token)
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                match result {
+                    Ok(()) => app.set_activity("Saved the AI API key in Keychain."),
+                    Err(_) => app.set_activity("Could not save the AI API key."),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn clear_ai_commit_key(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async {
+                    MacKeychainStore.delete(&MacKeychainStore::ai_commit_key())
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                match result {
+                    Ok(()) => app.set_activity("Removed the AI API key."),
+                    Err(_) => app.set_activity("Could not remove the AI API key."),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn suggest_commit_message(&mut self, cx: &mut Context<Self>) {
+        if !self.ai_commit_messages {
+            self.set_activity("Turn on AI commit messages in Settings.");
+            cx.notify();
+            return;
+        }
+        let ShellState::Repository(repository) = &self.state else {
+            self.set_activity("Open a repository before suggesting a commit message.");
+            cx.notify();
+            return;
+        };
+        if self.mutation_in_flight {
+            self.set_activity(
+                "Wait for the current operation to finish before suggesting a message.",
+            );
+            cx.notify();
+            return;
+        }
+        let paths: Vec<GitPath> = self
+            .status_groups()
+            .staged
+            .iter()
+            .map(|entry| crate::views::components::status_path(entry).clone())
+            .collect();
+        if paths.is_empty() {
+            self.set_activity("Stage changes before suggesting a commit message.");
+            cx.notify();
+            return;
+        }
+        let repository = repository.clone();
+        let use_system_git = self.use_system_git;
+        let endpoint = self.ai_commit_endpoint.clone();
+        let model = self.ai_commit_model.clone();
+        self.mutation_in_flight = true;
+        self.set_activity("Suggesting a commit message…");
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_spawn(async move {
+                    Self::request_commit_suggestion(
+                        &repository,
+                        use_system_git,
+                        &paths,
+                        &endpoint,
+                        &model,
+                    )
+                })
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                app.mutation_in_flight = false;
+                match result {
+                    Ok((subject, body)) => {
+                        app.commit_subject = subject;
+                        app.commit_body = body;
+                        app.commit_composer_expanded = true;
+                        app.refresh_commit_inputs(cx);
+                        app.set_activity("Suggested a commit message. Edit it, then commit.");
+                    }
+                    Err(error) => app.set_activity(error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn request_commit_suggestion(
+        repository: &WorktreeRepository,
+        use_system_git: bool,
+        paths: &[GitPath],
+        endpoint: &str,
+        model: &str,
+    ) -> Result<(String, String), String> {
+        let mut combined = String::new();
+        for path in paths {
+            if combined.len() >= MAX_AI_COMMIT_DIFF_BYTES {
+                combined.push_str("\n[truncated]\n");
+                break;
+            }
+            let remaining = MAX_AI_COMMIT_DIFF_BYTES.saturating_sub(combined.len());
+            let Ok(loaded) = git_backend::file_diff_with_limit(
+                repository,
+                use_system_git,
+                path,
+                true,
+                remaining,
+            )
+            .result
+            else {
+                continue;
+            };
+            combined.push_str(&unified_diff_prompt_text(&loaded.diff, remaining));
+        }
+        let diff = git_cli::redact_git_text(&combined);
+        if diff.trim().is_empty() {
+            return Err("Could not read the staged diff for a suggestion.".into());
+        }
+        let prompt = build_commit_suggestion_prompt(&diff);
+        let body = chat_completions_request_body(model, &prompt);
+        let key = MacKeychainStore
+            .read(&MacKeychainStore::ai_commit_key())
+            .map_err(|_| "Could not read the AI API key.".to_owned())?;
+        let resolved_endpoint = if endpoint.trim().is_empty() {
+            DEFAULT_AI_COMMIT_ENDPOINT
+        } else {
+            endpoint.trim()
+        };
+        if ai_commit_requires_api_key(resolved_endpoint) && key.as_deref().unwrap_or("").is_empty()
+        {
+            return Err("Add an API key in Settings before suggesting a commit message.".into());
+        }
+        let text =
+            crate::ai_commit::request_chat_completion(resolved_endpoint, key.as_deref(), &body)?;
+        let (subject, body) = split_commit_message(&text);
+        if subject.is_empty() {
+            Err("The suggestion was empty.".into())
+        } else {
+            Ok((subject, body))
+        }
     }
 
     fn check_for_app_updates(&mut self, cx: &mut Context<Self>) {
@@ -1594,18 +1811,6 @@ impl GitronimoApp {
         cx.notify();
     }
 
-    #[allow(dead_code)]
-    fn set_welcome_repo_search(&mut self, query: String, cx: &mut Context<Self>) {
-        self.welcome_repo_search = query;
-        cx.notify();
-    }
-
-    #[allow(dead_code)]
-    fn set_worktree_file_search(&mut self, query: String, cx: &mut Context<Self>) {
-        self.worktree_file_search = query;
-        cx.notify();
-    }
-
     fn prompt_create_repository(&mut self, cx: &mut Context<Self>) {
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: false,
@@ -2015,6 +2220,7 @@ return remote_url & linefeed & parent_path"#;
             }
             PaletteCommand::AboutGitRonimo => self.show_about_dialog(cx),
             PaletteCommand::CheckForUpdates => self.check_for_app_updates(cx),
+            PaletteCommand::SuggestCommitMessage => self.suggest_commit_message(cx),
         }
     }
 
@@ -2134,7 +2340,6 @@ return remote_url & linefeed & parent_path"#;
         }
     }
 
-    #[allow(dead_code)]
     fn return_to_welcome(&mut self, cx: &mut Context<Self>) {
         if matches!(self.state, ShellState::Welcome) {
             return;
@@ -2551,6 +2756,43 @@ return remote_url & linefeed & parent_path"#;
                 self.pending_text_prompt = None;
                 self.text_prompt_value.clear();
                 self.rename_bookmark_folder(&id, &value, cx);
+            }
+            TextPromptKind::AiCommitEndpoint => {
+                if value.is_empty() {
+                    self.set_activity("Enter an OpenAI-compatible API base URL.");
+                    cx.notify();
+                    return;
+                }
+                if app_core::chat_completions_url(&value).is_err() {
+                    self.set_activity("Use HTTPS, or HTTP on localhost, for the AI endpoint.");
+                    cx.notify();
+                    return;
+                }
+                if let Err(error) = self.store.save_ai_commit_endpoint(&value) {
+                    self.set_activity(format!("Could not save the AI endpoint: {error}"));
+                    cx.notify();
+                    return;
+                }
+                self.ai_commit_endpoint = value;
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.set_activity("Saved the AI endpoint.");
+            }
+            TextPromptKind::AiCommitModel => {
+                if value.is_empty() {
+                    self.set_activity("Enter a chat model name.");
+                    cx.notify();
+                    return;
+                }
+                if let Err(error) = self.store.save_ai_commit_model(&value) {
+                    self.set_activity(format!("Could not save the AI model: {error}"));
+                    cx.notify();
+                    return;
+                }
+                self.ai_commit_model = value;
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+                self.set_activity("Saved the AI model.");
             }
         }
         cx.notify();
@@ -4475,22 +4717,6 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         .detach();
     }
 
-    #[allow(dead_code)]
-    fn prompt_open_submodule(path: GitPath, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let _ = this.update(cx, |app, _| {
-                let ShellState::Repository(repository) = &app.state else {
-                    return;
-                };
-                let absolute = repository
-                    .worktree_root
-                    .join(PathBuf::from(String::from_utf8_lossy(&path.0).into_owned()));
-                let _ = Command::new("open").arg(&absolute).spawn();
-            });
-        })
-        .detach();
-    }
-
     fn show_rebase(&mut self, repository: WorktreeRepository, cx: &mut Context<Self>) {
         self.navigate_to(RepositoryView::Rebase, cx);
         self.load_rebase_plan(repository, cx);
@@ -5067,48 +5293,6 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
         .detach();
     }
 
-    #[allow(dead_code)]
-    fn prompt_branch_name(create: bool, cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let name = cx
-                .background_spawn(async move {
-                    let title = if create {
-                        "New branch from HEAD"
-                    } else {
-                        "Checkout branch"
-                    };
-                    Command::new("osascript")
-                        .args([
-                            "-e",
-                            &format!(
-                                "text returned of (display dialog \"{title}\" default answer \"\")"
-                            ),
-                        ])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| {
-                            String::from_utf8_lossy(&output.stdout)
-                                .trim_end()
-                                .to_owned()
-                        })
-                        .filter(|name| !name.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                let Some(name) = name else {
-                    return;
-                };
-                if create {
-                    app.create_branch(name, cx);
-                } else {
-                    app.checkout_branch(name, cx);
-                }
-            });
-        })
-        .detach();
-    }
-
     fn checkout_branch(&mut self, branch: String, cx: &mut Context<Self>) {
         let autostash = self.auto_stash;
         self.run_branch_command(
@@ -5120,75 +5304,6 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             },
             cx,
         );
-    }
-
-    #[allow(dead_code)]
-    fn create_branch(&mut self, branch: String, cx: &mut Context<Self>) {
-        self.create_branch_from(branch, None, cx);
-    }
-
-    #[allow(dead_code)]
-    fn prompt_rename_current_branch(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let name = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"Rename current branch\" default answer \"\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|name| !name.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                let Some(name) = name else { return; };
-                let Some(current) = app.working_copy.as_ref().and_then(|status| match &status.branch.head {
-                    HeadStatus::Branch(branch) => String::from_utf8(branch.0.clone()).ok(),
-                    _ => None,
-                }) else {
-                    app.set_activity("Checkout a local branch before renaming it.");
-                    cx.notify();
-                    return;
-                };
-                app.run_branch_command(format!("Renaming {current} to {name}"), move |git, repository| {
-                    git.rename_branch(repository, &current, &name)
-                }, cx);
-            });
-        }).detach();
-    }
-
-    #[allow(dead_code)]
-    fn prompt_delete_local_branch(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let branch = cx
-                .background_spawn(async {
-                    Command::new("osascript")
-                        .args(["-e", "text returned of (display dialog \"Delete local branch\" default answer \"\")"])
-                        .output()
-                        .ok()
-                        .filter(|output| output.status.success())
-                        .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                        .filter(|branch| !branch.is_empty())
-                })
-                .await;
-            let _ = this.update(cx, |app, cx| {
-                let Some(branch) = branch else { return; };
-                if !app
-                    .refs
-                    .local_branches
-                    .iter()
-                    .any(|entry| entry.name.0 == branch.as_bytes())
-                {
-                    app.set_activity(format!("Unknown local branch: {branch}"));
-                    cx.notify();
-                    return;
-                }
-                app.pending_branch_delete = Some(branch.clone());
-                app.set_activity(format!("Review deletion choices for local branch {branch}."));
-                cx.notify();
-            });
-        }).detach();
     }
 
     pub(crate) fn confirm_branch_delete(&mut self, force: bool, cx: &mut Context<Self>) {
@@ -5266,13 +5381,6 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             .and_then(|remote| String::from_utf8(remote.name.0.clone()).ok())
     }
 
-    #[allow(dead_code)]
-    fn has_attached_branch(&self) -> bool {
-        self.working_copy
-            .as_ref()
-            .is_some_and(|status| matches!(status.branch.head, HeadStatus::Branch(_)))
-    }
-
     fn fetch_default_remote(&mut self, cx: &mut Context<Self>) {
         let Some(remote) = self.default_remote() else {
             self.set_activity("No configured remote to fetch.");
@@ -5305,32 +5413,6 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             vec!["lfs".into(), verb.into(), remote.into()],
             cx,
         );
-    }
-
-    #[allow(dead_code)]
-    fn prompt_fetch_remote(cx: &mut Context<Self>) {
-        cx.spawn(async move |this, cx| {
-            let remote = cx.background_spawn(async {
-                Command::new("osascript")
-                    .args(["-e", "text returned of (display dialog \"Fetch configured remote\" default answer \"\")"])
-                    .output().ok().filter(|output| output.status.success())
-                    .map(|output| String::from_utf8_lossy(&output.stdout).trim_end().to_owned())
-                    .filter(|name| !name.is_empty())
-            }).await;
-            let _ = this.update(cx, |app, cx| {
-                let Some(remote) = remote else { return; };
-                if !app.refs.remotes.iter().any(|entry| entry.name.0 == remote.as_bytes()) {
-                    app.set_activity(format!("Unknown configured remote: {remote}"));
-                    cx.notify();
-                    return;
-                }
-                app.run_network_command(
-                    format!("Fetching {remote}"),
-                    vec!["fetch".into(), "--progress".into(), remote.into()],
-                    cx,
-                );
-            });
-        }).detach();
     }
 
     pub(crate) fn pull_current(&mut self, cx: &mut Context<Self>) {
@@ -5667,38 +5749,6 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             }
         }
         destinations.first().cloned()
-    }
-
-    #[allow(dead_code)]
-    fn publish_current(&mut self, cx: &mut Context<Self>) {
-        let Some(remote) = self.default_remote() else {
-            self.set_activity("No configured remote to publish to.");
-            cx.notify();
-            return;
-        };
-        let Some(branch) =
-            self.working_copy
-                .as_ref()
-                .and_then(|status| match &status.branch.head {
-                    HeadStatus::Branch(branch) => String::from_utf8(branch.0.clone()).ok(),
-                    _ => None,
-                })
-        else {
-            self.set_activity("Checkout a local branch before publishing.");
-            cx.notify();
-            return;
-        };
-        self.run_network_command(
-            format!("Publishing {branch} to {remote}"),
-            vec![
-                "push".into(),
-                "--progress".into(),
-                "--set-upstream".into(),
-                remote.into(),
-                branch.into(),
-            ],
-            cx,
-        );
     }
 
     pub(crate) fn request_force_with_lease(&mut self, cx: &mut Context<Self>) {

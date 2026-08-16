@@ -8,12 +8,15 @@ use ui_kit::ThemeColors;
 
 use git_domain::{GitPath, InProgressOperation, StatusEntry, WorktreeRepository};
 
-use crate::app_state::{ForcePushState, GitronimoApp, Mutation, OperationAction, RepositoryView};
+use crate::app_state::{ForcePushState, GitronimoApp, OperationAction, RepositoryView};
 use crate::views::components::{
-    centered_empty_state, file_action_button, list_pane_resize_handle, mutation_button,
-    primary_action_button, state_panel, status_badge_info, status_badge_square, status_label,
-    status_path,
+    centered_empty_state, file_action_button, list_pane_resize_handle, primary_action_button,
+    state_panel, status_badge_info, status_badge_square, status_label, status_path,
 };
+
+pub(crate) const WORKING_COPY_CLEAN_TITLE: &str = "Working tree clean";
+pub(crate) const WORKING_COPY_CLEAN_DETAIL: &str =
+    "Edit files in your editor and changes appear here.";
 
 impl GitronimoApp {
     #[allow(clippy::too_many_lines)]
@@ -325,8 +328,8 @@ impl GitronimoApp {
         let entries = self.modified_entries();
         if entries.is_empty() {
             return centered_empty_state(
-                "Working tree clean",
-                "Edit files in your editor and changes appear here.",
+                WORKING_COPY_CLEAN_TITLE,
+                WORKING_COPY_CLEAN_DETAIL,
                 colors,
             );
         }
@@ -352,57 +355,6 @@ impl GitronimoApp {
             .child(Self::file_list_column_header(colors))
             .children(rows)
             .into_any_element()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn mutation_controls(
-        &self,
-        colors: &ThemeColors,
-        cx: &mut gpui::Context<Self>,
-    ) -> impl IntoElement {
-        let disabled = self.mutation_in_flight;
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_1()
-            .child(mutation_button(
-                "Stage selected",
-                disabled,
-                Mutation::StageSelected,
-                colors,
-                cx,
-            ))
-            .child(mutation_button(
-                "Unstage selected",
-                disabled,
-                Mutation::UnstageSelected,
-                colors,
-                cx,
-            ))
-            .child(mutation_button(
-                "Stage all",
-                disabled,
-                Mutation::StageAll,
-                colors,
-                cx,
-            ))
-            .child(mutation_button(
-                "Unstage all",
-                disabled,
-                Mutation::UnstageAll,
-                colors,
-                cx,
-            ))
-            .child(mutation_button(
-                "Discard selected",
-                disabled,
-                Mutation::DiscardSelected,
-                colors,
-                cx,
-            ))
-            .child(file_action_button("Stash…", colors, cx, |app, cx| {
-                app.open_stash_save_dialog(false, Vec::new(), cx);
-            }))
     }
 
     pub(crate) fn operation_banner_view(

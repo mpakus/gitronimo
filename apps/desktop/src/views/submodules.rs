@@ -1,5 +1,4 @@
-//! Submodules view: list the repository's submodules, update one, or open it
-//! in Finder.
+//! Submodules view: list configured submodules and update them all.
 
 use gpui::{SharedString, div, prelude::*, px};
 use ui_kit::ThemeColors;

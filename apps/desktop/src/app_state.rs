@@ -74,6 +74,7 @@ pub(crate) fn classify_activity(message: &str) -> ActivityKind {
         || lower.starts_with("archived ")
         || lower.starts_with("unarchived ")
         || lower.starts_with("update installed")
+        || lower.starts_with("suggested a commit")
         || lower.ends_with(" saved.")
         || lower.ends_with(" created.")
         || lower.ends_with(" deleted.")
@@ -355,6 +356,8 @@ pub(crate) enum TextPromptKind {
     RenameBookmarkFolder {
         id: String,
     },
+    AiCommitEndpoint,
+    AiCommitModel,
 }
 
 /// Apply Stash options dialog.
@@ -523,6 +526,7 @@ pub(crate) enum PaletteCommand {
     NavigateForward,
     AboutGitRonimo,
     CheckForUpdates,
+    SuggestCommitMessage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -754,6 +758,10 @@ pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
     ("Navigate forward", PaletteCommand::NavigateForward),
     ("About GitRonimo", PaletteCommand::AboutGitRonimo),
     ("Check for updates", PaletteCommand::CheckForUpdates),
+    (
+        "Suggest commit message",
+        PaletteCommand::SuggestCommitMessage,
+    ),
 ];
 
 impl PaletteCommand {
@@ -796,6 +804,7 @@ mod palette_tests {
             "Message history",
             "About GitRonimo",
             "Check for updates",
+            "Suggest commit message",
             "Fetch Git LFS objects",
             "Pull Git LFS objects",
         ] {
@@ -805,9 +814,9 @@ mod palette_tests {
             );
         }
         assert!(
-            PaletteCommand::filtered("push")
+            PaletteCommand::filtered("suggest")
                 .iter()
-                .any(|(_, label, _)| { *label == "Push…" })
+                .any(|(_, label, _)| { *label == "Suggest commit message" })
         );
         assert!(
             PaletteCommand::filtered("").len() >= 55,
@@ -904,8 +913,6 @@ pub(crate) struct GitronimoApp {
     pub repository_folders: std::collections::HashMap<PathBuf, String>,
     pub welcome_repo_search: String,
     pub worktree_file_search: String,
-    #[allow(dead_code)]
-    pub search_focus_handle: FocusHandle,
     pub commit_subject_focused: bool,
     pub commit_body_focused: bool,
     /// Expandable commit card: details (body/options/author) shown when expanded.
@@ -1053,6 +1060,10 @@ pub(crate) struct GitronimoApp {
     /// Settings: check GitHub Releases and replace this `.app` (off by default).
     pub in_app_updates: bool,
     pub pending_app_update: Option<crate::app_update::PendingAppUpdate>,
+    /// Settings: request an AI commit-message suggestion (off by default).
+    pub ai_commit_messages: bool,
+    pub ai_commit_endpoint: String,
+    pub ai_commit_model: String,
     pub diagnostics: String,
     pub subscriptions: Vec<gpui::Subscription>,
     pub column_width: f32,
@@ -1073,15 +1084,6 @@ pub(crate) struct GitronimoApp {
 impl GitronimoApp {
     pub(crate) fn has_commit_draft(&self) -> bool {
         !self.commit_subject.trim().is_empty() || !self.commit_body.trim().is_empty()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn active_search_query(&self) -> &str {
-        match &self.state {
-            ShellState::Welcome => self.welcome_repo_search.as_str(),
-            ShellState::Repository(_) => self.worktree_file_search.as_str(),
-            _ => "",
-        }
     }
 }
 
@@ -1275,6 +1277,18 @@ mod tests {
         assert_eq!(
             classify_activity("Confirm deletion of branch feature/ui-improvements."),
             ActivityKind::Confirm
+        );
+        assert_eq!(
+            classify_activity("Suggested a commit message. Edit it, then commit."),
+            ActivityKind::Success
+        );
+        assert_eq!(
+            classify_activity("Could not suggest a commit message."),
+            ActivityKind::Error
+        );
+        assert_eq!(
+            classify_activity("Suggesting a commit message…"),
+            ActivityKind::Progress
         );
         assert_eq!(
             classify_activity("Refreshing working copy…"),

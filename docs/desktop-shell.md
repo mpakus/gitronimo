@@ -13,7 +13,14 @@ Functional reference for the repository window chrome that sits outside individu
 └─ Overlays: palette, prompts, ref/commit menus, Pull/Push, confirms, About ─┘
 ```
 
-Preferences live at `~/Library/Application Support/Gitronimo/recent-repositories.json` (schema v1). Settings **Auto-stash before switch and pull** is off by default; when on, switch and pull stash dirty work and reapply it. Settings **In-app updates** is off by default; when on, **Check now** (or palette **Check for updates**) can install a verified GitHub release zip. There is no check on launch.
+Preferences live at `~/Library/Application Support/Gitronimo/recent-repositories.json` (schema v1). Settings opt-ins (all default **off**):
+
+| Setting | Behavior |
+|---------|----------|
+| **Git engine** | Default **gix**. **System Git** forces `git_cli`. Unmigrated workflows always use the installed executable. |
+| **Auto-stash before switch and pull** | Stash dirty work, run the switch or pull, reapply. Pull uses Git `--autostash`. |
+| **In-app updates** | **Check now** (or palette **Check for updates**) can install a verified GitHub release zip. No check on launch. |
+| **AI commit messages** | Composer **Suggest** / palette **Suggest commit message** POSTs the redacted staged diff to an OpenAI-compatible endpoint (HTTPS, or HTTP on `127.0.0.1` / `localhost` / `[::1]`). Endpoint and model persist in prefs; API key is Keychain `com.gitronimo.ai-commit`. Fills the composer only — never commits. |
 
 ## Activity bar and message history
 
@@ -78,7 +85,7 @@ Chrome matches the sidebar ref menu (cursor-anchored overlay).
 Searchable list (`PALETTE_COMMANDS` in `app_state.rs`); list viewport scrolls. Includes:
 
 - Open repository, Fetch / Pull… / Push… / Sync, Refresh
-- Stage all / Unstage all, Focus commit composer, Amend last commit
+- Stage all / Unstage all, Focus commit composer, Amend last commit, **Suggest commit message**
 - Stashes: Save stash… / Save including untracked… (dialogs), Save stash snapshot…, Apply latest/selected… (apply dialog), Apply selected stash files, Branch / Pop / Drop selected…
 - Create branch… / Create tag…
 - Show working copy / history / stashes / remotes / settings / **workflow** / pull requests / branches review / reflog / LFS / worktrees / submodules / rebase / conflicts…
@@ -96,6 +103,10 @@ Dispatch is `run_palette_command` in `main.rs`. Adding a user-facing action that
 - **Apply** (toolbar Apply, Stashes Apply…): dialog with Delete after applying (pop) and Restore staging area (`--index`).
 - Stashes detail: date + subject list; on select, changeset paths + read-only diff; **Apply selected files** / Apply… / Pop… / Drop… / Branch…. Click or Cmd-click files, then drag them onto **Working Copy** in the sidebar to restore those paths without dropping the stash.
 - Create/apply/pop/drop/branch refresh Working Copy and the stash list. Settings can auto-stash before switch and pull (off by default).
+
+## Submodules
+
+Palette **Show submodules**. The view lists configured submodules and **Update all…** (`git submodule update --init` on system Git). There is no Finder-open action.
 
 ## Related docs
 

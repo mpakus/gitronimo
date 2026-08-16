@@ -125,10 +125,10 @@ impl Render for GitronimoApp {
                     .is_some()
                     .then(|| self.choice_prompt_overlay(&colors, cx).into_any_element()),
             )
-            .children(self.welcome_plus_menu_open.then(|| {
-                self.welcome_plus_menu_overlay(&colors, cx)
-                    .into_any_element()
-            }))
+            .children(
+                self.welcome_plus_menu_open
+                    .then(|| Self::welcome_plus_menu_overlay(&colors, cx).into_any_element()),
+            )
             .children(self.ref_context.is_some().then(|| {
                 self.ref_context_menu_overlay(&colors, cx)
                     .into_any_element()
@@ -454,6 +454,8 @@ impl GitronimoApp {
             }
             TextPromptKind::CreateBookmarkFolder => ("New group".into(), "Create"),
             TextPromptKind::RenameBookmarkFolder { .. } => ("Rename group".into(), "Rename"),
+            TextPromptKind::AiCommitEndpoint => ("AI API base URL".into(), "Save"),
+            TextPromptKind::AiCommitModel => ("AI chat model".into(), "Save"),
         };
         div()
             .absolute()
@@ -812,9 +814,7 @@ impl GitronimoApp {
             .into_any_element()
     }
 
-    #[allow(clippy::unused_self)]
     pub(crate) fn welcome_plus_menu_overlay(
-        &self,
         colors: &ui_kit::ThemeColors,
         cx: &mut gpui::Context<Self>,
     ) -> AnyElement {

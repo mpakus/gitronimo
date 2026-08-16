@@ -1,5 +1,35 @@
 # Implementation work log
 
+## 2026-08-16 — Remove unused handlers and dead_code allows
+
+**Intent:** Source still compiled only because of `#[allow(dead_code)]` on superseded osascript prompts, unused UI helpers, and a leftover `search_focus_handle` (Command-F focuses the search `SingleLineInput`). Delete unused code, drop stale clippy allows, keep live paths (in-app text prompts, context menus, Push/Fetch toolbar). Do not bump `APP_VERSION`.
+
+**Files:** `apps/desktop` (`main.rs`, `app_state.rs`, `views/components.rs`, `views/working_copy.rs`, `views/welcome.rs`, `views/workspace.rs`, `views/submodules.rs`, `tests.rs`), `crates/app_core` (stop re-exporting unused `ai_commit_endpoint_is_allowed`), docs.
+
+**Acceptance:** No `#[allow(dead_code)]` left in desktop. `return_to_welcome` stays (used). `cargo clippy --workspace --all-targets --all-features -- -D warnings` and tests stay green. Empty-state test asserts copy the Working Copy view actually shows.
+
+**References:** in-tree source.
+
+## 2026-08-16 — Sync docs, AGENTS.md, and tests with in-tree 2.0 work
+
+**Intent:** Source already ships PLAN-v2 A/E/D/G (gix default, LFS/stash extras, opt-in updater, opt-in AI commits) at product version 1.0.0. README, AGENTS.md, several `docs/` files, and SECURITY still describe the 1.0 Git-CLI-only client without those Settings surfaces. Align agent rules, user docs, and tests with the code. Do not bump `APP_VERSION`. No new crates.
+
+**Files:** `AGENTS.md`, `README.md`, `SECURITY.md`, `docs/*`, `PLAN.md` (ADR filename), `crates/app_core/src/ai_commit.rs`, `apps/desktop/src/ai_commit.rs`, `apps/desktop/src/app_state.rs`, `apps/desktop/src/main.rs` (use shared key-policy helper).
+
+**Acceptance:** README distinguishes tagged 1.0.0 from unreleased-in-tree features. AGENTS.md documents Git engine, AI commit, and updater rules. Tests cover loopback IPv6, empty endpoint/model defaults, HTTPS-requires-key, malformed completions, curl include parse, and activity classification. Gates stay green.
+
+**References:** in-tree source. No peer retrieval.
+
+## 2026-08-16 — Phase G: optional AI commit messages
+
+**Intent:** PLAN-v2 Phase G. Settings toggle (default **off**) lets the user request a commit-message suggestion from a configured HTTPS (or localhost) OpenAI-compatible endpoint. The prompt is the staged unified diff only (capped, redacted). The suggestion fills the composer; the user must edit/commit as usual. Failure is a no-op. No telemetry. No new HTTP/AI crate (`curl` + `serde_json` already in tree). Do not send the GitHub PAT or the full repo.
+
+**Files:** `crates/app_core` (preference, prompt/JSON/parse), `crates/git_domain` (diff excerpt), `crates/platform_macos` (Keychain key), `apps/desktop` (Settings, composer Suggest, palette), docs.
+
+**Acceptance:** Preference defaults off. Empty staged diff / disabled toggle / missing remote key do not call the network. Fixture tests: URL allowlist, prompt contains only the supplied diff, completion JSON → subject/body, markdown fences stripped. Suggest does not invoke commit. API errors leave the composer unchanged.
+
+**References:** rgitui `rgitui_ai` (MIT) — OpenAI-compatible chat JSON and fill-composer (not auto-commit), adapted; do **not** copy tool-calling or README/CLAUDE.md project context (PLAN: staged diff only). GitComet is AGPL — approach-only.
+
 ## 2026-08-16 — Phase D: in-app updates (opt-in)
 
 **Intent:** PLAN-v2 Phase D. Settings toggle (default **off**) lets the user check GitHub Releases for a newer notarized `GitRonimo-v*.zip`, confirm, download, verify SHA-256, Gatekeeper-assess the extracted `.app`, then replace this bundle. No telemetry, no PAT, no unsigned bits, no new crates (`curl` like `hosting_github`). Do not check on launch.
