@@ -178,6 +178,9 @@ fn asset_download_url(assets: &[Value], name: &str) -> Result<String, HostingErr
 
 /// Looks up a 64-hex SHA-256 for `filename` in `shasum -a 256` text.
 ///
+/// `shasum` may print a relative path (`target/release-universal/GitRonimo-v2.0.2.zip`).
+/// The lookup uses the final path component so that matches `GitRonimo-v2.0.2.zip`.
+///
 /// # Errors
 /// Returns parse errors for path traversal in the filename or a missing entry.
 pub fn sha256_for_filename(text: &str, filename: &str) -> Result<String, HostingError> {
@@ -218,10 +221,23 @@ fn parse_sum_line(line: &str) -> Option<(String, String)> {
     }
     let rest = line.get(64..)?.trim_start();
     let name = rest.strip_prefix('*').unwrap_or(rest).trim();
-    if !is_safe_asset_filename(name) {
-        return None;
+    let basename = sum_entry_basename(name)?;
+    Some((hash.to_ascii_lowercase(), basename))
+}
+
+/// Final component of a `shasum` path. Rejects `..` and empty names.
+fn sum_entry_basename(name: &str) -> Option<String> {
+    let mut last = None;
+    for part in name.split(['/', '\\']) {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." || !is_safe_asset_filename(part) {
+            return None;
+        }
+        last = Some(part);
     }
-    Some((hash.to_ascii_lowercase(), name.to_owned()))
+    last.map(str::to_owned)
 }
 
 #[must_use]
@@ -349,6 +365,11 @@ mod tests {
         assert_eq!(
             sha256_for_filename(text, "GitRonimo-v1.0.1.zip").expect("hash"),
             "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        );
+        let with_dir = "b73853d3477f3f4756296c3ed4e31becb1eee254c39ee3d7fd03d87f6440a6e0  target/release-universal/GitRonimo-v2.0.2.zip\n";
+        assert_eq!(
+            sha256_for_filename(with_dir, "GitRonimo-v2.0.2.zip").expect("basename"),
+            "b73853d3477f3f4756296c3ed4e31becb1eee254c39ee3d7fd03d87f6440a6e0"
         );
         assert!(sha256_for_filename(text, "../GitRonimo-v1.0.1.zip").is_err());
         let slip =

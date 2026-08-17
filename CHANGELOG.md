@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Release publish uses GitHub REST (`gh api`) with retries instead of `gh release view` / `create`. Those GraphQL commands 503'd after v2.0.3 notarized (“No server is currently available”) while REST still listed releases.
+
+## 2.0.3 — 2026-08-17
+
+Product version **2.0.3** (About GitRonimo / `APP_VERSION` and packager bundle version). Tag `v2.0.3` for the notarized universal zip.
+
+- In-app updates accept a `SHA256SUMS.txt` line that includes a directory prefix (the v2.0.2 release listed `target/release-universal/GitRonimo-v2.0.2.zip`). The release workflow now hashes the zip from its own directory so the filename is basename-only.
+
 ## 2.0.2 — 2026-08-17
 
 Product version **2.0.2** (About GitRonimo / `APP_VERSION` and packager bundle version). Tag `v2.0.2` for the notarized universal zip.
