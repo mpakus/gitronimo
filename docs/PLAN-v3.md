@@ -10,7 +10,7 @@ This is post-2.0.0 work. Remaining checkout / merge / rebase / stash / push / ho
 
 ## 2.0.0 already ships
 
-Working Copy, History, branches, stashes, remotes, GitHub PRs (personal-access token), Workflow, command palette, Message history, merge/rebase/cherry-pick/revert/reset plus continue/abort and Interactive rebase, fetch/pull/push with cancel, in-app updater (opt-in), LFS fetch/pull, stash extras, optional AI commit messages, default `gix` engine with system Git fallback.
+Working Copy, History, branches, stashes, remotes, GitHub PRs (personal-access token), Workflow, command palette, Message history, merge/rebase/cherry-pick/revert/reset plus continue/abort and Interactive rebase, fetch/pull/push with cancel, in-app updater (GitRonimo Settings, on by default), LFS fetch/pull, stash extras, optional AI commit messages, default `gix` engine with system Git fallback.
 
 WORKSPACE sidebar destinations are Working Copy / History / Stashes / Settings. Pull Requests, LFS, Worktrees, Submodules, Reflog, Blame, Compare, Branches Review, and Conflicts remain palette-only.
 

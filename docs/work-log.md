@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-08-17 — App Settings overlay; in-app updates on by default
+
+**Intent:** Repository Settings Off/On for Updates did not toggle (duplicate GPUI `action-button:Off` / `On` ids with auto-stash and AI). In-app updates belong on the app, not a repo. Move UPDATES into a Welcome-and-repo overlay (**GitRonimo → Settings…**, Command-comma). Default the preference **on**. Unique button ids. Do not bump `APP_VERSION`. No check on launch.
+
+**Files:** `apps/desktop` (actions, menus, keymap, workspace, settings, about, components, main, tests, app_state), `crates/app_core`, CHANGELOG, README, AGENTS.md, docs.
+
+**Acceptance:** Off/On in App Settings have distinct ids and persist. Missing prefs and legacy `in_app_updates: false` load as on; explicit off still persists. Menu has **Settings…**. Repo Settings no longer lists UPDATES. Overlay paints on Welcome. Gates green.
+
+**References:** in-tree About overlay (`views/about.rs`). rgitui settings is MIT approach-only for a separate window; GitComet is AGPL — approach-only. XERJ had no unique-id Off/On pattern.
+
 ## 2026-08-17 — Diff preview actually scrolls horizontally
 
 **Intent:** Vertical overflow worked after `overflow_scroll`, but long lines still could not pan left/right. GPUI only enables X scroll when content is wider than the pane; flex-stretched rows were sized to the viewport, so `scroll_max.x` stayed 0. Wrap hunks in an inner column with `min_w` from the longest line (GPUI scrollable example uses an explicit child width). Do not bump `APP_VERSION`.

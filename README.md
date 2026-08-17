@@ -23,10 +23,11 @@ The current release includes:
 - **Network** — fetch, pull, publish, and push in the background with cancellation; progress in the activity bar; Pull/Push dialogs for options
 - **Command palette / Message history** — searchable scrollable palette (`Command-Shift-P`); activity-bar history of statuses, errors, and confirmations
 - **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **2.0.1**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co), **Check for updates**)
+- **App Settings** — **GitRonimo → Settings…** (Command-comma) for in-app updates
 - **Git engine** — default `gix`; Settings **Use system Git** forces the installed executable
 - **Git LFS** — Fetch / Pull from the LFS view and palette
 - **Stash extras** — file drag onto Working Copy, optional auto-stash, named snapshots
-- **In-app updates** — Settings opt-in (off by default); **Check for Updates…** on the GitRonimo menu, About, Settings, and palette. SHA-256 and Gatekeeper before replace. No check on launch
+- **In-app updates** — **GitRonimo → Settings…** (Command-comma), on by default; **Check for Updates…** on the GitRonimo menu, About, App Settings, and palette. SHA-256 and Gatekeeper before replace. No check on launch
 - **AI commit messages** — Settings opt-in; **Suggest** fills the composer from the staged diff and never commits
 - **Safety** — typed Git invocation, force-with-lease confirmation, local crash reports, recovery from missing repos and stale index locks
 
@@ -50,6 +51,7 @@ See [PLAN.md](PLAN.md) for the full implementation contract and [CHANGELOG.md](C
 | Command-[ / Command-] | Back / Forward |
 | Command-Q | Quit GitRonimo |
 | Command-H | Hide GitRonimo |
+| Command-, | App Settings |
 | Command-F | Focus toolbar search |
 
 Working Copy selection and batch checkbox staging: [`docs/keyboard-shortcuts.md`](docs/keyboard-shortcuts.md).

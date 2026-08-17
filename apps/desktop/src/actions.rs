@@ -21,6 +21,7 @@ actions!(
         Hide,
         About,
         CheckForUpdates,
+        OpenSettings,
         Quit
     ]
 );

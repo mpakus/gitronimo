@@ -19,7 +19,7 @@ fn about_updates_copy(in_app_updates: bool) -> &'static str {
     if in_app_updates {
         "In-app updates are on. Check GitHub Releases for a newer notarized zip."
     } else {
-        "In-app updates are off. Turn them on in Settings, then check."
+        "In-app updates are off. Turn them on in GitRonimo → Settings…, then check."
     }
 }
 

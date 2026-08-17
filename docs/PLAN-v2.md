@@ -1,6 +1,6 @@
 # PLAN-v2.md — GitRonimo 2.0.0
 
-**Status:** Phase A prefer-gix complete; Phase E complete (LFS, stash partial apply, auto-stash, snapshots); Phase D complete (opt-in in-app updates); Phase G complete (optional AI commit messages). Checkout/merge/rebase/push/hooks stay on system Git.  
+**Status:** Phase A prefer-gix complete; Phase E complete (LFS, stash partial apply, auto-stash, snapshots); Phase D complete (in-app updates, now on by default in GitRonimo Settings); Phase G complete (optional AI commit messages). Checkout/merge/rebase/push/hooks stay on system Git.  
 **As of:** 2026-08-16  
 **Product today:** **2.0.1** (`APP_VERSION` / packager). Architecture and crate rules stay in [`PLAN.md`](../PLAN.md) unless an item below supersedes them.
 

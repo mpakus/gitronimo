@@ -60,8 +60,8 @@ use ui_kit::Appearance;
 
 use crate::actions::{
     About, CheckForUpdates, CommandPalette, FocusComposer, FocusSearch, Hide, HistoryNext,
-    HistoryPrevious, NavigateBack, NavigateForward, OpenRepository, Quit, Refresh, SaveStash,
-    SelectAllStatusFiles, ShortcutReference, ToggleAppearance, WidenSidebar,
+    HistoryPrevious, NavigateBack, NavigateForward, OpenRepository, OpenSettings, Quit, Refresh,
+    SaveStash, SelectAllStatusFiles, ShortcutReference, ToggleAppearance, WidenSidebar,
 };
 use crate::app_state::{
     ACTIVITY_LOG_CAPACITY, ActivityLogEntry, AppConfirmDialog, ChoicePromptKind, CommitContext,
@@ -360,7 +360,7 @@ impl GitronimoApp {
             .and_then(|path| store.load_workflow(path).ok().flatten());
         let use_system_git = store.load_use_system_git().unwrap_or(false);
         let auto_stash = store.load_auto_stash().unwrap_or(false);
-        let in_app_updates = store.load_in_app_updates().unwrap_or(false);
+        let in_app_updates = store.load_in_app_updates().unwrap_or(true);
         let ai_commit_messages = store.load_ai_commit_messages().unwrap_or(false);
         let ai_commit_endpoint = store.load_ai_commit_endpoint().unwrap_or_default();
         let ai_commit_model = store.load_ai_commit_model().unwrap_or_default();
@@ -443,6 +443,7 @@ impl GitronimoApp {
             command_palette_query: String::new(),
             command_palette_selected: 0,
             show_about: false,
+            show_app_settings: false,
             pending_overlay_focus: None,
             selected_branch_review: None,
             branches_review_show_all: false,
@@ -641,7 +642,7 @@ impl GitronimoApp {
         };
         let use_system_git = store.load_use_system_git().unwrap_or(false);
         let auto_stash = store.load_auto_stash().unwrap_or(false);
-        let in_app_updates = store.load_in_app_updates().unwrap_or(false);
+        let in_app_updates = store.load_in_app_updates().unwrap_or(true);
         let ai_commit_messages = store.load_ai_commit_messages().unwrap_or(false);
         let ai_commit_endpoint = store.load_ai_commit_endpoint().unwrap_or_default();
         let ai_commit_model = store.load_ai_commit_model().unwrap_or_default();
@@ -724,6 +725,7 @@ impl GitronimoApp {
             command_palette_query: String::new(),
             command_palette_selected: 0,
             show_about: false,
+            show_app_settings: false,
             pending_overlay_focus: None,
             selected_branch_review: None,
             branches_review_show_all: false,
@@ -1098,7 +1100,7 @@ impl GitronimoApp {
 
     pub(crate) fn check_for_app_updates(&mut self, cx: &mut Context<Self>) {
         if !self.in_app_updates {
-            self.set_activity("Turn on Updates in Settings to check GitHub Releases.");
+            self.set_activity("Turn on Updates in GitRonimo → Settings… to check GitHub Releases.");
             cx.notify();
             return;
         }
@@ -1980,6 +1982,10 @@ return remote_url & linefeed & parent_path"#;
         self.show_about_dialog(cx);
     }
 
+    fn show_settings_menu(&mut self, _: &OpenSettings, _: &mut Window, cx: &mut Context<Self>) {
+        self.show_app_settings_dialog(cx);
+    }
+
     fn check_for_updates_menu(
         &mut self,
         _: &CheckForUpdates,
@@ -1990,6 +1996,7 @@ return remote_url & linefeed & parent_path"#;
     }
 
     pub(crate) fn show_about_dialog(&mut self, cx: &mut Context<Self>) {
+        self.show_app_settings = false;
         self.show_about = true;
         cx.notify();
     }
@@ -1997,6 +2004,19 @@ return remote_url & linefeed & parent_path"#;
     pub(crate) fn close_about_dialog(&mut self, cx: &mut Context<Self>) {
         if self.show_about {
             self.show_about = false;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn show_app_settings_dialog(&mut self, cx: &mut Context<Self>) {
+        self.show_about = false;
+        self.show_app_settings = true;
+        cx.notify();
+    }
+
+    pub(crate) fn close_app_settings_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.show_app_settings {
+            self.show_app_settings = false;
             cx.notify();
         }
     }
@@ -2228,6 +2248,7 @@ return remote_url & linefeed & parent_path"#;
                 }
             }
             PaletteCommand::AboutGitRonimo => self.show_about_dialog(cx),
+            PaletteCommand::AppSettings => self.show_app_settings_dialog(cx),
             PaletteCommand::CheckForUpdates => self.check_for_app_updates(cx),
             PaletteCommand::SuggestCommitMessage => self.suggest_commit_message(cx),
         }

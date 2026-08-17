@@ -1,11 +1,13 @@
-//! Dedicated Settings view: appearance, Git engine, stashing, updates, AI commits, identity, GitHub, and shortcuts.
+//! Repository Settings view, plus the app-level Settings overlay (updates).
 
-use gpui::{div, prelude::*, px};
+use gpui::{AnyElement, MouseButton, MouseDownEvent, div, prelude::*, px};
 use ui_kit::ThemeColors;
 
 use crate::actions::ShortcutReference;
 use crate::app_state::{GitronimoApp, ThemeMode};
-use crate::views::components::{detail_row, detail_section, file_action_button, view_panel_header};
+use crate::views::components::{
+    detail_row, detail_section, file_action_button, file_action_button_named, view_panel_header,
+};
 use git_domain::ServiceAuthState;
 
 impl GitronimoApp {
@@ -31,8 +33,10 @@ impl GitronimoApp {
             .child(view_panel_header("Settings", colors, None))
             .child(
                 div()
+                    .id("settings-scroll")
                     .flex_1()
-                    .overflow_hidden()
+                    .min_h(px(0.0))
+                    .overflow_y_scroll()
                     .p_4()
                     .flex()
                     .flex_col()
@@ -59,7 +63,6 @@ impl GitronimoApp {
                     )
                     .child(self.git_engine_settings(colors, cx))
                     .child(self.auto_stash_settings(colors, cx))
-                    .child(self.updates_settings(colors, cx))
                     .child(self.ai_commit_settings(colors, cx))
                     .child(detail_section("GIT IDENTITY", colors))
                     .child(detail_row("Committer", &self.author_identity, colors))
@@ -99,6 +102,58 @@ impl GitronimoApp {
                         },
                     )),
             )
+    }
+
+    pub(crate) fn app_settings_overlay(
+        &self,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        div()
+            .absolute()
+            .inset_0()
+            .bg(colors.overlay_scrim)
+            .flex()
+            .items_center()
+            .justify_center()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|app, _: &MouseDownEvent, _, cx| {
+                    app.close_app_settings_dialog(cx);
+                }),
+            )
+            .child(
+                div()
+                    .id("app-settings")
+                    .debug_selector(|| "app-settings".into())
+                    .w(px(520.0))
+                    .max_h(px(420.0))
+                    .overflow_y_scroll()
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .bg(colors.panel_background)
+                    .border_1()
+                    .border_color(colors.border)
+                    .rounded(px(12.0))
+                    .shadow_lg()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(colors.text_primary)
+                            .child("GitRonimo Settings"),
+                    )
+                    .child(self.updates_settings(colors, cx)),
+            )
+            .into_any_element()
     }
 
     fn git_engine_settings(
@@ -147,12 +202,24 @@ impl GitronimoApp {
                 div()
                     .flex()
                     .gap_1()
-                    .child(file_action_button("Off", colors, cx, |app, cx| {
-                        app.set_auto_stash(false, cx);
-                    }))
-                    .child(file_action_button("On", colors, cx, |app, cx| {
-                        app.set_auto_stash(true, cx);
-                    })),
+                    .child(file_action_button_named(
+                        "auto-stash-off",
+                        "Off",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.set_auto_stash(false, cx);
+                        },
+                    ))
+                    .child(file_action_button_named(
+                        "auto-stash-on",
+                        "On",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.set_auto_stash(true, cx);
+                        },
+                    )),
             )
             .child(
                 div()
@@ -176,28 +243,50 @@ impl GitronimoApp {
             .flex_col()
             .gap_3()
             .child(detail_section("UPDATES", colors))
-            .child(detail_row("Installed version", crate::views::about::APP_VERSION, colors))
+            .child(detail_row(
+                "Installed version",
+                crate::views::about::APP_VERSION,
+                colors,
+            ))
             .child(detail_row("In-app updates", state, colors))
             .child(
                 div()
                     .flex()
                     .gap_1()
-                    .child(file_action_button("Off", colors, cx, |app, cx| {
-                        app.set_in_app_updates(false, cx);
-                    }))
-                    .child(file_action_button("On", colors, cx, |app, cx| {
-                        app.set_in_app_updates(true, cx);
-                    }))
-                    .child(file_action_button("Check now", colors, cx, |app, cx| {
-                        app.check_for_app_updates(cx);
-                    })),
+                    .child(file_action_button_named(
+                        "updates-off",
+                        "Off",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.set_in_app_updates(false, cx);
+                        },
+                    ))
+                    .child(file_action_button_named(
+                        "updates-on",
+                        "On",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.set_in_app_updates(true, cx);
+                        },
+                    ))
+                    .child(file_action_button_named(
+                        "updates-check-now",
+                        "Check now",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.check_for_app_updates(cx);
+                        },
+                    )),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(colors.text_muted)
                     .child(
-                        "Off by default. When on, Check now reads GitHub Releases for a newer notarized zip, verifies SHA-256 and Gatekeeper, then replaces this .app. No check on launch. No telemetry.",
+                        "On by default. Check now reads GitHub Releases for a newer notarized zip, verifies SHA-256 and Gatekeeper, then replaces this .app. No check on launch. No telemetry.",
                     ),
             )
             .into_any_element()
@@ -231,12 +320,24 @@ impl GitronimoApp {
                 div()
                     .flex()
                     .gap_1()
-                    .child(file_action_button("Off", colors, cx, |app, cx| {
-                        app.set_ai_commit_messages(false, cx);
-                    }))
-                    .child(file_action_button("On", colors, cx, |app, cx| {
-                        app.set_ai_commit_messages(true, cx);
-                    })),
+                    .child(file_action_button_named(
+                        "ai-commit-off",
+                        "Off",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.set_ai_commit_messages(false, cx);
+                        },
+                    ))
+                    .child(file_action_button_named(
+                        "ai-commit-on",
+                        "On",
+                        colors,
+                        cx,
+                        |app, cx| {
+                            app.set_ai_commit_messages(true, cx);
+                        },
+                    )),
             )
             .child(
                 div()

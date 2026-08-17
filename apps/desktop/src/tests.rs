@@ -203,7 +203,7 @@ fn window_titles_distinguish_welcome_loading_and_drafts() {
         window_title(&ShellState::Loading("/tmp/example".into()), false),
         "Opening repository — Gitronimo"
     );
-    assert_eq!(keymap::bindings().len(), 17);
+    assert_eq!(keymap::bindings().len(), 18);
 }
 
 #[test]
@@ -247,6 +247,22 @@ fn command_h_is_bound_to_hide() {
 }
 
 #[test]
+fn command_comma_is_bound_to_settings() {
+    let settings = keymap::bindings()
+        .into_iter()
+        .find(|binding| binding.action().partial_eq(&crate::actions::OpenSettings))
+        .expect("Command-comma should be bound");
+    let [keystroke] = settings.keystrokes() else {
+        panic!("OpenSettings should use a single keystroke");
+    };
+    assert_eq!(keystroke.key(), ",");
+    assert!(
+        keystroke.modifiers().platform,
+        "Settings needs the Command key"
+    );
+}
+
+#[test]
 fn application_menu_is_named_gitronimo_and_starts_with_about() {
     let menus = menus::application_menus();
     assert_eq!(
@@ -262,6 +278,10 @@ fn application_menu_is_named_gitronimo_and_starts_with_about() {
         panic!("the second application menu item should be Check for Updates");
     };
     assert_eq!(name.as_ref(), "Check for Updates…");
+    let gpui::MenuItem::Action { name, .. } = &menus[0].items[3] else {
+        panic!("Settings… should follow Check for Updates in the GitRonimo menu");
+    };
+    assert_eq!(name.as_ref(), "Settings…");
 }
 
 #[test]
@@ -958,6 +978,33 @@ fn about_overlay_renders_from_show_about_dialog(cx: &mut TestAppContext) {
     assert!(
         cx.debug_bounds("about-check-updates").is_some(),
         "About GitRonimo must offer Check for updates"
+    );
+}
+
+#[gpui::test]
+fn app_settings_overlay_renders_unique_update_toggles(cx: &mut TestAppContext) {
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    app.update(cx, GitronimoApp::show_app_settings_dialog);
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("app-settings").is_some(),
+        "GitRonimo Settings must paint the overlay"
+    );
+    assert!(
+        cx.debug_bounds("button:updates-on").is_some(),
+        "Updates On must use a unique button id"
+    );
+    assert!(
+        cx.debug_bounds("button:updates-off").is_some(),
+        "Updates Off must use a unique button id"
+    );
+    assert!(
+        cx.debug_bounds("button:updates-check-now").is_some(),
+        "Check now must use a unique button id"
     );
 }
 
