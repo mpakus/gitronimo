@@ -82,7 +82,7 @@ Read `docs/desktop-shell.md` before changing activity bar, overlays, pins, or th
 - **Pins / archives:** persist via `RecentRepositoryStore::save_branch_organization`; sidebar shows pins flat atop BRANCHES (no “PINNED” label). Preference RMW is path-locked — do not reintroduce unlocked load-modify-save on that JSON.
 - **Command palette:** new user-facing commands that already have handlers should get a `PaletteCommand` + `PALETTE_COMMANDS` label + `run_palette_command` arm; keep the overlay list scrollable. Current extras include **Suggest commit message**, **Check for updates**, **App settings**, **Fetch Git LFS objects**, **Pull Git LFS objects**, **Save stash snapshot…**, **Apply selected stash files**.
 - **Overlays:** Git/domain work stays in `main.rs`; `views/workspace.rs` only renders and dispatches. About GitRonimo is `views/about.rs` (click outside to dismiss; **Check for updates** closes About then runs the same handler as Settings). App Settings is `views/settings.rs` `app_settings_overlay` (click outside to dismiss; **GitRonimo → Settings…** / Command-comma).
-- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs` (currently **2.0.2**). Bump that string and `[package.metadata.packager] version` together after each release. Independent of the Cargo workspace version.
+- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs` (currently **2.0.3**). Bump that string and `[package.metadata.packager] version` together after each release. Independent of the Cargo workspace version.
 - **Binary / menu name:** crate remains `gitronimo-desktop`; the macOS executable and bundle name is `GitRonimo` so the application menu title is GitRonimo (`GitRonimo.app`).
 
 ## Git engine (agent context)

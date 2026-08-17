@@ -1,5 +1,25 @@
 # Implementation work log
 
+## 2026-08-17 — Cut product version 2.0.3
+
+**Intent:** Bump product version to **2.0.3** (`APP_VERSION` + packager) for the SHA256SUMS basename lookup and release-workflow hash path. Cargo workspace version stays `0.1.0`.
+
+**Files:** `apps/desktop/src/views/about.rs`, `apps/desktop/Cargo.toml`, `apps/desktop/src/tests.rs`, CHANGELOG, README, AGENTS.md, PLAN.md, docs.
+
+**Acceptance:** About and packager show `2.0.3`. Test asserts `APP_VERSION`. Changelog has a 2.0.3 section. Gates green.
+
+**References:** in-tree version bump sites from the 2.0.2 cut.
+
+## 2026-08-17 — SHA256SUMS zip hash lookup uses basename
+
+**Intent:** In-app install failed with “SHA256SUMS.txt is missing the zip hash.” The release workflow ran `shasum` on `target/release-universal/GitRonimo-${tag}.zip`, so the published sums file stored that path. The parser required an exact basename and rejected `/`. Match the final path component (still reject `..`). Hash from the zip’s directory in CI. Replace the v2.0.2 GitHub `SHA256SUMS.txt` so already-shipped apps can install. Do not bump `APP_VERSION`.
+
+**Files:** `crates/hosting_github/src/releases.rs`, `.github/workflows/release.yml`, CHANGELOG, docs.
+
+**Acceptance:** A sums line with `target/release-universal/GitRonimo-v2.0.2.zip` returns the hash for `GitRonimo-v2.0.2.zip`. `../` entries stay rejected. Workflow writes a basename-only sums file. Live v2.0.2 asset lists `GitRonimo-v2.0.2.zip`. Gates green.
+
+**References:** in-tree `sha256_for_filename`. Published v2.0.2 `SHA256SUMS.txt` (112 bytes, path prefix). GitComet is AGPL — approach-only.
+
 ## 2026-08-17 — Cut product version 2.0.2
 
 **Intent:** Bump product version to **2.0.2** (`APP_VERSION` + packager) for App Settings and in-app updates default-on. Cargo workspace version stays `0.1.0`.

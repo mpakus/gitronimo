@@ -117,7 +117,7 @@ Palette **Show submodules**. The view lists configured submodules and **Update a
 
 ## About GitRonimo
 
-**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **2.0.2**, bump after each release), “Made in Austin ✩ Texas”, https://aomega.co, in-app update status, and **Check for updates** (same handler as App Settings **Check now** and **GitRonimo → Check for Updates…**). Click outside to dismiss. The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.
+**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **2.0.3**, bump after each release), “Made in Austin ✩ Texas”, https://aomega.co, in-app update status, and **Check for updates** (same handler as App Settings **Check now** and **GitRonimo → Check for Updates…**). Click outside to dismiss. The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.
 
 ## App Settings
 

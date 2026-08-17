@@ -2,7 +2,7 @@
 
 **Status:** Phase A prefer-gix complete; Phase E complete (LFS, stash partial apply, auto-stash, snapshots); Phase D complete (in-app updates, now on by default in GitRonimo Settings); Phase G complete (optional AI commit messages). Checkout/merge/rebase/push/hooks stay on system Git.  
 **As of:** 2026-08-16  
-**Product today:** **2.0.2** (`APP_VERSION` / packager). Architecture and crate rules stay in [`PLAN.md`](../PLAN.md) unless an item below supersedes them.
+**Product today:** **2.0.3** (`APP_VERSION` / packager). Architecture and crate rules stay in [`PLAN.md`](../PLAN.md) unless an item below supersedes them.
 
 This is post-1.0.0 work. Do not start it while tagging or smoking 1.0.0. Hand steps for the 1.0.0 tag remain in [`todo-v1.md`](todo-v1.md). Remaining boxes below are `gix` fallbacks. Post-2.0.0 product work is [`PLAN-v3.md`](PLAN-v3.md).
 

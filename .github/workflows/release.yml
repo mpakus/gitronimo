@@ -81,7 +81,10 @@ jobs:
           spctl --assess --type execute --verbose=4 "$app_path"
           rm -f "$zip_path"
           ditto -c -k --sequesterRsrc --keepParent "$app_path" "$zip_path"
-          shasum -a 256 "$zip_path" > target/release-universal/SHA256SUMS.txt
+          (
+            cd target/release-universal
+            shasum -a 256 "GitRonimo-${GITHUB_REF_NAME}.zip" > SHA256SUMS.txt
+          )
       - uses: actions/upload-artifact@v7
         with:
           name: GitRonimo-signed-macos

@@ -2,7 +2,7 @@
 
 The product name is **GitRonimo**. The crate is still `gitronimo-desktop`; the binary and `.app` executable are `GitRonimo` so the macOS application menu title matches.
 
-Product version **2.0.2** is the string shown in About GitRonimo (`APP_VERSION` in `apps/desktop/src/views/about.rs`) and in the bundle (`[package.metadata.packager] version` in `apps/desktop/Cargo.toml`). Bump **both** after each release. They are independent of the Cargo workspace crate version.
+Product version **2.0.3** is the string shown in About GitRonimo (`APP_VERSION` in `apps/desktop/src/views/about.rs`) and in the bundle (`[package.metadata.packager] version` in `apps/desktop/Cargo.toml`). Bump **both** after each release. They are independent of the Cargo workspace crate version.
 
 Local `.app` bundles are unsigned. Gatekeeper will not treat them as a distributable release.
 
@@ -59,11 +59,11 @@ lipo -archs target/release-intel/GitRonimo.app/Contents/MacOS/GitRonimo
 mkdir -p target/dist
 ditto -c -k --sequesterRsrc --keepParent \
   target/release-arm/GitRonimo.app \
-  target/dist/GitRonimo-2.0.2-macos-arm64.zip
+  target/dist/GitRonimo-2.0.3-macos-arm64.zip
 ditto -c -k --sequesterRsrc --keepParent \
   target/release-intel/GitRonimo.app \
-  target/dist/GitRonimo-2.0.2-macos-x86_64.zip
-(cd target/dist && shasum -a 256 GitRonimo-2.0.2-macos-*.zip > SHA256SUMS.txt)
+  target/dist/GitRonimo-2.0.3-macos-x86_64.zip
+(cd target/dist && shasum -a 256 GitRonimo-2.0.3-macos-*.zip > SHA256SUMS.txt)
 ```
 
 A universal binary (lipo of both executables into one `GitRonimo.app`) is produced by `.github/workflows/release.yml` on a `v*` tag, then signed and notarized.
@@ -90,7 +90,7 @@ Pushing a `v*` tag starts `.github/workflows/release.yml`. Configure these repos
 - `APPLE_API_KEY_BASE64`: the base64-encoded App Store Connect API key `.p8` file.
 - `APPLE_API_KEY_ID` and `APPLE_API_ISSUER`: the corresponding App Store Connect API key identifiers.
 
-The workflow builds arm64 and x86_64 bundles, creates a universal app, signs it with hardened runtime and a timestamp, notarizes and staples it (retries `notarytool --wait` on App Store Connect HTTP timeouts), writes `SHA256SUMS.txt`, and publishes the ZIP with `CHANGELOG.md` as the release notes. If a GitHub release for that tag already exists, the workflow uploads the ZIP onto it instead of failing.
+The workflow builds arm64 and x86_64 bundles, creates a universal app, signs it with hardened runtime and a timestamp, notarizes and staples it (retries `notarytool --wait` on App Store Connect HTTP timeouts), writes `SHA256SUMS.txt` with the zip **basename** (hash from `target/release-universal/`, not a path-prefixed `shasum` line), and publishes the ZIP with `CHANGELOG.md` as the release notes. If a GitHub release for that tag already exists, the workflow uploads the ZIP onto it instead of failing.
 
 If `notarytool` reports `The request timed out` after `Successfully uploaded file`, signing already succeeded; re-run the job. Apple sometimes takes 15–40 minutes, and a poll timeout is not a certificate problem.
 
