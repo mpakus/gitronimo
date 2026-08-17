@@ -2200,7 +2200,7 @@ A phase is done only when all checklist items and exit criteria in that phase pa
 
 ## 27. Release checklist
 
-Product version is `APP_VERSION` in `apps/desktop/src/views/about.rs` and `[package.metadata.packager] version` in `apps/desktop/Cargo.toml` (currently **2.0.3**). The Cargo workspace crate version is independent — do not bump it for a product release.
+Product version is `APP_VERSION` in `apps/desktop/src/views/about.rs` and `[package.metadata.packager] version` in `apps/desktop/Cargo.toml` (currently **2.0.4**). The Cargo workspace crate version is independent — do not bump it for a product release.
 
 ### Code quality
 

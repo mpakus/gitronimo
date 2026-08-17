@@ -13,7 +13,7 @@ pub(crate) const APP_TAGLINE: &str = "Made in Austin \u{2729} Texas";
 /// Product version shown in About `GitRonimo`. Bump this after each release.
 /// Keep in sync with `[package.metadata.packager] version` in `apps/desktop/Cargo.toml`.
 /// Independent of the Cargo workspace version.
-pub(crate) const APP_VERSION: &str = "2.0.3";
+pub(crate) const APP_VERSION: &str = "2.0.4";
 
 fn about_updates_copy(in_app_updates: bool) -> &'static str {
     if in_app_updates {
@@ -26,6 +26,7 @@ fn about_updates_copy(in_app_updates: bool) -> &'static str {
 fn about_brand_column() -> impl IntoElement {
     div()
         .w(px(160.0))
+        .flex_shrink_0()
         .flex()
         .flex_col()
         .items_center()
@@ -62,6 +63,7 @@ fn about_check_updates_button(cx: &mut gpui::Context<GitronimoApp>) -> impl Into
         .debug_selector(|| "about-check-updates".into())
         .h(px(26.0))
         .px_3()
+        .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center()
@@ -72,7 +74,7 @@ fn about_check_updates_button(cx: &mut gpui::Context<GitronimoApp>) -> impl Into
         .cursor_pointer()
         .hover(|style| style.bg(rgb(0x3a_3a_3a)))
         .on_click(cx.listener(|app, _, _, cx| {
-            app.close_about_dialog(cx);
+            app.close_about_dialog_immediate(cx);
             app.check_for_app_updates(cx);
         }))
         .child("Check for updates")
@@ -82,12 +84,16 @@ impl GitronimoApp {
     fn about_details_column(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         div()
             .flex_1()
+            .min_w(px(0.0))
+            .overflow_hidden()
             .flex()
             .flex_col()
             .justify_center()
             .gap_3()
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .text_sm()
                     .text_color(rgb(0xf2_f4_f7))
                     .child(APP_TAGLINE),
@@ -96,6 +102,8 @@ impl GitronimoApp {
                 div()
                     .id("about-site-link")
                     .debug_selector(|| "about-site-link".into())
+                    .w_full()
+                    .min_w(px(0.0))
                     .text_sm()
                     .text_color(rgb(0x6a_b1_ff))
                     .cursor_pointer()
@@ -107,6 +115,8 @@ impl GitronimoApp {
             )
             .child(
                 div()
+                    .w_full()
+                    .min_w(px(0.0))
                     .text_xs()
                     .text_color(rgb(0x9a_a3_ad))
                     .child(about_updates_copy(self.in_app_updates)),
@@ -137,6 +147,7 @@ impl GitronimoApp {
                     .id("about-gitronimo")
                     .debug_selector(|| "about-gitronimo".into())
                     .w(px(520.0))
+                    .overflow_hidden()
                     .p_6()
                     .flex()
                     .gap_6()

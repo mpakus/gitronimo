@@ -1,7 +1,5 @@
 //! Commit composer: expandable card (subject → details on focus).
 
-use std::time::Duration;
-
 use gpui::{Animation, AnimationExt, AnyElement, MouseButton, div, ease_out_quint, prelude::*, px};
 use ui_kit::ThemeColors;
 
@@ -12,6 +10,7 @@ use crate::views::components::{
     file_action_button, mutation_button, primary_window_action_button_with_reason,
 };
 use crate::views::icons::{IconKind, icon};
+use crate::views::overlay_anim::{COMPOSER_DETAILS_HEIGHT, COMPOSER_REVEAL_DURATION};
 use crate::views::single_line_input::{
     COMPOSER_BODY_HEIGHT, composer_multiline_shell, composer_subject_shell,
 };
@@ -37,6 +36,8 @@ impl GitronimoApp {
         let (branch, tracking) = self.branch_path_labels();
         let subject_filled = !self.commit_subject.trim().is_empty();
         let expanded = self.commit_composer_expanded;
+        let show_details = expanded || self.commit_composer_closing;
+        let closing_details = !expanded && self.commit_composer_closing;
 
         // Flush section at the top of the file pane: it shares the pane background so the
         // fields are the only raised surfaces, `px_3` is the sole horizontal inset, and the
@@ -92,110 +93,134 @@ impl GitronimoApp {
                 subject_remaining.to_string(),
             ));
 
-        if expanded {
+        if show_details {
             let (author_name, author_email) = split_author_identity(&self.author_identity);
             let initial = author_name
                 .chars()
                 .next()
                 .map_or_else(|| "?".into(), |c| c.to_uppercase().to_string());
 
-            // Reveal details with a short ease-out fade. Keep definite width/height on the
-            // animated wrappers so GPUI's AnimationElement does not collapse the fields
-            // (wrapping description alone previously shrank to a ~0px slit).
-            let reveal = Animation::new(Duration::from_millis(90)).with_easing(ease_out_quint());
-            card = card
-                .child(
-                    div()
-                        .id("commit-body-reveal")
-                        .w_full()
-                        .flex_shrink_0()
-                        .h(px(COMPOSER_BODY_HEIGHT))
-                        .min_h(px(COMPOSER_BODY_HEIGHT))
-                        .child(composer_multiline_shell(
-                            self.commit_body_input.clone(),
-                            colors,
-                            self.commit_body_focused,
-                        ))
-                        .with_animation("commit-body-fade", reveal.clone(), gpui::Styled::opacity),
-                )
-                .child(
-                    div()
-                        .id("commit-composer-options")
-                        .w_full()
-                        .flex_shrink_0()
-                        .flex()
-                        .items_center()
-                        .gap_3()
-                        .child(commit_checkbox(
-                            "Amend",
-                            self.commit_amend,
-                            colors,
-                            cx,
-                            GitronimoApp::toggle_commit_amend,
-                        ))
-                        .children(self.commit_amend_short_oid.as_ref().map(|oid| {
-                            div()
-                                .text_xs()
-                                .font_family("Monaco")
-                                .text_color(colors.text_muted)
-                                .child(oid.clone())
-                                .into_any_element()
-                        }))
-                        .child(commit_checkbox(
-                            "Sign-off",
-                            self.commit_sign_off,
-                            colors,
-                            cx,
-                            GitronimoApp::toggle_commit_sign_off,
-                        ))
-                        .child(div().flex_1())
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .w(px(22.0))
-                                        .h(px(22.0))
-                                        .rounded_full()
-                                        .bg(colors.selection)
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .text_xs()
-                                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                                        .text_color(colors.text_primary)
-                                        .child(initial),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .min_w(px(0.0))
-                                        .overflow_hidden()
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .text_color(colors.text_primary)
-                                                .overflow_hidden()
-                                                .whitespace_nowrap()
-                                                .child(author_name),
-                                        )
-                                        .children((!author_email.is_empty()).then(|| {
-                                            div()
-                                                .text_xs()
-                                                .text_color(colors.text_muted)
-                                                .overflow_hidden()
-                                                .whitespace_nowrap()
-                                                .child(author_email)
-                                                .into_any_element()
-                                        })),
-                                ),
-                        )
-                        .with_animation("commit-options-fade", reveal, gpui::Styled::opacity),
-                );
+            // Height clip + opacity so the file list eases down instead of jumping.
+            // Adapted from rgitui MIT modal entrance easing; motion is original.
+            let reveal = Animation::new(COMPOSER_REVEAL_DURATION).with_easing(ease_out_quint());
+            let anim_id = if closing_details {
+                format!("commit-details-out-{}", self.commit_composer_anim_token)
+            } else {
+                format!("commit-details-in-{}", self.commit_composer_anim_token)
+            };
+            card = card.child(
+                div()
+                    .id("commit-composer-details")
+                    .w_full()
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .id("commit-body-reveal")
+                            .w_full()
+                            .flex_shrink_0()
+                            .h(px(COMPOSER_BODY_HEIGHT))
+                            .min_h(px(COMPOSER_BODY_HEIGHT))
+                            .child(composer_multiline_shell(
+                                self.commit_body_input.clone(),
+                                colors,
+                                self.commit_body_focused,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .id("commit-composer-options")
+                            .w_full()
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(commit_checkbox(
+                                "Amend",
+                                self.commit_amend,
+                                colors,
+                                cx,
+                                GitronimoApp::toggle_commit_amend,
+                            ))
+                            .children(self.commit_amend_short_oid.as_ref().map(|oid| {
+                                div()
+                                    .text_xs()
+                                    .font_family("Monaco")
+                                    .text_color(colors.text_muted)
+                                    .child(oid.clone())
+                                    .into_any_element()
+                            }))
+                            .child(commit_checkbox(
+                                "Sign-off",
+                                self.commit_sign_off,
+                                colors,
+                                cx,
+                                GitronimoApp::toggle_commit_sign_off,
+                            ))
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .w(px(22.0))
+                                            .h(px(22.0))
+                                            .rounded_full()
+                                            .bg(colors.selection)
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .text_xs()
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .text_color(colors.text_primary)
+                                            .child(initial),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .min_w(px(0.0))
+                                            .overflow_hidden()
+                                            .child(
+                                                div()
+                                                    .text_xs()
+                                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                                    .text_color(colors.text_primary)
+                                                    .overflow_hidden()
+                                                    .whitespace_nowrap()
+                                                    .child(author_name),
+                                            )
+                                            .children((!author_email.is_empty()).then(|| {
+                                                div()
+                                                    .text_xs()
+                                                    .text_color(colors.text_muted)
+                                                    .overflow_hidden()
+                                                    .whitespace_nowrap()
+                                                    .child(author_email)
+                                                    .into_any_element()
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .with_animation(
+                        gpui::ElementId::Name(anim_id.into()),
+                        reveal,
+                        move |el, delta| {
+                            let t = if closing_details { 1.0 - delta } else { delta };
+                            let el = el.opacity(t);
+                            if !closing_details && t >= 0.999 {
+                                el
+                            } else {
+                                el.h(px(COMPOSER_DETAILS_HEIGHT * t)).overflow_hidden()
+                            }
+                        },
+                    ),
+            );
         }
 
         card.child(

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.4 — 2026-08-17
+
+Product version **2.0.4** (About GitRonimo / `APP_VERSION` and packager bundle version). Tag `v2.0.4` for the notarized universal zip.
+
+- Modal popups (About, App Settings, palette, prompts, Pull/Push, confirms, message history) fade in and out. Clicking Commit Subject eases the description and Amend/Sign-off fields open instead of jumping.
+- About GitRonimo keeps the site link and **Check for updates** inside the card (the updates sentence no longer stretches the right column past 520px).
 - Release publish uses GitHub REST (`gh api`) with retries instead of `gh release view` / `create`. Those GraphQL commands 503'd after v2.0.3 notarized (“No server is currently available”) while REST still listed releases.
 
 ## 2.0.3 — 2026-08-17

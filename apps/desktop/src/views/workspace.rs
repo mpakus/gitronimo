@@ -7,8 +7,9 @@ use gpui::{
 use ui_kit::Theme;
 
 use crate::app_state::{
-    AppConfirmDialog, ChoicePromptKind, GitronimoApp, OverlayFocus, PaletteCommand, PushOption,
-    ShellState, ShortcutReferenceState, SubmodulePushMode, TextPromptKind, window_title,
+    AppConfirmDialog, ChoicePromptKind, GitronimoApp, OverlayFocus, OverlaySlot, PaletteCommand,
+    PushOption, ShellState, ShortcutReferenceState, SubmodulePushMode, TextPromptKind,
+    window_title,
 };
 
 use crate::views::components::{
@@ -110,28 +111,36 @@ impl Render for GitronimoApp {
                     ),
             )
             // Overlays after chrome so they paint above in-flow content.
-            .children(
-                self.show_quick_open
-                    .then(|| self.quick_open_overlay(&colors, cx).into_any_element()),
-            )
-            .children(
-                self.show_command_palette
-                    .then(|| self.command_palette_overlay(&colors, cx).into_any_element()),
-            )
-            .children(
-                self.pending_text_prompt
-                    .is_some()
-                    .then(|| self.text_prompt_overlay(&colors, cx).into_any_element()),
-            )
-            .children(
-                self.pending_choice_prompt
-                    .is_some()
-                    .then(|| self.choice_prompt_overlay(&colors, cx).into_any_element()),
-            )
-            .children(
-                self.welcome_plus_menu_open
-                    .then(|| Self::welcome_plus_menu_overlay(&colors, cx).into_any_element()),
-            )
+            .children(self.show_quick_open.then(|| {
+                self.fading_overlay(
+                    OverlaySlot::QuickOpen,
+                    self.quick_open_overlay(&colors, cx).into_any_element(),
+                )
+            }))
+            .children(self.show_command_palette.then(|| {
+                self.fading_overlay(
+                    OverlaySlot::CommandPalette,
+                    self.command_palette_overlay(&colors, cx).into_any_element(),
+                )
+            }))
+            .children(self.pending_text_prompt.is_some().then(|| {
+                self.fading_overlay(
+                    OverlaySlot::TextPrompt,
+                    self.text_prompt_overlay(&colors, cx).into_any_element(),
+                )
+            }))
+            .children(self.pending_choice_prompt.is_some().then(|| {
+                self.fading_overlay(
+                    OverlaySlot::ChoicePrompt,
+                    self.choice_prompt_overlay(&colors, cx).into_any_element(),
+                )
+            }))
+            .children(self.welcome_plus_menu_open.then(|| {
+                self.fading_overlay(
+                    OverlaySlot::WelcomePlus,
+                    Self::welcome_plus_menu_overlay(&colors, cx).into_any_element(),
+                )
+            }))
             .children(self.ref_context.is_some().then(|| {
                 self.ref_context_menu_overlay(&colors, cx)
                     .into_any_element()
@@ -140,40 +149,57 @@ impl Render for GitronimoApp {
                 self.commit_context_menu_overlay(&colors, cx)
                     .into_any_element()
             }))
-            .children(
-                self.pull_dialog
-                    .is_some()
-                    .then(|| self.pull_dialog_overlay(&colors, cx).into_any_element()),
-            )
-            .children(
-                self.push_dialog
-                    .is_some()
-                    .then(|| self.push_dialog_overlay(&colors, cx).into_any_element()),
-            )
+            .children(self.pull_dialog.is_some().then(|| {
+                self.fading_overlay(
+                    OverlaySlot::Pull,
+                    self.pull_dialog_overlay(&colors, cx).into_any_element(),
+                )
+            }))
+            .children(self.push_dialog.is_some().then(|| {
+                self.fading_overlay(
+                    OverlaySlot::Push,
+                    self.push_dialog_overlay(&colors, cx).into_any_element(),
+                )
+            }))
             .children(self.stash_apply_dialog.is_some().then(|| {
-                self.stash_apply_dialog_overlay(&colors, cx)
-                    .into_any_element()
+                self.fading_overlay(
+                    OverlaySlot::StashApply,
+                    self.stash_apply_dialog_overlay(&colors, cx)
+                        .into_any_element(),
+                )
             }))
             .children(self.pending_branch_delete.is_some().then(|| {
-                self.branch_delete_confirm_overlay(&colors, cx)
-                    .into_any_element()
+                self.fading_overlay(
+                    OverlaySlot::BranchDelete,
+                    self.branch_delete_confirm_overlay(&colors, cx)
+                        .into_any_element(),
+                )
             }))
             .children(self.confirm_dialog.is_some().then(|| {
-                self.app_confirm_dialog_overlay(&colors, cx)
-                    .into_any_element()
+                self.fading_overlay(
+                    OverlaySlot::AppConfirm,
+                    self.app_confirm_dialog_overlay(&colors, cx)
+                        .into_any_element(),
+                )
             }))
-            .children(
-                self.show_activity_log
-                    .then(|| self.activity_log_overlay(&colors, cx).into_any_element()),
-            )
-            .children(
-                self.show_about
-                    .then(|| self.about_overlay(&colors, cx).into_any_element()),
-            )
-            .children(
-                self.show_app_settings
-                    .then(|| self.app_settings_overlay(&colors, cx).into_any_element()),
-            )
+            .children(self.show_activity_log.then(|| {
+                self.fading_overlay(
+                    OverlaySlot::ActivityLog,
+                    self.activity_log_overlay(&colors, cx).into_any_element(),
+                )
+            }))
+            .children(self.show_about.then(|| {
+                self.fading_overlay(
+                    OverlaySlot::About,
+                    self.about_overlay(&colors, cx).into_any_element(),
+                )
+            }))
+            .children(self.show_app_settings.then(|| {
+                self.fading_overlay(
+                    OverlaySlot::AppSettings,
+                    self.app_settings_overlay(&colors, cx).into_any_element(),
+                )
+            }))
     }
 }
 
@@ -240,8 +266,7 @@ impl GitronimoApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|app, _: &MouseDownEvent, _, cx| {
-                    app.show_quick_open = false;
-                    cx.notify();
+                    app.dismiss_overlay(OverlaySlot::QuickOpen, false, cx);
                 }),
             )
             .child(
@@ -289,7 +314,7 @@ impl GitronimoApp {
                             .cursor_pointer()
                             .hover(|row| row.bg(colors.selection))
                             .on_click(cx.listener(move |app, _, window, cx| {
-                                app.show_quick_open = false;
+                                app.dismiss_overlay(OverlaySlot::QuickOpen, true, cx);
                                 app.open_recent(path.clone(), window, cx);
                             }))
                             .child(display)

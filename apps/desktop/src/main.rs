@@ -67,15 +67,16 @@ use crate::app_state::{
     ACTIVITY_LOG_CAPACITY, ActivityLogEntry, AppConfirmDialog, ChoicePromptKind, CommitContext,
     DEFAULT_LIST_PANE_WIDTH, DEFAULT_SIDEBAR_WIDTH, ForcePushState, GitronimoApp,
     HistoryDetailMode, LastAction, Mutation, NetworkOperation, OpenedRepository, OperationAction,
-    OverlayFocus, PR_MERGE_METHOD_CHOICES, PaletteCommand, PullDialogState, PushDialogState,
-    PushOption, RefContext, RefContextSubmenu, RepositoryView, ShellState, ShortcutReferenceState,
-    StashAction, StashApplyDialog, SubmodulePushMode, TextPromptKind, ThemeMode,
-    WelcomeRepoSnapshot, WelcomeShellView, appearance_from_window, branch_not_fully_merged_error,
-    clamp_list_pane_width, clamp_sidebar_width, classify_activity, discard_selected,
-    files_for_status_drag, git_failure_message, is_working_copy_refresh_noise,
+    OverlayFocus, OverlaySlot, PR_MERGE_METHOD_CHOICES, PaletteCommand, PullDialogState,
+    PushDialogState, PushOption, RefContext, RefContextSubmenu, RepositoryView, ShellState,
+    ShortcutReferenceState, StashAction, StashApplyDialog, SubmodulePushMode, TextPromptKind,
+    ThemeMode, WelcomeRepoSnapshot, WelcomeShellView, appearance_from_window,
+    branch_not_fully_merged_error, clamp_list_pane_width, clamp_sidebar_width, classify_activity,
+    discard_selected, files_for_status_drag, git_failure_message, is_working_copy_refresh_noise,
     network_failure_message, repository_is_available, repository_unavailable_message, resize_width,
 };
 use crate::views::components::status_path;
+use crate::views::overlay_anim::{COMPOSER_REVEAL_DURATION, OVERLAY_FADE_DURATION};
 use crate::views::single_line_input::register_input_bindings;
 use crate::views::working_copy::entry_is_staged;
 
@@ -396,6 +397,8 @@ impl GitronimoApp {
             commit_subject_focused: false,
             commit_body_focused: false,
             commit_composer_expanded: false,
+            commit_composer_closing: false,
+            commit_composer_anim_token: 0,
             network_progress: 0.0,
             last_network_result: None,
             activity: "Choose a repository to begin.".into(),
@@ -444,6 +447,9 @@ impl GitronimoApp {
             command_palette_selected: 0,
             show_about: false,
             show_app_settings: false,
+            overlay_fade_out: None,
+            overlay_fade_token: 0,
+            overlay_fade_generation: 0,
             pending_overlay_focus: None,
             selected_branch_review: None,
             branches_review_show_all: false,
@@ -678,6 +684,8 @@ impl GitronimoApp {
             commit_subject_focused: false,
             commit_body_focused: false,
             commit_composer_expanded: false,
+            commit_composer_closing: false,
+            commit_composer_anim_token: 0,
             network_progress: 0.0,
             last_network_result: None,
             activity_log: std::collections::VecDeque::from([ActivityLogEntry {
@@ -726,6 +734,9 @@ impl GitronimoApp {
             command_palette_selected: 0,
             show_about: false,
             show_app_settings: false,
+            overlay_fade_out: None,
+            overlay_fade_token: 0,
+            overlay_fade_generation: 0,
             pending_overlay_focus: None,
             selected_branch_review: None,
             branches_review_show_all: false,
@@ -1267,15 +1278,24 @@ impl GitronimoApp {
     }
 
     pub(crate) fn toggle_activity_log(&mut self, cx: &mut Context<Self>) {
-        self.show_activity_log = !self.show_activity_log;
+        if self.overlay_fade_out == Some(OverlaySlot::ActivityLog) {
+            self.cancel_overlay_fade_out(OverlaySlot::ActivityLog);
+            self.bump_overlay_fade_generation();
+            self.show_activity_log = true;
+            cx.notify();
+            return;
+        }
+        if self.show_activity_log {
+            self.dismiss_overlay(OverlaySlot::ActivityLog, false, cx);
+            return;
+        }
+        self.show_activity_log = true;
+        self.bump_overlay_fade_generation();
         cx.notify();
     }
 
     pub(crate) fn close_activity_log(&mut self, cx: &mut Context<Self>) {
-        if self.show_activity_log {
-            self.show_activity_log = false;
-            cx.notify();
-        }
+        self.dismiss_overlay(OverlaySlot::ActivityLog, false, cx);
     }
 
     fn observe_commit_composer_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1317,10 +1337,42 @@ impl GitronimoApp {
             || self.commit_sign_off
             || !self.commit_subject.trim().is_empty()
             || !self.commit_body.trim().is_empty();
-        if self.commit_composer_expanded != keep_open {
-            self.commit_composer_expanded = keep_open;
+        if keep_open {
+            if self.commit_composer_closing {
+                self.commit_composer_closing = false;
+                self.commit_composer_anim_token = self.commit_composer_anim_token.wrapping_add(1);
+            }
+            if !self.commit_composer_expanded {
+                self.commit_composer_expanded = true;
+                self.commit_composer_anim_token = self.commit_composer_anim_token.wrapping_add(1);
+            }
             cx.notify();
+            return;
         }
+        if self.commit_composer_expanded && !self.commit_composer_closing {
+            self.begin_commit_composer_collapse(cx);
+        }
+    }
+
+    fn begin_commit_composer_collapse(&mut self, cx: &mut Context<Self>) {
+        self.commit_composer_expanded = false;
+        self.commit_composer_closing = true;
+        self.commit_composer_anim_token = self.commit_composer_anim_token.wrapping_add(1);
+        let token = self.commit_composer_anim_token;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(COMPOSER_REVEAL_DURATION)
+                .await;
+            let _ = this.update(cx, |app, cx| {
+                if app.commit_composer_anim_token != token {
+                    return;
+                }
+                app.commit_composer_closing = false;
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
     }
 
     fn load_diagnostics(cx: &mut Context<Self>) {
@@ -1376,6 +1428,8 @@ impl GitronimoApp {
                 self.pull_dialog = None;
                 self.push_dialog = None;
                 self.stash_apply_dialog = None;
+                self.overlay_fade_out = None;
+                self.overlay_fade_token = self.overlay_fade_token.wrapping_add(1);
                 self.selected_paths.clear();
                 self.file_list_select_all_toggle = None;
                 self.context_path = None;
@@ -1472,7 +1526,7 @@ impl GitronimoApp {
         if matches!(self.state, ShellState::Repository(_)) {
             self.return_to_welcome(cx);
         }
-        self.welcome_plus_menu_open = false;
+        self.dismiss_overlay(OverlaySlot::WelcomePlus, true, cx);
         if self.welcome_shell_view == view {
             cx.notify();
             return;
@@ -1955,27 +2009,166 @@ return remote_url & linefeed & parent_path"#;
         self.open_command_palette(cx);
     }
 
+    fn overlay_is_open(&self, slot: OverlaySlot) -> bool {
+        match slot {
+            OverlaySlot::QuickOpen => self.show_quick_open,
+            OverlaySlot::CommandPalette => self.show_command_palette,
+            OverlaySlot::TextPrompt => self.pending_text_prompt.is_some(),
+            OverlaySlot::ChoicePrompt => self.pending_choice_prompt.is_some(),
+            OverlaySlot::WelcomePlus => self.welcome_plus_menu_open,
+            OverlaySlot::Pull => self.pull_dialog.is_some(),
+            OverlaySlot::Push => self.push_dialog.is_some(),
+            OverlaySlot::StashApply => self.stash_apply_dialog.is_some(),
+            OverlaySlot::BranchDelete => self.pending_branch_delete.is_some(),
+            OverlaySlot::AppConfirm => self.confirm_dialog.is_some(),
+            OverlaySlot::ActivityLog => self.show_activity_log,
+            OverlaySlot::About => self.show_about,
+            OverlaySlot::AppSettings => self.show_app_settings,
+        }
+    }
+
+    fn clear_overlay_slot(&mut self, slot: OverlaySlot) {
+        match slot {
+            OverlaySlot::QuickOpen => self.show_quick_open = false,
+            OverlaySlot::CommandPalette => {
+                self.show_command_palette = false;
+                self.command_palette_query.clear();
+                self.command_palette_selected = 0;
+            }
+            OverlaySlot::TextPrompt => {
+                self.pending_text_prompt = None;
+                self.text_prompt_value.clear();
+            }
+            OverlaySlot::ChoicePrompt => {
+                self.pending_choice_prompt = None;
+                self.choice_prompt_query.clear();
+                self.choice_prompt_selected = 0;
+            }
+            OverlaySlot::WelcomePlus => self.welcome_plus_menu_open = false,
+            OverlaySlot::Pull => {
+                self.pull_dialog = None;
+            }
+            OverlaySlot::Push => {
+                self.push_dialog = None;
+            }
+            OverlaySlot::StashApply => self.stash_apply_dialog = None,
+            OverlaySlot::BranchDelete => self.pending_branch_delete = None,
+            OverlaySlot::AppConfirm => {
+                if matches!(
+                    self.confirm_dialog,
+                    Some(AppConfirmDialog::InstallUpdate { .. })
+                ) {
+                    self.pending_app_update = None;
+                }
+                self.confirm_dialog = None;
+            }
+            OverlaySlot::ActivityLog => self.show_activity_log = false,
+            OverlaySlot::About => self.show_about = false,
+            OverlaySlot::AppSettings => self.show_app_settings = false,
+        }
+    }
+
+    fn bump_overlay_fade_generation(&mut self) {
+        self.overlay_fade_generation = self.overlay_fade_generation.wrapping_add(1);
+    }
+
+    fn cancel_overlay_fade_out(&mut self, slot: OverlaySlot) {
+        if self.overlay_fade_out == Some(slot) {
+            self.overlay_fade_out = None;
+            self.overlay_fade_token = self.overlay_fade_token.wrapping_add(1);
+        }
+    }
+
+    pub(crate) fn dismiss_overlay(
+        &mut self,
+        slot: OverlaySlot,
+        immediate: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.overlay_is_open(slot) {
+            return;
+        }
+        if immediate {
+            if self.overlay_fade_out == Some(slot) {
+                self.overlay_fade_out = None;
+                self.overlay_fade_token = self.overlay_fade_token.wrapping_add(1);
+            }
+            self.clear_overlay_slot(slot);
+            cx.notify();
+            return;
+        }
+        self.begin_overlay_fade_out(slot, cx);
+    }
+
+    fn begin_overlay_fade_out(&mut self, slot: OverlaySlot, cx: &mut Context<Self>) {
+        if self.overlay_fade_out == Some(slot) {
+            return;
+        }
+        if let Some(other) = self.overlay_fade_out {
+            self.clear_overlay_slot(other);
+        }
+        self.overlay_fade_out = Some(slot);
+        self.overlay_fade_token = self.overlay_fade_token.wrapping_add(1);
+        self.bump_overlay_fade_generation();
+        let token = self.overlay_fade_token;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(OVERLAY_FADE_DURATION).await;
+            let _ = this.update(cx, |app, cx| {
+                if app.overlay_fade_token != token {
+                    return;
+                }
+                if app.overlay_fade_out != Some(slot) {
+                    return;
+                }
+                app.overlay_fade_out = None;
+                app.clear_overlay_slot(slot);
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_quick_open(&mut self, cx: &mut Context<Self>) {
+        if self.overlay_fade_out == Some(OverlaySlot::QuickOpen) {
+            self.cancel_overlay_fade_out(OverlaySlot::QuickOpen);
+            self.bump_overlay_fade_generation();
+            self.show_quick_open = true;
+            cx.notify();
+            return;
+        }
+        if self.show_quick_open {
+            self.dismiss_overlay(OverlaySlot::QuickOpen, false, cx);
+            return;
+        }
+        self.dismiss_overlay(OverlaySlot::CommandPalette, true, cx);
+        self.dismiss_overlay(OverlaySlot::WelcomePlus, true, cx);
+        self.show_quick_open = true;
+        self.bump_overlay_fade_generation();
+        cx.notify();
+    }
+
     pub(crate) fn open_command_palette(&mut self, cx: &mut Context<Self>) {
-        self.show_quick_open = false;
-        self.welcome_plus_menu_open = false;
-        self.pending_text_prompt = None;
-        self.text_prompt_value.clear();
-        self.pending_choice_prompt = None;
-        self.choice_prompt_query.clear();
-        self.choice_prompt_selected = 0;
+        self.dismiss_overlay(OverlaySlot::QuickOpen, true, cx);
+        self.dismiss_overlay(OverlaySlot::WelcomePlus, true, cx);
+        self.dismiss_overlay(OverlaySlot::TextPrompt, true, cx);
+        self.dismiss_overlay(OverlaySlot::ChoicePrompt, true, cx);
+        self.cancel_overlay_fade_out(OverlaySlot::CommandPalette);
         self.show_command_palette = true;
         self.command_palette_query.clear();
         self.command_palette_selected = 0;
         self.pending_overlay_focus = Some(OverlayFocus::CommandPalette);
+        self.bump_overlay_fade_generation();
         self.set_activity("Choose a command from the palette.");
         cx.notify();
     }
 
     fn close_command_palette(&mut self, cx: &mut Context<Self>) {
-        self.show_command_palette = false;
-        self.command_palette_query.clear();
-        self.command_palette_selected = 0;
-        cx.notify();
+        self.dismiss_overlay(OverlaySlot::CommandPalette, false, cx);
+    }
+
+    fn close_command_palette_immediate(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_overlay(OverlaySlot::CommandPalette, true, cx);
     }
 
     fn show_about(&mut self, _: &About, _: &mut Window, cx: &mut Context<Self>) {
@@ -1996,29 +2189,31 @@ return remote_url & linefeed & parent_path"#;
     }
 
     pub(crate) fn show_about_dialog(&mut self, cx: &mut Context<Self>) {
-        self.show_app_settings = false;
+        self.dismiss_overlay(OverlaySlot::AppSettings, true, cx);
+        self.cancel_overlay_fade_out(OverlaySlot::About);
         self.show_about = true;
+        self.bump_overlay_fade_generation();
         cx.notify();
     }
 
     pub(crate) fn close_about_dialog(&mut self, cx: &mut Context<Self>) {
-        if self.show_about {
-            self.show_about = false;
-            cx.notify();
-        }
+        self.dismiss_overlay(OverlaySlot::About, false, cx);
+    }
+
+    pub(crate) fn close_about_dialog_immediate(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_overlay(OverlaySlot::About, true, cx);
     }
 
     pub(crate) fn show_app_settings_dialog(&mut self, cx: &mut Context<Self>) {
-        self.show_about = false;
+        self.dismiss_overlay(OverlaySlot::About, true, cx);
+        self.cancel_overlay_fade_out(OverlaySlot::AppSettings);
         self.show_app_settings = true;
+        self.bump_overlay_fade_generation();
         cx.notify();
     }
 
     pub(crate) fn close_app_settings_dialog(&mut self, cx: &mut Context<Self>) {
-        if self.show_app_settings {
-            self.show_app_settings = false;
-            cx.notify();
-        }
+        self.dismiss_overlay(OverlaySlot::AppSettings, false, cx);
     }
 
     fn move_command_palette_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -2054,7 +2249,7 @@ return remote_url & linefeed & parent_path"#;
 
     #[allow(clippy::too_many_lines)]
     pub(crate) fn run_palette_command(&mut self, command: PaletteCommand, cx: &mut Context<Self>) {
-        self.close_command_palette(cx);
+        self.close_command_palette_immediate(cx);
         match command {
             PaletteCommand::OpenRepository => self.add_repository_from_picker(cx),
             PaletteCommand::Fetch => self.fetch_default_remote(cx),
@@ -2209,8 +2404,10 @@ return remote_url & linefeed & parent_path"#;
             PaletteCommand::OpenInMergeTool => self.prompt_run_merge_tool(cx),
             PaletteCommand::CheckCommitSignature => Self::prompt_check_commit_signature(cx),
             PaletteCommand::QuickOpenFile => {
+                self.cancel_overlay_fade_out(OverlaySlot::QuickOpen);
                 self.show_quick_open = true;
                 self.pending_overlay_focus = None;
+                self.bump_overlay_fade_generation();
                 cx.notify();
             }
             PaletteCommand::ToggleMessageHistory => self.toggle_activity_log(cx),
@@ -2402,24 +2599,25 @@ return remote_url & linefeed & parent_path"#;
     }
 
     pub(crate) fn cancel_branch_delete(&mut self, cx: &mut Context<Self>) {
-        self.pending_branch_delete = None;
+        if self.pending_branch_delete.is_none() {
+            return;
+        }
         self.set_activity("Branch deletion cancelled.");
-        cx.notify();
+        self.dismiss_overlay(OverlaySlot::BranchDelete, false, cx);
     }
 
     pub(crate) fn cancel_confirm_dialog(&mut self, cx: &mut Context<Self>) {
-        if matches!(
-            self.confirm_dialog,
-            Some(AppConfirmDialog::InstallUpdate { .. })
-        ) {
-            self.pending_app_update = None;
+        if self.confirm_dialog.is_none() {
+            return;
         }
-        self.confirm_dialog = None;
         self.set_activity("Cancelled.");
-        cx.notify();
+        self.dismiss_overlay(OverlaySlot::AppConfirm, false, cx);
     }
 
     pub(crate) fn confirm_confirm_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.overlay_fade_out == Some(OverlaySlot::AppConfirm) {
+            return;
+        }
         let Some(dialog) = self.confirm_dialog.take() else {
             return;
         };
@@ -2460,26 +2658,27 @@ return remote_url & linefeed & parent_path"#;
         initial: impl Into<String>,
         cx: &mut Context<Self>,
     ) {
-        self.show_command_palette = false;
-        self.show_quick_open = false;
-        self.welcome_plus_menu_open = false;
-        self.pending_choice_prompt = None;
-        self.choice_prompt_query.clear();
-        self.choice_prompt_selected = 0;
+        self.dismiss_overlay(OverlaySlot::CommandPalette, true, cx);
+        self.dismiss_overlay(OverlaySlot::QuickOpen, true, cx);
+        self.dismiss_overlay(OverlaySlot::WelcomePlus, true, cx);
+        self.dismiss_overlay(OverlaySlot::ChoicePrompt, true, cx);
+        self.cancel_overlay_fade_out(OverlaySlot::TextPrompt);
         self.pending_text_prompt = Some(kind);
         self.text_prompt_value = initial.into();
         self.pending_overlay_focus = Some(OverlayFocus::TextPrompt);
+        self.bump_overlay_fade_generation();
         cx.notify();
     }
 
     fn cancel_text_prompt(&mut self, cx: &mut Context<Self>) {
-        self.pending_text_prompt = None;
-        self.text_prompt_value.clear();
-        cx.notify();
+        self.dismiss_overlay(OverlaySlot::TextPrompt, false, cx);
     }
 
     #[allow(clippy::too_many_lines)]
     fn confirm_text_prompt(&mut self, cx: &mut Context<Self>) {
+        if self.overlay_fade_out == Some(OverlaySlot::TextPrompt) {
+            return;
+        }
         let Some(kind) = self.pending_text_prompt.clone() else {
             return;
         };
@@ -2829,38 +3028,45 @@ return remote_url & linefeed & parent_path"#;
     }
 
     pub(crate) fn begin_choice_prompt(&mut self, kind: ChoicePromptKind, cx: &mut Context<Self>) {
-        self.show_command_palette = false;
-        self.show_quick_open = false;
-        self.welcome_plus_menu_open = false;
-        self.pending_text_prompt = None;
-        self.text_prompt_value.clear();
+        self.dismiss_overlay(OverlaySlot::CommandPalette, true, cx);
+        self.dismiss_overlay(OverlaySlot::QuickOpen, true, cx);
+        self.dismiss_overlay(OverlaySlot::WelcomePlus, true, cx);
+        self.dismiss_overlay(OverlaySlot::TextPrompt, true, cx);
+        self.cancel_overlay_fade_out(OverlaySlot::ChoicePrompt);
         self.pending_choice_prompt = Some(kind);
         self.choice_prompt_query.clear();
         self.choice_prompt_selected = 0;
         self.pending_overlay_focus = Some(OverlayFocus::ChoicePrompt);
+        self.bump_overlay_fade_generation();
         cx.notify();
     }
 
     pub(crate) fn toggle_welcome_plus_menu(&mut self, cx: &mut Context<Self>) {
-        self.show_command_palette = false;
-        self.show_quick_open = false;
-        self.pending_choice_prompt = None;
-        self.choice_prompt_query.clear();
-        self.choice_prompt_selected = 0;
-        self.welcome_plus_menu_open = !self.welcome_plus_menu_open;
+        if self.overlay_fade_out == Some(OverlaySlot::WelcomePlus) {
+            self.cancel_overlay_fade_out(OverlaySlot::WelcomePlus);
+            self.bump_overlay_fade_generation();
+            self.welcome_plus_menu_open = true;
+            cx.notify();
+            return;
+        }
+        if self.welcome_plus_menu_open {
+            self.dismiss_overlay(OverlaySlot::WelcomePlus, false, cx);
+            return;
+        }
+        self.dismiss_overlay(OverlaySlot::CommandPalette, true, cx);
+        self.dismiss_overlay(OverlaySlot::QuickOpen, true, cx);
+        self.dismiss_overlay(OverlaySlot::ChoicePrompt, true, cx);
+        self.welcome_plus_menu_open = true;
+        self.bump_overlay_fade_generation();
         cx.notify();
     }
 
     pub(crate) fn close_welcome_plus_menu(&mut self, cx: &mut Context<Self>) {
-        if !self.welcome_plus_menu_open {
-            return;
-        }
-        self.welcome_plus_menu_open = false;
-        cx.notify();
+        self.dismiss_overlay(OverlaySlot::WelcomePlus, false, cx);
     }
 
     pub(crate) fn add_repository_from_picker(&mut self, cx: &mut Context<Self>) {
-        self.welcome_plus_menu_open = false;
+        self.dismiss_overlay(OverlaySlot::WelcomePlus, true, cx);
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
@@ -2885,15 +3091,12 @@ return remote_url & linefeed & parent_path"#;
     }
 
     pub(crate) fn new_bookmark_group_from_menu(&mut self, cx: &mut Context<Self>) {
-        self.welcome_plus_menu_open = false;
+        self.dismiss_overlay(OverlaySlot::WelcomePlus, true, cx);
         self.begin_text_prompt(TextPromptKind::CreateBookmarkFolder, "", cx);
     }
 
     fn cancel_choice_prompt(&mut self, cx: &mut Context<Self>) {
-        self.pending_choice_prompt = None;
-        self.choice_prompt_query.clear();
-        self.choice_prompt_selected = 0;
-        cx.notify();
+        self.dismiss_overlay(OverlaySlot::ChoicePrompt, false, cx);
     }
 
     fn move_choice_prompt_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
@@ -2917,6 +3120,9 @@ return remote_url & linefeed & parent_path"#;
     }
 
     fn confirm_choice_prompt(&mut self, cx: &mut Context<Self>) {
+        if self.overlay_fade_out == Some(OverlaySlot::ChoicePrompt) {
+            return;
+        }
         let Some(kind) = self.pending_choice_prompt.clone() else {
             return;
         };
@@ -5498,6 +5704,8 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             .or_else(|| self.default_pull_remote_branch(&remote_branches))
             .unwrap_or_default();
         self.close_ref_context_menu(cx);
+        self.cancel_overlay_fade_out(OverlaySlot::Pull);
+        self.bump_overlay_fade_generation();
         self.pull_dialog = Some(PullDialogState {
             use_rebase: false,
             remote_branch,
@@ -5508,9 +5716,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     }
 
     pub(crate) fn close_pull_dialog(&mut self, cx: &mut Context<Self>) {
-        if self.pull_dialog.take().is_some() {
-            cx.notify();
-        }
+        self.dismiss_overlay(OverlaySlot::Pull, false, cx);
     }
 
     pub(crate) fn toggle_pull_dialog_rebase(&mut self, cx: &mut Context<Self>) {
@@ -5540,6 +5746,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     }
 
     pub(crate) fn confirm_pull_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.overlay_fade_out == Some(OverlaySlot::Pull) {
+            return;
+        }
         let Some(dialog) = self.pull_dialog.take() else {
             return;
         };
@@ -5645,6 +5854,8 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             .or_else(|| self.default_push_destination(&destinations, head_branch.as_deref()))
             .unwrap_or_default();
         self.close_ref_context_menu(cx);
+        self.cancel_overlay_fade_out(OverlaySlot::Push);
+        self.bump_overlay_fade_generation();
         self.push_dialog = Some(PushDialogState {
             head_branch: head_branch.unwrap_or_else(|| "HEAD".into()),
             destination,
@@ -5658,9 +5869,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     }
 
     pub(crate) fn close_push_dialog(&mut self, cx: &mut Context<Self>) {
-        if self.push_dialog.take().is_some() {
-            cx.notify();
-        }
+        self.dismiss_overlay(OverlaySlot::Push, false, cx);
     }
 
     pub(crate) fn toggle_push_dialog_destination_menu(&mut self, cx: &mut Context<Self>) {
@@ -5718,6 +5927,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     }
 
     pub(crate) fn confirm_push_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.overlay_fade_out == Some(OverlaySlot::Push) {
+            return;
+        }
         let Some(dialog) = self.push_dialog.take() else {
             return;
         };
@@ -7354,6 +7566,8 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             cx.notify();
             return;
         };
+        self.cancel_overlay_fade_out(OverlaySlot::StashApply);
+        self.bump_overlay_fade_generation();
         self.stash_apply_dialog = Some(StashApplyDialog {
             reference,
             delete_after: false,
@@ -7368,6 +7582,8 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
             cx.notify();
             return;
         }
+        self.cancel_overlay_fade_out(OverlaySlot::StashApply);
+        self.bump_overlay_fade_generation();
         self.stash_apply_dialog = Some(StashApplyDialog {
             reference: "stash@{0}".into(),
             delete_after: false,
@@ -7377,8 +7593,7 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     }
 
     pub(crate) fn close_stash_apply_dialog(&mut self, cx: &mut Context<Self>) {
-        self.stash_apply_dialog = None;
-        cx.notify();
+        self.dismiss_overlay(OverlaySlot::StashApply, false, cx);
     }
 
     pub(crate) fn toggle_stash_apply_delete_after(&mut self, cx: &mut Context<Self>) {
@@ -7396,6 +7611,9 @@ return title_text & linefeed & body_text & linefeed & head_text & linefeed & bas
     }
 
     pub(crate) fn confirm_stash_apply_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.overlay_fade_out == Some(OverlaySlot::StashApply) {
+            return;
+        }
         let Some(dialog) = self.stash_apply_dialog.take() else {
             return;
         };

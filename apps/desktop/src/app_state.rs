@@ -537,6 +537,44 @@ pub(crate) enum OverlayFocus {
     ChoicePrompt,
 }
 
+/// Modal / popup slots that keep painting while a fade-out runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum OverlaySlot {
+    QuickOpen,
+    CommandPalette,
+    TextPrompt,
+    ChoicePrompt,
+    WelcomePlus,
+    Pull,
+    Push,
+    StashApply,
+    BranchDelete,
+    AppConfirm,
+    ActivityLog,
+    About,
+    AppSettings,
+}
+
+impl OverlaySlot {
+    pub(crate) fn animation_key(self) -> &'static str {
+        match self {
+            Self::QuickOpen => "quick-open",
+            Self::CommandPalette => "command-palette",
+            Self::TextPrompt => "text-prompt",
+            Self::ChoicePrompt => "choice-prompt",
+            Self::WelcomePlus => "welcome-plus",
+            Self::Pull => "pull-dialog",
+            Self::Push => "push-dialog",
+            Self::StashApply => "stash-apply",
+            Self::BranchDelete => "branch-delete",
+            Self::AppConfirm => "app-confirm",
+            Self::ActivityLog => "activity-log",
+            Self::About => "about",
+            Self::AppSettings => "app-settings",
+        }
+    }
+}
+
 /// Pull dialog: remote branch + optional rebase.
 #[derive(Clone, Debug)]
 pub(crate) struct PullDialogState {
@@ -920,6 +958,9 @@ pub(crate) struct GitronimoApp {
     pub commit_body_focused: bool,
     /// Expandable commit card: details (body/options/author) shown when expanded.
     pub commit_composer_expanded: bool,
+    /// Keep composer details mounted while the collapse animation runs.
+    pub commit_composer_closing: bool,
+    pub commit_composer_anim_token: u64,
     pub network_progress: f32,
     pub last_network_result: Option<String>,
     pub activity: String,
@@ -972,6 +1013,10 @@ pub(crate) struct GitronimoApp {
     pub command_palette_selected: usize,
     pub show_about: bool,
     pub show_app_settings: bool,
+    /// Overlay kept on screen until its fade-out finishes.
+    pub overlay_fade_out: Option<OverlaySlot>,
+    pub overlay_fade_token: u64,
+    pub overlay_fade_generation: u64,
     pub pending_overlay_focus: Option<OverlayFocus>,
     pub selected_branch_review: Option<String>,
     pub branches_review_show_all: bool,

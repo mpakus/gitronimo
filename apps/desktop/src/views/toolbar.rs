@@ -146,10 +146,7 @@ impl GitronimoApp {
                                 colors,
                                 cx,
                                 |app, _, cx| {
-                                    app.show_command_palette = false;
-                                    app.welcome_plus_menu_open = false;
-                                    app.show_quick_open = !app.show_quick_open;
-                                    cx.notify();
+                                    app.toggle_quick_open(cx);
                                 },
                                 false,
                             ))

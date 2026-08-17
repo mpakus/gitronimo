@@ -1,5 +1,33 @@
 # Implementation work log
 
+## 2026-08-17 — Cut product version 2.0.4
+
+**Intent:** Bump product version to **2.0.4** (`APP_VERSION` + packager) for overlay fade, composer expand motion, About overflow, and REST publish retry. Cargo workspace version stays `0.1.0`.
+
+**Files:** `apps/desktop/src/views/about.rs`, `apps/desktop/Cargo.toml`, `apps/desktop/src/tests.rs`, CHANGELOG, README, AGENTS.md, PLAN.md, docs.
+
+**Acceptance:** About and packager show `2.0.4`. Test asserts `APP_VERSION`. Changelog has a 2.0.4 section. Gates green.
+
+## 2026-08-17 — Overlay fade and commit composer expand motion
+
+**Intent:** Popups appear and dismiss with a short opacity fade. Clicking Commit Subject should open description / Amend / Sign-off with a height+fade motion instead of a jump. Do not bump `APP_VERSION`.
+
+**Files:** `apps/desktop/src/views/overlay_anim.rs`, `workspace.rs`, `commit_composer.rs`, `toolbar.rs`, `app_state.rs`, `main.rs`, `tests.rs`, CHANGELOG, `docs/desktop-shell.md`.
+
+**Acceptance:** About / Settings / palette / prompts / Pull-Push / confirms fade in and out (~150ms). Composer details ease in height and opacity (~200ms); collapse eases out. Context menus stay instant. Gates green; app runs for a visual check.
+
+**References:** rgitui `crates/rgitui_ui/src/modal.rs` (MIT) — adapted overlay entrance `Animation` + `ease_out_quint`. GitComet is AGPL — approach-only.
+
+## 2026-08-17 — About overlay keeps site link and Check for updates inside the card
+
+**Intent:** About GitRonimo paints the site URL and **Check for updates** past the 520px card. The details column is `flex_1` without `min_w(0)`, so GPUI sizes it to the long in-app-updates sentence and the right column overflows. Constrain that column and wrap the copy. Do not bump `APP_VERSION`.
+
+**Files:** `apps/desktop/src/views/about.rs`, `apps/desktop/src/tests.rs`.
+
+**Acceptance:** `about-site-link` and `about-check-updates` right edges stay inside `about-gitronimo`. Gates green.
+
+**References:** in-tree `min_w(0)` + `overflow_hidden` on flex children (toolbar, sidebar, Working Copy). GitComet is AGPL — approach-only.
+
 ## 2026-08-17 — Retry GitHub Releases publish on 503
 
 **Intent:** The v2.0.3 release job notarized and uploaded the signed zip artifact, then `gh release view`/`create` failed with GitHub API 503 (“No server is currently available”). Treat that as transient: retry view/create/upload/edit like `notarytool`. Do not bump `APP_VERSION`. Do not re-notarize.

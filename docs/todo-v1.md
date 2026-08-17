@@ -1,6 +1,6 @@
 # GitRonimo 1.0.0
 
-**Status:** in-tree product is **2.0.3**  
+**Status:** in-tree product is **2.0.4**  
 **As of:** 2026-08-17
 
 The daily Git client is already in the app. This file is what is left **after** the 1.0.0 version bump — mostly a tag and a smoke pass — plus work that is explicitly **not** 1.0.0.

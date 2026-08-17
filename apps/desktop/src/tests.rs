@@ -11,10 +11,10 @@ use super::crash_report_body;
 use super::crash_report_path;
 use super::window_options;
 use crate::app_state::{
-    GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, OperationAction, RefContext,
-    RefContextSubmenu, RepositoryView, ShellState, eligible_trash_path, files_for_status_drag,
-    git_failure_message, network_failure_message, repository_is_available, resize_width,
-    window_title,
+    GitronimoApp, LastAction, MAXIMUM_PANE_WIDTH, MINIMUM_PANE_WIDTH, OperationAction, OverlaySlot,
+    RefContext, RefContextSubmenu, RepositoryView, ShellState, eligible_trash_path,
+    files_for_status_drag, git_failure_message, network_failure_message, repository_is_available,
+    resize_width, window_title,
 };
 use crate::keymap;
 use crate::menus;
@@ -288,7 +288,7 @@ fn application_menu_is_named_gitronimo_and_starts_with_about() {
 fn about_dialog_uses_the_release_version() {
     assert_eq!(
         crate::views::about::APP_VERSION,
-        "2.0.3",
+        "2.0.4",
         "bump APP_VERSION in views/about.rs after each release"
     );
 }
@@ -979,6 +979,52 @@ fn about_overlay_renders_from_show_about_dialog(cx: &mut TestAppContext) {
         cx.debug_bounds("about-check-updates").is_some(),
         "About GitRonimo must offer Check for updates"
     );
+    let card = cx
+        .debug_bounds("about-gitronimo")
+        .expect("About card bounds");
+    let site = cx
+        .debug_bounds("about-site-link")
+        .expect("About site link bounds");
+    let button = cx
+        .debug_bounds("about-check-updates")
+        .expect("About check-updates bounds");
+    assert!(
+        site.origin.x + site.size.width <= card.origin.x + card.size.width,
+        "site link must stay inside the About card (link {site:?}, card {card:?})"
+    );
+    assert!(
+        button.origin.x + button.size.width <= card.origin.x + card.size.width,
+        "Check for updates must stay inside the About card (button {button:?}, card {card:?})"
+    );
+}
+
+#[gpui::test]
+fn about_overlay_fades_out_before_unmount(cx: &mut TestAppContext) {
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    app.update(cx, GitronimoApp::show_about_dialog);
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("about-gitronimo").is_some(),
+        "About GitRonimo must paint after open"
+    );
+    app.update(cx, GitronimoApp::close_about_dialog);
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("about-gitronimo").is_some(),
+        "About GitRonimo must stay painted while fading out"
+    );
+    app.update(cx, |app, _| {
+        assert!(
+            app.show_about,
+            "fade-out keeps the About overlay mounted until the timer finishes"
+        );
+        assert_eq!(app.overlay_fade_out, Some(OverlaySlot::About));
+    });
 }
 
 #[gpui::test]

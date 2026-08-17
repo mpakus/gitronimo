@@ -6,7 +6,7 @@
 
 GitRonimo is a native macOS Git client written in Rust with [GPUI](https://gpui.rs). It keeps Git as the source of truth. The default engine is gitoxide [`gix`](https://github.com/GitoxideLabs/gitoxide) for repository discovery, status, history, stage/commit, and HTTPS fetch/clone. Your installed Git executable remains the fallback (Settings **Use system Git**) and still handles credential helpers, SSH, hooks, signing, filters, LFS, checkout, merge, rebase, stash, and push.
 
-Product version **2.0.3** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
+Product version **2.0.4** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
 
 ![GitRonimo working copy](docs/screenshot.png)
 
@@ -22,7 +22,7 @@ The current release includes:
 - **Branches** — context menu (pin/archive/rename/delete…); pinned branches persist and sit at the top of BRANCHES; unmerged delete offers a force-confirm dialog
 - **Network** — fetch, pull, publish, and push in the background with cancellation; progress in the activity bar; Pull/Push dialogs for options
 - **Command palette / Message history** — searchable scrollable palette (`Command-Shift-P`); activity-bar history of statuses, errors, and confirmations
-- **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **2.0.3**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co), **Check for updates**)
+- **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **2.0.4**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co), **Check for updates**)
 - **App Settings** — **GitRonimo → Settings…** (Command-comma) for in-app updates
 - **Git engine** — default `gix`; Settings **Use system Git** forces the installed executable
 - **Git LFS** — Fetch / Pull from the LFS view and palette
@@ -58,7 +58,7 @@ Working Copy selection and batch checkbox staging: [`docs/keyboard-shortcuts.md`
 
 ## Install and run
 
-Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (Apple Silicon and Intel in one zip). After the `v2.0.3` tag that file is `GitRonimo-v2.0.3.zip`.
+Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (Apple Silicon and Intel in one zip). After the `v2.0.4` tag that file is `GitRonimo-v2.0.4.zip`.
 
 To build a local `.app`:
 

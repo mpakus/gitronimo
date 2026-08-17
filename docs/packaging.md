@@ -2,7 +2,7 @@
 
 The product name is **GitRonimo**. The crate is still `gitronimo-desktop`; the binary and `.app` executable are `GitRonimo` so the macOS application menu title matches.
 
-Product version **2.0.3** is the string shown in About GitRonimo (`APP_VERSION` in `apps/desktop/src/views/about.rs`) and in the bundle (`[package.metadata.packager] version` in `apps/desktop/Cargo.toml`). Bump **both** after each release. They are independent of the Cargo workspace crate version.
+Product version **2.0.4** is the string shown in About GitRonimo (`APP_VERSION` in `apps/desktop/src/views/about.rs`) and in the bundle (`[package.metadata.packager] version` in `apps/desktop/Cargo.toml`). Bump **both** after each release. They are independent of the Cargo workspace crate version.
 
 Local `.app` bundles are unsigned. Gatekeeper will not treat them as a distributable release.
 
@@ -59,11 +59,11 @@ lipo -archs target/release-intel/GitRonimo.app/Contents/MacOS/GitRonimo
 mkdir -p target/dist
 ditto -c -k --sequesterRsrc --keepParent \
   target/release-arm/GitRonimo.app \
-  target/dist/GitRonimo-2.0.3-macos-arm64.zip
+  target/dist/GitRonimo-2.0.4-macos-arm64.zip
 ditto -c -k --sequesterRsrc --keepParent \
   target/release-intel/GitRonimo.app \
-  target/dist/GitRonimo-2.0.3-macos-x86_64.zip
-(cd target/dist && shasum -a 256 GitRonimo-2.0.3-macos-*.zip > SHA256SUMS.txt)
+  target/dist/GitRonimo-2.0.4-macos-x86_64.zip
+(cd target/dist && shasum -a 256 GitRonimo-2.0.4-macos-*.zip > SHA256SUMS.txt)
 ```
 
 A universal binary (lipo of both executables into one `GitRonimo.app`) is produced by `.github/workflows/release.yml` on a `v*` tag, then signed and notarized.
