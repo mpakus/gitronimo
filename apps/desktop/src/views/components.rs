@@ -197,7 +197,26 @@ pub(crate) fn file_action_button(
     cx: &mut gpui::Context<GitronimoApp>,
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> gpui::AnyElement {
-    action_button(label, ActionButtonStyle::Secondary, colors, cx, on_click)
+    file_action_button_named(label, label, colors, cx, on_click)
+}
+
+/// Same as [`file_action_button`], but the GPUI id is independent of the visible label.
+/// Use this when two rows would otherwise share `Off` / `On` and steal clicks.
+pub(crate) fn file_action_button_named(
+    id: &'static str,
+    label: &'static str,
+    colors: &ThemeColors,
+    cx: &mut gpui::Context<GitronimoApp>,
+    on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
+) -> gpui::AnyElement {
+    action_button(
+        id,
+        label,
+        ActionButtonStyle::Secondary,
+        colors,
+        cx,
+        on_click,
+    )
 }
 
 /// Primary (accent-filled) variant for the confirming action of a dialog or panel.
@@ -207,7 +226,14 @@ pub(crate) fn primary_action_button(
     cx: &mut gpui::Context<GitronimoApp>,
     on_click: impl Fn(&mut GitronimoApp, &mut gpui::Context<GitronimoApp>) + 'static,
 ) -> gpui::AnyElement {
-    action_button(label, ActionButtonStyle::Primary, colors, cx, on_click)
+    action_button(
+        label,
+        label,
+        ActionButtonStyle::Primary,
+        colors,
+        cx,
+        on_click,
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -217,6 +243,7 @@ pub(crate) enum ActionButtonStyle {
 }
 
 fn action_button(
+    id: &'static str,
     label: &'static str,
     style: ActionButtonStyle,
     colors: &ThemeColors,
@@ -236,8 +263,8 @@ fn action_button(
         colors.selection
     };
     div()
-        .id(action_button_id(label))
-        .debug_selector(|| format!("button:{label}"))
+        .id(action_button_id(id))
+        .debug_selector(|| format!("button:{id}"))
         .h(px(ACTION_BUTTON_HEIGHT))
         .px_2()
         .flex()

@@ -525,6 +525,7 @@ pub(crate) enum PaletteCommand {
     NavigateBack,
     NavigateForward,
     AboutGitRonimo,
+    AppSettings,
     CheckForUpdates,
     SuggestCommitMessage,
 }
@@ -757,6 +758,7 @@ pub(crate) const PALETTE_COMMANDS: &[(&str, PaletteCommand)] = &[
     ("Navigate back", PaletteCommand::NavigateBack),
     ("Navigate forward", PaletteCommand::NavigateForward),
     ("About GitRonimo", PaletteCommand::AboutGitRonimo),
+    ("App settings", PaletteCommand::AppSettings),
     ("Check for updates", PaletteCommand::CheckForUpdates),
     (
         "Suggest commit message",
@@ -803,6 +805,7 @@ mod palette_tests {
             "Quick open file…",
             "Message history",
             "About GitRonimo",
+            "App settings",
             "Check for updates",
             "Suggest commit message",
             "Fetch Git LFS objects",
@@ -968,6 +971,7 @@ pub(crate) struct GitronimoApp {
     pub command_palette_query: String,
     pub command_palette_selected: usize,
     pub show_about: bool,
+    pub show_app_settings: bool,
     pub pending_overlay_focus: Option<OverlayFocus>,
     pub selected_branch_review: Option<String>,
     pub branches_review_show_all: bool,

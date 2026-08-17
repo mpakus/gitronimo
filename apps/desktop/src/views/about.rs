@@ -13,13 +13,13 @@ pub(crate) const APP_TAGLINE: &str = "Made in Austin \u{2729} Texas";
 /// Product version shown in About `GitRonimo`. Bump this after each release.
 /// Keep in sync with `[package.metadata.packager] version` in `apps/desktop/Cargo.toml`.
 /// Independent of the Cargo workspace version.
-pub(crate) const APP_VERSION: &str = "2.0.1";
+pub(crate) const APP_VERSION: &str = "2.0.2";
 
 fn about_updates_copy(in_app_updates: bool) -> &'static str {
     if in_app_updates {
         "In-app updates are on. Check GitHub Releases for a newer notarized zip."
     } else {
-        "In-app updates are off. Turn them on in Settings, then check."
+        "In-app updates are off. Turn them on in GitRonimo → Settings…, then check."
     }
 }
 

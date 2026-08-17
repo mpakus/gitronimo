@@ -97,7 +97,7 @@ File list (with per-file add/del counts) on the left, full diff on the right. Fi
 - [x] Repositories welcome view: grouped/flat recents, detail panel, Add/Create/Clone actions
 - [x] Pull Requests list/detail workflow (Phase 9 baseline)
 - [x] Welcome toolbar Bookmarks / Workflow tabs (templates, Start / Finish / Sync)
-- [x] Services tab and view removed; GitHub connect lives in Settings. Settings also has Git engine (gix / System Git), auto-stash, in-app updates, and AI commit messages (all extra toggles default off).
+- [x] Services tab and view removed; GitHub connect lives in Settings. Settings also has Git engine (gix / System Git), auto-stash, and AI commit messages (extra toggles default off). In-app updates live in **GitRonimo → Settings…** and default on.
 - [x] Always-visible inline toolbar/sidebar search filtering repos and files
 - [x] Sidebar remote-activity progress bar during fetch/pull/push + last-result footer when idle
 - [x] Visual polish pass: welcome detail headers, commit focus border, diff tabs/hunk headers, HEAD badge, activity bar

@@ -498,7 +498,7 @@ impl RecentRepositoryStore {
         })
     }
 
-    /// Whether Settings may check GitHub Releases and replace this `.app`.
+    /// Whether `GitRonimo` Settings may check GitHub Releases and replace this `.app`.
     ///
     /// # Errors
     /// Returns the same schema and read errors as [`Self::load`].
@@ -836,6 +836,10 @@ pub struct BookmarkOrganization {
     pub repository_folders: std::collections::BTreeMap<String, String>,
 }
 
+fn default_in_app_updates_on() -> bool {
+    true
+}
+
 #[derive(Deserialize, Serialize)]
 #[allow(clippy::struct_excessive_bools)]
 struct RecentRepositoryDocument {
@@ -865,8 +869,13 @@ struct RecentRepositoryDocument {
     /// When true, stash dirty work before switch and pull, then reapply it.
     #[serde(default)]
     auto_stash: bool,
-    /// When true, Settings can check GitHub Releases and install a notarized zip.
-    #[serde(default)]
+    /// When true, `GitRonimo` Settings can check GitHub Releases and install a notarized zip.
+    /// Stored as `in_app_updates_enabled` so older documents that wrote
+    /// `in_app_updates: false` (the previous default) pick up On.
+    #[serde(
+        default = "default_in_app_updates_on",
+        rename = "in_app_updates_enabled"
+    )]
     in_app_updates: bool,
     /// When true, the commit composer may request an AI suggestion.
     #[serde(default)]
@@ -894,7 +903,7 @@ impl Default for RecentRepositoryDocument {
             workflows: std::collections::BTreeMap::new(),
             use_system_git: false,
             auto_stash: false,
-            in_app_updates: false,
+            in_app_updates: true,
             ai_commit_messages: false,
             ai_commit_endpoint: String::new(),
             ai_commit_model: String::new(),
@@ -1264,17 +1273,29 @@ mod tests {
     }
 
     #[test]
-    fn in_app_updates_defaults_off_and_persists() {
+    fn in_app_updates_defaults_on_and_ignores_legacy_false_key() {
         let (directory, store) = temporary_store();
         assert!(
-            !store
+            store
                 .load_in_app_updates()
-                .expect("missing store should default off")
+                .expect("missing store should default on")
+        );
+        let store_path = directory.join("recents.json");
+        fs::create_dir_all(&directory).expect("store directory should create");
+        fs::write(
+            &store_path,
+            br#"{"schema_version":1,"recent_repositories":[],"in_app_updates":false}"#,
+        )
+        .expect("legacy document should write");
+        assert!(
+            store
+                .load_in_app_updates()
+                .expect("legacy false key should not keep updates off")
         );
         store
-            .save_in_app_updates(true)
+            .save_in_app_updates(false)
             .expect("override should save");
-        assert!(store.load_in_app_updates().expect("override should load"));
+        assert!(!store.load_in_app_updates().expect("override should load"));
         let _ = fs::remove_dir_all(directory);
     }
 

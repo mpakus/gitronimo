@@ -10,17 +10,17 @@ Functional reference for the repository window chrome that sits outside individu
 │ BRANCHES│                                                                   │
 │ (pins…) │                                                                   │
 ├─ Activity bar: [history] [network progress…] status line ───────────────────┤
-└─ Overlays: palette, prompts, ref/commit menus, Pull/Push, confirms, About ─┘
+└─ Overlays: palette, prompts, ref/commit menus, Pull/Push, confirms, About, App Settings ─┘
 ```
 
-Preferences live at `~/Library/Application Support/Gitronimo/recent-repositories.json` (schema v1). Settings opt-ins (all default **off**):
+Preferences live at `~/Library/Application Support/Gitronimo/recent-repositories.json` (schema v1). Repository Settings opt-ins default **off** except as noted:
 
-| Setting | Behavior |
-|---------|----------|
-| **Git engine** | Default **gix**. **System Git** forces `git_cli`. Unmigrated workflows always use the installed executable. |
-| **Auto-stash before switch and pull** | Stash dirty work, run the switch or pull, reapply. Pull uses Git `--autostash`. |
-| **In-app updates** | **Check now** (About **Check for updates**, GitRonimo menu **Check for Updates…**, or palette) can install a verified GitHub release zip. No check on launch. Settings shows the installed `APP_VERSION`. |
-| **AI commit messages** | Composer **Suggest** / palette **Suggest commit message** POSTs the redacted staged diff to an OpenAI-compatible endpoint (HTTPS, or HTTP on `127.0.0.1` / `localhost` / `[::1]`). Endpoint and model persist in prefs; API key is Keychain `com.gitronimo.ai-commit`. Fills the composer only — never commits. |
+| Setting | Where | Behavior |
+|---------|-------|----------|
+| **Git engine** | Repository Settings | Default **gix**. **System Git** forces `git_cli`. Unmigrated workflows always use the installed executable. |
+| **Auto-stash before switch and pull** | Repository Settings | Stash dirty work, run the switch or pull, reapply. Pull uses Git `--autostash`. Off by default. |
+| **In-app updates** | **GitRonimo → Settings…** (Command-comma) | On by default. **Check now** (About **Check for updates**, GitRonimo menu **Check for Updates…**, or palette) can install a verified GitHub release zip. No check on launch. App Settings shows the installed `APP_VERSION`. |
+| **AI commit messages** | Repository Settings | Composer **Suggest** / palette **Suggest commit message** POSTs the redacted staged diff to an OpenAI-compatible endpoint (HTTPS, or HTTP on `127.0.0.1` / `localhost` / `[::1]`). Endpoint and model persist in prefs; API key is Keychain `com.gitronimo.ai-commit`. Fills the composer only — never commits. Off by default. |
 
 ## Activity bar and message history
 
@@ -45,7 +45,7 @@ Destructive or blocked Git outcomes use modal overlays (not only the activity fl
 | History → Hard reset | Choice prompt Soft / Mixed / Hard | **Hard Reset** confirm via `AppConfirmDialog::HardReset` |
 | History → Revert / Delete | `AppConfirmDialog::RevertCommit` / `DropCommit` | — |
 | Workflow → Finish topic | `AppConfirmDialog::FinishTopic` | merge/squash/rebase into configured bases, then delete the topic |
-| Settings → Check now (updates on) | `AppConfirmDialog::InstallUpdate` | download zip, SHA-256, Gatekeeper, replace `.app` |
+| GitRonimo Settings → Check now (updates on) | `AppConfirmDialog::InstallUpdate` | download zip, SHA-256, Gatekeeper, replace `.app` |
 | Force push | Existing force-with-lease confirmation | — |
 
 `AppConfirmDialog` is the shared enum for blocked-action confirmations; render through `workspace` modal helpers. Domain logic stays in `main.rs`, not in `Render`.
@@ -92,7 +92,7 @@ Searchable list (`PALETTE_COMMANDS` in `app_state.rs`); list viewport scrolls. I
 - Git LFS: status list, **Fetch Git LFS objects**, **Pull Git LFS objects** (system Git; cancellable; default remote)
 - History filter, Reveal HEAD, selected-commit copy / checkout / reset / revert / patch / export / compare / new branch
 - History tools (file history, blame, compare refs, browse tree, rebase onto, merge revision, squash/fixup/drop/reword, merge tool, signature check)
-- Quick open file, Message history, Toggle appearance, Keyboard shortcuts, Navigate back/forward, **About GitRonimo**, **Check for updates**
+- Quick open file, Message history, Toggle appearance, Keyboard shortcuts, Navigate back/forward, **About GitRonimo**, **App settings**, **Check for updates**
 
 Dispatch is `run_palette_command` in `main.rs`. Adding a user-facing action that already has a handler should usually add a `PaletteCommand` variant + label + match arm. Selected-commit actions require a History selection; Reset/Revert also require History scoped to the HEAD branch.
 
@@ -117,4 +117,8 @@ Palette **Show submodules**. The view lists configured submodules and **Update a
 
 ## About GitRonimo
 
-**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **2.0.1**, bump after each release), “Made in Austin ✩ Texas”, https://aomega.co, in-app update status, and **Check for updates** (same handler as Settings **Check now** and **GitRonimo → Check for Updates…**). Click outside to dismiss. The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.
+**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **2.0.2**, bump after each release), “Made in Austin ✩ Texas”, https://aomega.co, in-app update status, and **Check for updates** (same handler as App Settings **Check now** and **GitRonimo → Check for Updates…**). Click outside to dismiss. The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.
+
+## App Settings
+
+**GitRonimo → Settings…** (Command-comma, also palette **App settings**) opens a centered overlay with **UPDATES** (installed version, On/Off, **Check now**). In-app updates default on. Click outside to dismiss. Repository sidebar **Settings** keeps Git engine, auto-stash, AI commits, GitHub, and appearance.

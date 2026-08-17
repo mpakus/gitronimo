@@ -80,7 +80,7 @@ Local and CI development bundles are unsigned `GitRonimo.app`. macOS Gatekeeper 
 
 ## In-app update failed or refused
 
-Settings **In-app updates** stays off until you turn it on. **Check now** / About **Check for updates** / **GitRonimo → Check for Updates…** only talk to GitHub when that toggle is on; GitRonimo does not poll on launch. Install requires a real `GitRonimo.app` (not `cargo run`). The zip must match `SHA256SUMS.txt`, and the extracted app must pass Gatekeeper. Unsigned local zips are refused. After a successful install, quit and open `GitRonimo.app` again.
+**GitRonimo → Settings…** (Command-comma) **In-app updates** is on by default. **Check now** / About **Check for updates** / **GitRonimo → Check for Updates…** only talk to GitHub when that toggle is on; GitRonimo does not poll on launch. Install requires a real `GitRonimo.app` (not `cargo run`). The zip must match `SHA256SUMS.txt`, and the extracted app must pass Gatekeeper. Unsigned local zips are refused. After a successful install, quit and open `GitRonimo.app` again.
 
 ## AI commit suggestion failed or did nothing
 
@@ -88,4 +88,4 @@ Settings **AI commit messages** stays off until you turn it on. **Suggest** (Wor
 
 ## About GitRonimo
 
-**GitRonimo → About GitRonimo** (or palette **About GitRonimo**) shows product version **2.0.1**. After a release, bump `APP_VERSION` in `apps/desktop/src/views/about.rs` and the packager version together. **Check for updates** on About (and **GitRonimo → Check for Updates…**) uses the same path as Settings. Click outside the overlay to dismiss it.
+**GitRonimo → About GitRonimo** (or palette **About GitRonimo**) shows product version **2.0.2**. After a release, bump `APP_VERSION` in `apps/desktop/src/views/about.rs` and the packager version together. **Check for updates** on About (and **GitRonimo → Check for Updates…**) uses the same path as App Settings. Click outside the overlay to dismiss it.

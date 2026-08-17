@@ -2,14 +2,15 @@ use gpui::KeyBinding;
 
 use crate::actions::{
     CommandPalette, FocusComposer, FocusSearch, Hide, HistoryNext, HistoryPrevious, NavigateBack,
-    NavigateForward, OpenRepository, Quit, Refresh, SaveStash, SelectAllStatusFiles,
+    NavigateForward, OpenRepository, OpenSettings, Quit, Refresh, SaveStash, SelectAllStatusFiles,
     ShortcutReference, ToggleAppearance, WidenInspector, WidenSidebar,
 };
 
-pub fn bindings() -> [KeyBinding; 17] {
+pub fn bindings() -> [KeyBinding; 18] {
     [
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-h", Hide, None),
+        KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-f", FocusSearch, None),
         KeyBinding::new("cmd-o", OpenRepository, None),
         KeyBinding::new("cmd-r", Refresh, None),

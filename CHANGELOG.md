@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.2 — 2026-08-17
+
+Product version **2.0.2** (About GitRonimo / `APP_VERSION` and packager bundle version). Tag `v2.0.2` for the notarized universal zip.
+
+- In-app updates default **on**. **GitRonimo → Settings…** (Command-comma) opens app Settings with the Updates toggle and **Check now**. Repository Settings no longer lists Updates. Off/On use unique control ids so the toggle actually persists.
+
 ## 2.0.1 — 2026-08-17
 
 Product version **2.0.1** (About GitRonimo / `APP_VERSION` and packager bundle version). Tag `v2.0.1` for the notarized universal zip.
