@@ -6,23 +6,23 @@
 
 GitRonimo is a native macOS Git client written in Rust with [GPUI](https://gpui.rs). It keeps Git as the source of truth. The default engine is gitoxide [`gix`](https://github.com/GitoxideLabs/gitoxide) for repository discovery, status, history, stage/commit, and HTTPS fetch/clone. Your installed Git executable remains the fallback (Settings **Use system Git**) and still handles credential helpers, SSH, hooks, signing, filters, LFS, checkout, merge, rebase, stash, and push.
 
-Product version **2.0.0** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
+Product version **2.0.1** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
 
 ![GitRonimo working copy](docs/screenshot.png)
 
-## 2.0.0 scope
+## 2.0 scope
 
 The current release includes:
 
 - **Welcome / Repositories** — open, add, create, and clone local repositories; grouped bookmark folders
-- **Working Copy** — status and diffs, Modified/All Files toggle, multi-select (`Command-A`, Shift-click), batch stage/unstage via checkboxes, partial line/hunk staging, commit/amend/sign-off
+- **Working Copy** — status and diffs, Modified/All Files toggle, multi-select (`Command-A`, Shift-click), batch stage/unstage via checkboxes, partial line/hunk staging, commit/amend/sign-off; the changes preview scrolls when hunks or lines overflow the pane
 - **History** — bounded commit log with graph, scope filter, Changeset/Tree detail, double-click to Commit Detail, commit context menu
 - **Stashes, Remotes, Pull Requests, Settings** — two-pane list + detail layouts (some secondary views remain palette-only)
 - **Workflow** — GitHub Flow / GitLab Flow / git-flow templates, auto-detect, Start / Finish / Sync topic branches (welcome + in-repo)
 - **Branches** — context menu (pin/archive/rename/delete…); pinned branches persist and sit at the top of BRANCHES; unmerged delete offers a force-confirm dialog
 - **Network** — fetch, pull, publish, and push in the background with cancellation; progress in the activity bar; Pull/Push dialogs for options
 - **Command palette / Message history** — searchable scrollable palette (`Command-Shift-P`); activity-bar history of statuses, errors, and confirmations
-- **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **2.0.0**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co), **Check for updates**)
+- **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **2.0.1**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co), **Check for updates**)
 - **Git engine** — default `gix`; Settings **Use system Git** forces the installed executable
 - **Git LFS** — Fetch / Pull from the LFS view and palette
 - **Stash extras** — file drag onto Working Copy, optional auto-stash, named snapshots
@@ -56,7 +56,7 @@ Working Copy selection and batch checkbox staging: [`docs/keyboard-shortcuts.md`
 
 ## Install and run
 
-Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (Apple Silicon and Intel in one zip). After the `v2.0.0` tag that file is `GitRonimo-v2.0.0.zip`.
+Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (Apple Silicon and Intel in one zip). After the `v2.0.1` tag that file is `GitRonimo-v2.0.1.zip`.
 
 To build a local `.app`:
 

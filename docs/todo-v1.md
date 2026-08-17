@@ -1,7 +1,7 @@
 # GitRonimo 1.0.0
 
-**Status:** in-tree product is **2.0.0**  
-**As of:** 2026-08-16
+**Status:** in-tree product is **2.0.1**  
+**As of:** 2026-08-17
 
 The daily Git client is already in the app. This file is what is left **after** the 1.0.0 version bump — mostly a tag and a smoke pass — plus work that is explicitly **not** 1.0.0.
 
@@ -33,7 +33,7 @@ The daily Git client is already in the app. This file is what is left **after** 
 
 ## Not 1.0.0 (do not start while tagging)
 
-Tracked as **[`PLAN-v2.md`](PLAN-v2.md)**. In tree after the 1.0.0 bump: `gix` as primary Git (system Git fallback), in-app updater, LFS fetch/pull UI and stash extras, optional AI commit messages. Remaining PLAN-v2 checkboxes are workflows that still run on system Git until `gix` orchestrates them.
+Tracked as **[`PLAN-v2.md`](PLAN-v2.md)**. In tree after the 1.0.0 bump: `gix` as primary Git (system Git fallback), in-app updater, LFS fetch/pull UI and stash extras, optional AI commit messages. Remaining PLAN-v2 checkboxes are workflows that still run on system Git until `gix` orchestrates them. Post-2.0.0 product work is **[`PLAN-v3.md`](PLAN-v3.md)**.
 
 ---
 

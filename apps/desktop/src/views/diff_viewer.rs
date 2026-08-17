@@ -9,6 +9,24 @@ use git_domain::{DiffLine, DiffLineKind};
 use crate::app_state::GitronimoApp;
 use crate::views::components::file_action_button;
 
+/// Monaco `text_xs` is about 8px per column. Gutters are two `w_8` + sign + padding.
+const DIFF_PREVIEW_COLUMN_PX: f32 = 8.0;
+const DIFF_PREVIEW_GUTTER_PX: f32 = 96.0;
+
+fn diff_preview_min_width_px(diff: &git_domain::UnifiedDiff) -> f32 {
+    let mut max_cols = 0usize;
+    for file in &diff.files {
+        for hunk in &file.hunks {
+            max_cols = max_cols.max(hunk.header.len());
+            for line in &hunk.lines {
+                max_cols = max_cols.max(line.content.len());
+            }
+        }
+    }
+    let cols = u16::try_from(max_cols.min(usize::from(u16::MAX))).unwrap_or(u16::MAX);
+    f32::from(cols).mul_add(DIFF_PREVIEW_COLUMN_PX, DIFF_PREVIEW_GUTTER_PX)
+}
+
 impl GitronimoApp {
     pub(crate) fn diff_view(
         &self,
@@ -45,6 +63,11 @@ impl GitronimoApp {
             div()
                 .flex()
                 .flex_col()
+                .flex_1()
+                .size_full()
+                .min_h(px(0.0))
+                .min_w(px(0.0))
+                .overflow_hidden()
                 .gap_0()
                 .bg(colors.panel_background)
                 .child(Self::diff_header(
@@ -65,7 +88,28 @@ impl GitronimoApp {
                         .child("Binary file changed")
                         .into_any_element()
                 } else {
-                    div().p_2().children(code_rows).into_any_element()
+                    let min_width = diff_preview_min_width_px(&loaded.diff);
+                    div()
+                        .id("diff-scroll")
+                        .debug_selector(|| "diff-scroll".into())
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .min_w(px(0.0))
+                        .overflow_scroll()
+                        .scrollbar_width(px(8.0))
+                        .p_2()
+                        .child(
+                            div()
+                                .id("diff-scroll-content")
+                                .debug_selector(|| "diff-scroll-content".into())
+                                .w(px(min_width))
+                                .min_w(px(min_width))
+                                .flex()
+                                .flex_col()
+                                .whitespace_nowrap()
+                                .children(code_rows),
+                        )
+                        .into_any_element()
                 })
                 .children(loaded.truncated.then(|| {
                     div()
@@ -238,69 +282,14 @@ impl GitronimoApp {
                 }
                 let header_text = String::from_utf8_lossy(&hunk.header).into_owned();
                 let can_hunk = can_mutate;
-                code_rows.push(
-                    div()
-                        .px_2()
-                        .py_1()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .bg(colors.raised_background)
-                        .border_b_1()
-                        .border_color(colors.border)
-                        .font_family("Monaco")
-                        .text_xs()
-                        .text_color(colors.text_secondary)
-                        .child(div().child(header_text))
-                        .when(can_hunk, |row| {
-                            row.child(
-                                div()
-                                    .flex()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .id(("discard-chunk", hunk_index))
-                                            .px_2()
-                                            .py_1()
-                                            .rounded(px(3.0))
-                                            .text_xs()
-                                            .bg(colors.raised_background)
-                                            .border_1()
-                                            .border_color(colors.border)
-                                            .cursor_pointer()
-                                            .on_click(cx.listener(move |app, _, _, cx| {
-                                                app.request_hunk_discard(hunk_index, cx);
-                                            }))
-                                            .child("Discard Chunk"),
-                                    )
-                                    .child(
-                                        div()
-                                            .id(("stage-chunk", hunk_index))
-                                            .px_2()
-                                            .py_1()
-                                            .rounded(px(3.0))
-                                            .text_xs()
-                                            .bg(colors.raised_background)
-                                            .border_1()
-                                            .border_color(colors.border)
-                                            .cursor_pointer()
-                                            .on_click(cx.listener(move |app, _, _, cx| {
-                                                if staged_diff {
-                                                    app.unstage_diff_hunk(hunk_index, cx);
-                                                } else {
-                                                    app.stage_diff_hunk(hunk_index, cx);
-                                                }
-                                            }))
-                                            .child(if staged_diff {
-                                                "Unstage Chunk"
-                                            } else {
-                                                "Stage Chunk"
-                                            }),
-                                    ),
-                            )
-                        })
-                        .into_any_element(),
-                );
+                code_rows.push(Self::hunk_header_row(
+                    hunk_index,
+                    header_text,
+                    can_hunk,
+                    staged_diff,
+                    colors,
+                    cx,
+                ));
                 for (line_index, line) in hunk.lines.iter().enumerate() {
                     code_rows.push(
                         self.diff_line_row(hunk_index, line_index, line, selectable, colors, cx),
@@ -309,6 +298,83 @@ impl GitronimoApp {
             }
         }
         (hunk_count, total_additions, total_deletions, code_rows)
+    }
+
+    fn hunk_header_row(
+        hunk_index: usize,
+        header_text: String,
+        can_hunk: bool,
+        staged_diff: bool,
+        colors: &ThemeColors,
+        cx: &mut gpui::Context<Self>,
+    ) -> AnyElement {
+        div()
+            .w_full()
+            .px_2()
+            .py_1()
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .gap_2()
+            .whitespace_nowrap()
+            .bg(colors.raised_background)
+            .border_b_1()
+            .border_color(colors.border)
+            .font_family("Monaco")
+            .text_xs()
+            .text_color(colors.text_secondary)
+            .when(can_hunk, |row| {
+                row.child(
+                    div()
+                        .flex()
+                        .flex_shrink_0()
+                        .gap_1()
+                        .child(
+                            div()
+                                .id(("discard-chunk", hunk_index))
+                                .debug_selector(|| format!("discard-chunk-{hunk_index}"))
+                                .px_2()
+                                .py_1()
+                                .rounded(px(3.0))
+                                .text_xs()
+                                .bg(colors.raised_background)
+                                .border_1()
+                                .border_color(colors.border)
+                                .cursor_pointer()
+                                .on_click(cx.listener(move |app, _, _, cx| {
+                                    app.request_hunk_discard(hunk_index, cx);
+                                }))
+                                .child("Discard Chunk"),
+                        )
+                        .child(
+                            div()
+                                .id(("stage-chunk", hunk_index))
+                                .debug_selector(|| format!("stage-chunk-{hunk_index}"))
+                                .px_2()
+                                .py_1()
+                                .rounded(px(3.0))
+                                .text_xs()
+                                .bg(colors.raised_background)
+                                .border_1()
+                                .border_color(colors.border)
+                                .cursor_pointer()
+                                .on_click(cx.listener(move |app, _, _, cx| {
+                                    if staged_diff {
+                                        app.unstage_diff_hunk(hunk_index, cx);
+                                    } else {
+                                        app.stage_diff_hunk(hunk_index, cx);
+                                    }
+                                }))
+                                .child(if staged_diff {
+                                    "Unstage Chunk"
+                                } else {
+                                    "Stage Chunk"
+                                }),
+                        ),
+                )
+            })
+            .child(div().flex_shrink_0().whitespace_nowrap().child(header_text))
+            .into_any_element()
     }
 
     fn diff_line_row(
@@ -349,6 +415,8 @@ impl GitronimoApp {
                 .child(sign)
                 .into_any_element(),
             div()
+                .flex_shrink_0()
+                .whitespace_nowrap()
                 .text_color(content_color)
                 .child(String::from_utf8_lossy(&line.content).into_owned())
                 .into_any_element(),
@@ -362,13 +430,16 @@ impl GitronimoApp {
             );
         }
         let styled = |row: gpui::Div| {
-            row.px_1()
+            row.w_full()
+                .px_1()
                 .py_0p5()
                 .font_family("Monaco")
                 .text_xs()
                 .flex()
+                .flex_shrink_0()
                 .items_center()
                 .gap_2()
+                .whitespace_nowrap()
                 .when(is_selected, |line| {
                     line.border_l_2().border_color(colors.accent)
                 })

@@ -2,9 +2,9 @@
 
 **Status:** Phase A prefer-gix complete; Phase E complete (LFS, stash partial apply, auto-stash, snapshots); Phase D complete (opt-in in-app updates); Phase G complete (optional AI commit messages). Checkout/merge/rebase/push/hooks stay on system Git.  
 **As of:** 2026-08-16  
-**Product today:** **2.0.0** (`APP_VERSION` / packager). Architecture and crate rules stay in [`PLAN.md`](../PLAN.md) unless an item below supersedes them.
+**Product today:** **2.0.1** (`APP_VERSION` / packager). Architecture and crate rules stay in [`PLAN.md`](../PLAN.md) unless an item below supersedes them.
 
-This is post-1.0.0 work. Do not start it while tagging or smoking 1.0.0. Hand steps for the 1.0.0 tag remain in [`todo-v1.md`](todo-v1.md).
+This is post-1.0.0 work. Do not start it while tagging or smoking 1.0.0. Hand steps for the 1.0.0 tag remain in [`todo-v1.md`](todo-v1.md). Remaining boxes below are `gix` fallbacks. Post-2.0.0 product work is [`PLAN-v3.md`](PLAN-v3.md).
 
 ---
 
@@ -134,7 +134,7 @@ Same as 1.0 [`PLAN.md`](../PLAN.md) §23 and [`AGENTS.md`](../AGENTS.md):
 4. Gates: `fmt --check`, clippy `-D warnings`, `cargo test --workspace --all-features`, `cargo deny check`.
 5. Bump `APP_VERSION` and packager version together when cutting a later release.
 
-Suggested order: **A → E → D → G** (all checkbox groups done).
+Suggested order: **A → E → D → G** (all checkbox groups done). Remaining boxes are `gix` fallbacks only; 3.0 product work is [`PLAN-v3.md`](PLAN-v3.md).
 
 ---
 

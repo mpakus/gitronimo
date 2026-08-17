@@ -268,7 +268,7 @@ fn application_menu_is_named_gitronimo_and_starts_with_about() {
 fn about_dialog_uses_the_release_version() {
     assert_eq!(
         crate::views::about::APP_VERSION,
-        "2.0.0",
+        "2.0.1",
         "bump APP_VERSION in views/about.rs after each release"
     );
 }
@@ -958,5 +958,45 @@ fn about_overlay_renders_from_show_about_dialog(cx: &mut TestAppContext) {
     assert!(
         cx.debug_bounds("about-check-updates").is_some(),
         "About GitRonimo must offer Check for updates"
+    );
+}
+
+#[gpui::test]
+fn working_copy_diff_preview_paints_a_scroll_area(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("diff-scroll");
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    app.update(cx, |app, _| {
+        app.state = ShellState::Repository(fixture.repository.clone());
+        app.working_copy = Some(fixture.status());
+        let mut loaded = sample_loaded_diff();
+        loaded.diff.files[0].hunks[0].lines[1].content = b"x".repeat(400);
+        app.loaded_diff = Some(loaded);
+        app.selected_diff = Some((GitPath(b"a.txt".to_vec()), false));
+        app.repository_view = RepositoryView::WorkingCopy;
+    });
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    let scroll = cx
+        .debug_bounds("diff-scroll")
+        .expect("the changes preview must be a scroll container");
+    let content = cx
+        .debug_bounds("diff-scroll-content")
+        .expect("the changes preview must size content wider than long lines");
+    assert!(
+        content.size.width > scroll.size.width,
+        "long diff lines must overflow the pane so they can scroll horizontally (content {:?}, pane {:?})",
+        content.size.width,
+        scroll.size.width
+    );
+    assert!(
+        cx.debug_bounds("stage-chunk-0").is_some(),
+        "Stage Chunk must stay on the hunk header"
+    );
+    assert!(
+        cx.debug_bounds("discard-chunk-0").is_some(),
+        "Discard Chunk must stay on the hunk header"
     );
 }

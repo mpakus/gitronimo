@@ -1,5 +1,45 @@
 # Implementation work log
 
+## 2026-08-17 — Diff preview actually scrolls horizontally
+
+**Intent:** Vertical overflow worked after `overflow_scroll`, but long lines still could not pan left/right. GPUI only enables X scroll when content is wider than the pane; flex-stretched rows were sized to the viewport, so `scroll_max.x` stayed 0. Wrap hunks in an inner column with `min_w` from the longest line (GPUI scrollable example uses an explicit child width). Do not bump `APP_VERSION`.
+
+**Files:** `apps/desktop/src/views/diff_viewer.rs`, `tests.rs`.
+
+**Acceptance:** Inner `diff-scroll-content` is wider than `diff-scroll` when a line is longer than the pane. Stage/Discard remain on the hunk header. Gates green.
+
+**References:** GPUI 0.2.2 `examples/scrollable.rs` (explicit child width inside `overflow_scroll`). rgitui no-wrap (MIT) adapted. GitComet is AGPL — approach-only.
+
+## 2026-08-17 — Cut product version 2.0.1
+
+**Intent:** Bump product version to **2.0.1** (`APP_VERSION` + packager) for the Working Copy diff-preview scroll fix. Cargo workspace version stays `0.1.0`.
+
+**Files:** `apps/desktop/src/views/about.rs`, `apps/desktop/Cargo.toml`, `apps/desktop/src/tests.rs`, CHANGELOG, README, AGENTS.md, PLAN.md, docs.
+
+**Acceptance:** About and packager show `2.0.1`. Test asserts `APP_VERSION`. Changelog has a 2.0.1 section. Gates green.
+
+**References:** in-tree version bump sites from the 2.0.0 cut.
+
+## 2026-08-17 — Diff preview scrolls vertically and horizontally
+
+**Intent:** The Working Copy right-hand changes preview (Stage Chunk / Discard Chunk) clips long lines and tall hunks because the pane is `overflow_hidden` with no scroll container. Add a two-axis scroll area so users can pan when lines are wider than the pane and when the hunk list is taller than the window. Keep hunk action buttons on the hunk header (header text ellipsizes; line body scrolls). No Git in `Render`. Do not bump `APP_VERSION`.
+
+**Files:** `apps/desktop/src/views/diff_viewer.rs`, `working_copy.rs`, `tests.rs`.
+
+**Acceptance:** Diff body uses a named `diff-scroll` container with `overflow_scroll`. Lines do not wrap. A GPUI test paints Working Copy with a loaded diff and finds `diff-scroll` and Stage Chunk. Gates green.
+
+**References:** in-tree command-palette `overflow_y_scroll`; rgitui `rgitui_diff` (MIT) no-wrap + ancestor/per-row `overflow_x_scroll` for long diff lines, adapted. GitComet is AGPL — approach-only.
+
+## 2026-08-16 — Record post-2.0 product plan as PLAN-v3.md
+
+**Intent:** Write `docs/PLAN-v3.md` so 3.0 work (findability, GitHub OAuth/enterprise, daily-loop polish) is not mixed into remaining PLAN-v2 `gix` fallbacks. GitHub-only for 3.0; GitLab stays 3.1. No code.
+
+**Files:** `docs/PLAN-v3.md`, `docs/README.md`, `AGENTS.md`, `PLAN.md`, `docs/PLAN-v2.md`.
+
+**Acceptance:** PLAN-v3 has F/H/P checkbox groups, in-scope table, and non-goals. Docs index and agent rules point at it. Remaining checkout/merge/rebase/stash/push/hooks stay in PLAN-v2.
+
+**References:** in-tree PLAN-v2, UI-IMPROVE remaining gaps, PLAN.md Phase 9 enterprise box.
+
 ## 2026-08-16 — Cut 2.0.0; About/Settings/menu Check for updates
 
 **Intent:** Bump product version to **2.0.0** (`APP_VERSION` + packager). Surface in-app update info and a **Check for updates** control on About (plus Settings installed-version row and the GitRonimo application menu). Still opt-in; no check on launch. Cargo workspace version stays `0.1.0`.

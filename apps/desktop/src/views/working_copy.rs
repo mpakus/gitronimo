@@ -150,13 +150,21 @@ impl GitronimoApp {
             };
             centered_empty_state(title, detail, colors)
         });
-        let diff_pane = div().flex_1().h_full().overflow_hidden().child(diff);
+        let diff_pane = div()
+            .flex_1()
+            .h_full()
+            .min_w(px(0.0))
+            .min_h(px(0.0))
+            .overflow_hidden()
+            .child(diff);
         let col_w = px(self.column_width);
         div()
             .id("workspace-flex")
             .flex()
             .flex_1()
             .h_full()
+            .min_w(px(0.0))
+            .overflow_hidden()
             .child(
                 div()
                     .w(col_w)

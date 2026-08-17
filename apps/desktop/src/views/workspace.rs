@@ -80,6 +80,7 @@ impl Render for GitronimoApp {
                         div()
                             .flex_1()
                             .h_full()
+                            .min_w(px(0.0))
                             .overflow_hidden()
                             .child(content)
                             .children(self.shortcut_reference_view(&colors, cx)),

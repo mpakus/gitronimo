@@ -1,6 +1,6 @@
 # GitRonimo documentation
 
-Index of project documentation. Start with [README.md](../README.md) for install and overview. Product version **2.0.0** is `APP_VERSION` in `apps/desktop/src/views/about.rs` (bump after each release).
+Index of project documentation. Start with [README.md](../README.md) for install and overview. Product version **2.0.1** is `APP_VERSION` in `apps/desktop/src/views/about.rs` (bump after each release).
 
 ## Product and planning
 
@@ -8,6 +8,7 @@ Index of project documentation. Start with [README.md](../README.md) for install
 |----------|----------|---------|
 | [PLAN.md](../PLAN.md) | Contributors | Roadmap, checklist, crate boundaries |
 | [PLAN-v2.md](PLAN-v2.md) | Contributors | Post-1.0.0 work. A/E/D/G are in tree; remaining boxes are `gix` fallback migrations |
+| [PLAN-v3.md](PLAN-v3.md) | Contributors | Post-2.0.0 work. F (findability), H (GitHub OAuth/enterprise), P (polish). GitLab is 3.1 |
 | [todo-v1.md](todo-v1.md) | Contributors | Leftover work and doc hygiene toward v1 |
 | [UI-PLAN.md](UI-PLAN.md) | UI contributors | UI phases and screenshot matrix |
 | [UI-IMPROVE.md](UI-IMPROVE.md) | UI contributors | GitRonimo view patterns and remaining gaps |
@@ -58,4 +59,4 @@ When you change user-visible behavior:
 4. Update [README.md](../README.md) screenshots if the UI changed materially.
 5. Sync [UI-IMPROVE.md](UI-IMPROVE.md) implementation status when a user-visible UI pattern lands.
 6. Add a [CHANGELOG.md](../CHANGELOG.md) note when preparing a release.
-7. Bump `APP_VERSION` in `apps/desktop/src/views/about.rs` after each product release (currently **2.0.0**).
+7. Bump `APP_VERSION` in `apps/desktop/src/views/about.rs` after each product release (currently **2.0.1**).

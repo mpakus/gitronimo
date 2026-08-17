@@ -88,4 +88,4 @@ Settings **AI commit messages** stays off until you turn it on. **Suggest** (Wor
 
 ## About GitRonimo
 
-**GitRonimo → About GitRonimo** (or palette **About GitRonimo**) shows product version **2.0.0**. After a release, bump `APP_VERSION` in `apps/desktop/src/views/about.rs` and the packager version together. **Check for updates** on About (and **GitRonimo → Check for Updates…**) uses the same path as Settings. Click outside the overlay to dismiss it.
+**GitRonimo → About GitRonimo** (or palette **About GitRonimo**) shows product version **2.0.1**. After a release, bump `APP_VERSION` in `apps/desktop/src/views/about.rs` and the packager version together. **Check for updates** on About (and **GitRonimo → Check for Updates…**) uses the same path as Settings. Click outside the overlay to dismiss it.

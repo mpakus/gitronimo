@@ -2,7 +2,7 @@
 
 - Read `PLAN.md` and this file before editing code.
 - Before non-trivial implementation, use XERJ reference coding: search `gitronimo-*` indices on `http://127.0.0.1:9200` (see `.cursor/rules/xerj-reference-coding.mdc`); GitComet is AGPL — approach-only.
-- Work on one unchecked `PLAN.md` or `docs/PLAN-v2.md` checkbox group at a time. 1.0 scope is tagged in `PLAN.md`. Post-1.0 A/E/D/G are in tree; remaining PLAN-v2 boxes are `gix` fallback migrations (checkout, merge, rebase, stash, push, hooks).
+- Work on one unchecked `PLAN.md`, `docs/PLAN-v2.md`, or `docs/PLAN-v3.md` checkbox group at a time. 1.0 scope is tagged in `PLAN.md`. Post-1.0 A/E/D/G are in tree; remaining PLAN-v2 boxes are `gix` fallback migrations (checkout, merge, rebase, stash, push, hooks). Post-2.0 F/H/P (findability, GitHub OAuth/enterprise, polish) are in `docs/PLAN-v3.md` — do not mix them into `gix` fallback work.
 - Record the intended files and acceptance checks in `docs/work-log.md` before coding.
 - Never build Git commands with shell strings; use typed `std::process::Command` arguments.
 - Never place Git or domain logic in GPUI render implementations.
@@ -33,6 +33,7 @@ System `cargo` older than 1.97 will fail on this workspace.
 |-----|---------|
 | `PLAN.md` | Product roadmap and checklist — source of truth for 1.0 scope |
 | `docs/PLAN-v2.md` | Post-1.0.0 roadmap. A (`gix` default), E (LFS/stash extras), D (updater), G (AI commits) are in tree; remaining boxes are system-Git fallbacks until `gix` gains the workflow |
+| `docs/PLAN-v3.md` | Post-2.0.0 roadmap. F (findability), H (GitHub OAuth/enterprise), P (polish). GitLab is 3.1. Do not mix with PLAN-v2 `gix` fallbacks |
 | `docs/README.md` | Documentation index |
 | `docs/work-log.md` | Per-task intent, files, acceptance checks (write **before** coding) |
 | `docs/desktop-shell.md` | Activity bar, message history, confirms, pins, command palette, About |
@@ -81,7 +82,7 @@ Read `docs/desktop-shell.md` before changing activity bar, overlays, pins, or th
 - **Pins / archives:** persist via `RecentRepositoryStore::save_branch_organization`; sidebar shows pins flat atop BRANCHES (no “PINNED” label). Preference RMW is path-locked — do not reintroduce unlocked load-modify-save on that JSON.
 - **Command palette:** new user-facing commands that already have handlers should get a `PaletteCommand` + `PALETTE_COMMANDS` label + `run_palette_command` arm; keep the overlay list scrollable. Current extras include **Suggest commit message**, **Check for updates**, **Fetch Git LFS objects**, **Pull Git LFS objects**, **Save stash snapshot…**, **Apply selected stash files**.
 - **Overlays:** Git/domain work stays in `main.rs`; `views/workspace.rs` only renders and dispatches. About GitRonimo is `views/about.rs` (click outside to dismiss; **Check for updates** closes About then runs the same handler as Settings).
-- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs` (currently **2.0.0**). Bump that string and `[package.metadata.packager] version` together after each release. Independent of the Cargo workspace version.
+- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs` (currently **2.0.1**). Bump that string and `[package.metadata.packager] version` together after each release. Independent of the Cargo workspace version.
 - **Binary / menu name:** crate remains `gitronimo-desktop`; the macOS executable and bundle name is `GitRonimo` so the application menu title is GitRonimo (`GitRonimo.app`).
 
 ## Git engine (agent context)

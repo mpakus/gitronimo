@@ -8,7 +8,7 @@
 > **Plan version:** 1.0  
 > **Research date:** 2026-08-06
 
-Post-1.0.0 work (`gix` as primary Git, updater, LFS/stash extras, optional AI commits) is in [`docs/PLAN-v2.md`](docs/PLAN-v2.md). Do not mix it into 1.0 tagging.
+Post-1.0.0 work (`gix` as primary Git, updater, LFS/stash extras, optional AI commits) is in [`docs/PLAN-v2.md`](docs/PLAN-v2.md). Do not mix it into 1.0 tagging. Post-2.0.0 product work (findability, GitHub OAuth/enterprise, polish) is in [`docs/PLAN-v3.md`](docs/PLAN-v3.md). Remaining `gix` fallbacks stay in PLAN-v2.
 
 ---
 
@@ -2200,7 +2200,7 @@ A phase is done only when all checklist items and exit criteria in that phase pa
 
 ## 27. Release checklist
 
-Product version is `APP_VERSION` in `apps/desktop/src/views/about.rs` and `[package.metadata.packager] version` in `apps/desktop/Cargo.toml` (currently **2.0.0**). The Cargo workspace crate version is independent — do not bump it for a product release.
+Product version is `APP_VERSION` in `apps/desktop/src/views/about.rs` and `[package.metadata.packager] version` in `apps/desktop/Cargo.toml` (currently **2.0.1**). The Cargo workspace crate version is independent — do not bump it for a product release.
 
 ### Code quality
 

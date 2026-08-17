@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.1 — 2026-08-17
+
+Product version **2.0.1** (About GitRonimo / `APP_VERSION` and packager bundle version). Tag `v2.0.1` for the notarized universal zip.
+
+- Working Copy changes preview (Stage Chunk / Discard Chunk) scrolls vertically and horizontally when the hunk or a line is larger than the pane.
+
 ## 2.0.0 — 2026-08-16
 
 Product version **2.0.0** (About GitRonimo / `APP_VERSION` and packager bundle version). Tag `v2.0.0` for the notarized universal zip.
