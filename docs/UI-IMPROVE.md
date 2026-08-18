@@ -51,7 +51,7 @@ Single window per repository. Sidebar destinations: Working Copy, History, Stash
 
 ### 1.6 Working Copy
 
-- commit composer sits above the file list;
+- commit composer sits above the file list (subject first; description / Amend / Sign-off ease in on focus);
 - **Modified only / All files** list-mode toggle;
 - per-file **stage checkbox**;
 - **multi-select** with Command-A, Shift-click, and Command-click; checkbox on a multi-selected row stages/unstages all selected files (see [`keyboard-shortcuts.md`](keyboard-shortcuts.md)).
@@ -65,7 +65,7 @@ Single window per repository. Sidebar destinations: Working Copy, History, Stash
 ### 1.8 History
 
 - Changeset / Tree mode toggle on the detail pane;
-- full-width flat commit rows, multi-lane graph, plain typographic ref labels;
+- full-width flat commit rows, multi-lane graph, two-line layout (author + filled ref pills, then hash + subject). HEAD/local branches use accent pills; tags use warning pills; remotes are muted;
 - **double-click → Commit Detail**.
 
 ### 1.9 Commit Detail
@@ -79,7 +79,7 @@ File list (with per-file add/del counts) on the left, full diff on the right. Fi
 - Welcome offers open, add, create (`git init`), and clone.
 - File editing happens in an external editor; the watcher refreshes status.
 - File list + diff; per-file checkbox; left = staged / right = unstaged affordance; hunk and line staging in the diff viewer.
-- Composer: subject + optional body, then Commit. Optional **Suggest** (Settings **AI commit messages**) fills those fields from the staged diff and does not commit. Stay on Working Copy after commit; remember the new OID for History reveal.
+- Composer: subject first; description / Amend / Sign-off ease open on subject focus. Optional **Suggest** (Settings **AI commit messages**) fills those fields from the staged diff and does not commit. Stay on Working Copy after commit; remember the new OID for History reveal.
 - History graph + detail confirms the new commit.
 
 ---
@@ -88,7 +88,7 @@ File list (with per-file add/del counts) on the left, full diff on the right. Fi
 
 **Done (functional):**
 
-- [x] Working Copy composer above file list, Modified/All Files toggle, per-file stage checkbox, staged/unstaged badges. **Suggest** appears on the composer when Settings **AI commit messages** is on.
+- [x] Working Copy composer above file list, Modified/All Files toggle, per-file stage checkbox, staged/unstaged badges. **Suggest** appears on the composer when Settings **AI commit messages** is on. File list is full width; the diff pane appears after a file is selected.
 - [x] Working Copy multi-select: Command-A select all visible files; toggle deselect/reselect on row click when all selected; batch stage/unstage via checkbox on multi-selection
 - [x] Visible Back/Forward (Prev/Next) toolbar navigation with disabled state
 - [x] Remember new commit OID for History reveal; stay on Working Copy after commit (no auto-redirect)
@@ -109,6 +109,8 @@ File list (with per-file add/del counts) on the left, full diff on the right. Fi
 - [x] Pinned branches persist across relaunch; flat at top of BRANCHES
 - [x] Command palette expanded and scrollable
 - [x] Network progress strip in the bottom activity bar during fetch/pull/push/sync
+- [x] Modal overlays fade in and out (~150ms); context menus stay instant
+- [x] Commit composer height+fade expand/collapse when the subject is focused
 
 **Done (stashes core):**
 
@@ -123,7 +125,7 @@ File list (with per-file add/del counts) on the left, full diff on the right. Fi
 - [x] In-repo sidebar trimmed to Working Copy / History / Stashes / Settings
 - [x] Branch/ref: left-click scoped History; double-click checkout; right-click context menu; selection ribbon vs muted HEAD badge
 - [x] Pull / Push HEAD dialogs with options
-- [x] History: full-width flat rows, multi-lane graph, plain ref labels, scope header + month groups
+- [x] History: full-width flat rows, multi-lane graph, two-line layout, filled ref pills (accent branches, warning tags), scope header + month groups
 - [x] Shared layout constants and helpers in `components.rs`
 
 ### Remaining gaps
@@ -151,7 +153,8 @@ See [`keyboard-shortcuts.md`](keyboard-shortcuts.md) and [`desktop-shell.md`](de
 - **Commit:** subject vs body, staged file count, and Commit affordance must be unambiguous.
 - **Empty states:** every view needs a meaningful empty state.
 - **Button hierarchy:** confirming actions use `primary_action_button`; Cancel stays on `raised_background`.
-- **Surfaces:** panels are flat and separated by borders. The commit composer shares the pane background.
+- **Surfaces:** panels are flat and separated by borders. The commit composer shares the pane background; details ease in height and opacity on subject focus.
+- **Overlays:** modal popups fade (~150ms) via `overlay_anim.rs`; sidebar context menus stay instant.
 - **Branch context menu:** cursor-anchored (`ref_context_menu.rs`); items quote the branch name; Pin/Archive persist; unmerged delete offers force confirm.
 - **History commit context menu:** grouped menu with quoted short OIDs (`commit_context_menu.rs`).
 - **Element ids:** button helpers namespace GPUI ids so two controls never share hover/click state.

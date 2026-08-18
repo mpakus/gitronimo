@@ -13,7 +13,7 @@ Press **Command-/** in the app to toggle the in-app shortcut reference overlay. 
 | Command-F | Focus toolbar search |
 | Command-O | Open repository |
 | Command-R | Refresh working copy |
-| Command-Shift-C | Focus commit subject |
+| Command-Shift-C | Focus commit subject (expands description / Amend / Sign-off) |
 | Command-Shift-S | Save stash (message + include-untracked dialog) |
 | Command-Shift-P | Command palette (Fetch/Pull/Push/Sync, staging, views, …) |
 | Command-/ | Show or hide shortcut reference |
@@ -37,6 +37,8 @@ Palette command **Message history** toggles the same popup. See [desktop-shell.m
 ## Command palette
 
 `Command-Shift-P` opens a filterable, **scrollable** command list. Besides secondary views (Reflog, Blame, Compare, Workflow, …), it includes toolbar actions: Open repository, Fetch, Pull…, Push…, Sync, Stage/Unstage all, stash Save/Apply (dialogs), Save stash snapshot…, Apply selected stash files, Apply/Branch/Pop/Drop selected stash, Create branch…, Show settings, Show workflow, Quick open file, Message history, Toggle appearance, Navigate back/forward, **About GitRonimo**, **App settings**, **Check for updates**, **Suggest commit message**, **Fetch Git LFS objects**, **Pull Git LFS objects**.
+
+Click outside About or App Settings dismisses the overlay with a fade. Modal popups fade in and out; sidebar ref/commit context menus stay instant. See [desktop-shell.md](desktop-shell.md).
 
 ## Working Copy
 
@@ -102,6 +104,8 @@ The destination is pushed as `<remote> HEAD:<branch>`; picking a remote branch t
 | Delete… | Cancel / Delete (`git branch -d`); if unmerged → **Could Not Delete Branch** Cancel / Delete force (`-D`) |
 
 ## History
+
+Rows are two lines: author + filled ref pills + date, then short hash + subject. Local branches and HEAD use accent pills; tags use warning pills; remotes are muted. Selected rows use a full-width accent background.
 
 | Interaction | Behavior |
 |-------------|----------|

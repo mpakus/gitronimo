@@ -481,10 +481,44 @@ pub struct ReflogEntry {
     pub subject: String,
 }
 
+/// Kind of a history decoration, derived from the full Git refname.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RefDecorationKind {
+    Head,
+    LocalBranch,
+    Tag,
+    RemoteBranch,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RefDecoration {
+    /// Short display name (`main`, `v1.0.0`, `origin/main`, `HEAD`).
     pub name: Vec<u8>,
     pub target: String,
+    pub kind: RefDecorationKind,
+}
+
+/// Maps a Git `refname` (`refs/heads/main`) to a short label and kind.
+///
+/// Returns `None` for refs that should not decorate history (stash, notes, remote `HEAD`).
+#[must_use]
+pub fn classify_refname(refname: &[u8]) -> Option<(RefDecorationKind, Vec<u8>)> {
+    if refname == b"HEAD" {
+        return Some((RefDecorationKind::Head, b"HEAD".to_vec()));
+    }
+    if let Some(rest) = refname.strip_prefix(b"refs/heads/") {
+        return (!rest.is_empty()).then(|| (RefDecorationKind::LocalBranch, rest.to_vec()));
+    }
+    if let Some(rest) = refname.strip_prefix(b"refs/remotes/") {
+        if rest.is_empty() || rest.ends_with(b"/HEAD") {
+            return None;
+        }
+        return Some((RefDecorationKind::RemoteBranch, rest.to_vec()));
+    }
+    if let Some(rest) = refname.strip_prefix(b"refs/tags/") {
+        return (!rest.is_empty()).then(|| (RefDecorationKind::Tag, rest.to_vec()));
+    }
+    None
 }
 
 /// A bounded request for the commit history of a single tracked path.
@@ -896,8 +930,8 @@ pub fn layout_history_graph(commits: &[HistoryCommit], state: &mut GraphState) -
 mod tests {
     use super::{
         CommitIdentity, DiffFile, DiffHunk, DiffLine, DiffLineKind, GitPath, GraphState,
-        HistoryCommit, UnifiedDiff, layout_history_graph, parse_hunk_header, selected_lines_patch,
-        unified_diff_prompt_text,
+        HistoryCommit, RefDecorationKind, UnifiedDiff, classify_refname, layout_history_graph,
+        parse_hunk_header, selected_lines_patch, unified_diff_prompt_text,
     };
 
     fn diff_line(kind: DiffLineKind, content: &str) -> DiffLine {
@@ -1079,5 +1113,28 @@ mod tests {
         assert!(!text.contains("[truncated]"));
         let tiny = unified_diff_prompt_text(&diff, 20);
         assert!(tiny.contains("[truncated]"));
+    }
+
+    #[test]
+    fn classify_refname_splits_heads_tags_and_remotes() {
+        assert_eq!(
+            classify_refname(b"HEAD"),
+            Some((RefDecorationKind::Head, b"HEAD".to_vec()))
+        );
+        assert_eq!(
+            classify_refname(b"refs/heads/main"),
+            Some((RefDecorationKind::LocalBranch, b"main".to_vec()))
+        );
+        assert_eq!(
+            classify_refname(b"refs/tags/v2.0.4"),
+            Some((RefDecorationKind::Tag, b"v2.0.4".to_vec()))
+        );
+        assert_eq!(
+            classify_refname(b"refs/remotes/origin/main"),
+            Some((RefDecorationKind::RemoteBranch, b"origin/main".to_vec()))
+        );
+        assert_eq!(classify_refname(b"refs/remotes/origin/HEAD"), None);
+        assert_eq!(classify_refname(b"refs/stash"), None);
+        assert_eq!(classify_refname(b"refs/heads/"), None);
     }
 }

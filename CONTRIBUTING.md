@@ -1,8 +1,8 @@
 # Contributing to Gitronimo
 
-Read [PLAN.md](PLAN.md), [docs/PLAN-v2.md](docs/PLAN-v2.md), and [AGENTS.md](AGENTS.md) before coding. Keep each change tied to one checklist group and record its intended files and acceptance checks in [docs/work-log.md](docs/work-log.md).
+Read [PLAN.md](PLAN.md), [docs/PLAN-v2.md](docs/PLAN-v2.md), [docs/PLAN-v3.md](docs/PLAN-v3.md), and [AGENTS.md](AGENTS.md) before coding. Keep each change tied to one checklist group and record its intended files and acceptance checks in [docs/work-log.md](docs/work-log.md). Do not mix PLAN-v3 work into remaining PLAN-v2 `gix` fallbacks.
 
-Documentation lives under [docs/](docs/README.md). Update [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) when shortcuts or Working Copy selection behavior changes, [docs/desktop-shell.md](docs/desktop-shell.md) when activity bar / palette / confirms / pins / Settings opt-ins / About change, bump `APP_VERSION` in `apps/desktop/src/views/about.rs` when cutting a product release, and refresh [README.md](README.md) screenshots when the UI changes materially.
+Documentation lives under [docs/](docs/README.md). Update [docs/keyboard-shortcuts.md](docs/keyboard-shortcuts.md) when shortcuts or Working Copy selection behavior changes, [docs/desktop-shell.md](docs/desktop-shell.md) when activity bar / palette / confirms / pins / Settings opt-ins / About / App Settings / overlay or composer motion change, bump `APP_VERSION` in `apps/desktop/src/views/about.rs` when cutting a product release, and refresh [README.md](README.md) screenshots when the UI changes materially.
 
 ## Development rules
 

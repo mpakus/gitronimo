@@ -25,6 +25,8 @@ Commit-message suggestions: `app_core` builds the OpenAI-compatible prompt and p
 
 ## Desktop shell state
 
-Shell chrome (activity history, `AppConfirmDialog`, command palette, pin presentation) is documented in [desktop-shell.md](desktop-shell.md). Status lines append through `set_activity`; overlays dispatch into `main.rs` handlers and must not run Git inside `Render`.
+Shell chrome (activity history, `AppConfirmDialog`, command palette, pin presentation, App Settings overlay) is documented in [desktop-shell.md](desktop-shell.md). Status lines append through `set_activity`; overlays dispatch into `main.rs` handlers and must not run Git inside `Render`.
+
+Modal overlays use `OverlaySlot` plus `views/overlay_anim.rs` for a ~150ms fade. Fade-out keeps the overlay mounted until the timer; `dismiss_overlay(..., immediate: true)` skips that for confirms and About **Check for updates**. Composer expand/collapse is UI state (`commit_composer_expanded` / `commit_composer_closing`) with a ~200ms height+opacity ease — no Git in `Render`. Context menus stay instant.
 
 See [implementation boundaries](implementation-boundaries.md) for the governing constraints and [keyboard shortcuts](keyboard-shortcuts.md) for selection behavior.

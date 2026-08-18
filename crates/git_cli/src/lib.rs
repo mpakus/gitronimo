@@ -18,9 +18,10 @@ use git_domain::{
     DiffFile, DiffHunk, DiffLine, DiffLineKind, FileHistoryRequest, FileStatus, GitPath,
     HeadStatus, HistoryCommit, HistoryPage, HistoryReference, HistoryRequest, InProgressOperation,
     LfsEntry, NamedRef, RebaseAction, RebaseTodoItem, RecoveredBranchTip, RecoveryRecord,
-    RefDecoration, RefSnapshot, ReflogEntry, ReflogRequest, Remote, RenameKind, RepositoryLocation,
-    StashEntry, StatusEntry, SubmoduleEntry, SubmoduleState, TreeEntry, TreeEntryKind, UnifiedDiff,
-    WorktreeEntry, WorktreeRepository, WorktreeStatus, parse_hunk_header, selected_lines_patch,
+    RefDecoration, RefDecorationKind, RefSnapshot, ReflogEntry, ReflogRequest, Remote, RenameKind,
+    RepositoryLocation, StashEntry, StatusEntry, SubmoduleEntry, SubmoduleState, TreeEntry,
+    TreeEntryKind, UnifiedDiff, WorktreeEntry, WorktreeRepository, WorktreeStatus,
+    classify_refname, parse_hunk_header, selected_lines_patch,
 };
 
 pub use git_domain::{CommitRequest, LoadedDiff, MAX_DISPLAY_DIFF_BYTES};
@@ -1111,13 +1112,31 @@ impl GitExecutable {
             &repository.worktree_root,
             [
                 "for-each-ref",
-                "--format=%(refname:short)%00%(objectname)%00",
+                "--format=%(refname)%00%(objectname)%00%(*objectname)%00",
             ],
         )?;
         if !output.status.success() {
             return Err(command_error(&output));
         }
-        parse_ref_decorations(&output.stdout)
+        let mut decorations = parse_ref_decorations(&output.stdout)?;
+        if decorations
+            .iter()
+            .any(|decoration| decoration.kind == RefDecorationKind::Head)
+        {
+            return Ok(decorations);
+        }
+        let head = self.run(&repository.worktree_root, ["rev-parse", "HEAD"])?;
+        if head.status.success()
+            && let Some(oid) = trim_oid(&head.stdout)
+            && let Ok(target) = String::from_utf8(oid)
+        {
+            decorations.push(RefDecoration {
+                name: b"HEAD".to_vec(),
+                target,
+                kind: RefDecorationKind::Head,
+            });
+        }
+        Ok(decorations)
     }
 
     /// Loads branches, tags, and configured remotes without parsing presentation output.
@@ -3674,22 +3693,34 @@ fn parse_history_records(bytes: &[u8]) -> Result<Vec<HistoryCommit>, GitStatusEr
 }
 
 fn parse_ref_decorations(bytes: &[u8]) -> Result<Vec<RefDecoration>, GitStatusError> {
-    let fields = bytes
+    let mut fields: Vec<&[u8]> = bytes
         .split(|byte| *byte == 0)
-        .filter(|field| field.iter().any(|byte| !byte.is_ascii_whitespace()))
-        .collect::<Vec<_>>();
-    if fields.len() % 2 != 0 {
+        .map(<[u8]>::trim_ascii)
+        .collect();
+    if fields.last().is_some_and(|field| field.is_empty()) {
+        fields.pop();
+    }
+    if !fields.len().is_multiple_of(3) {
         return Err(GitStatusError::ParseHistory);
     }
     fields
-        .chunks_exact(2)
-        .map(|pair| {
-            Ok(RefDecoration {
-                name: pair[0].to_vec(),
-                target: std::str::from_utf8(pair[1])
-                    .map_err(|_| GitStatusError::ParseHistory)?
-                    .to_owned(),
-            })
+        .chunks_exact(3)
+        .filter_map(|triple| {
+            let (kind, name) = classify_refname(triple[0])?;
+            let target_bytes = if triple[2].iter().any(|byte| !byte.is_ascii_whitespace()) {
+                triple[2]
+            } else {
+                triple[1]
+            };
+            Some(
+                std::str::from_utf8(target_bytes)
+                    .map_err(|_| GitStatusError::ParseHistory)
+                    .map(|target| RefDecoration {
+                        name,
+                        target: target.to_owned(),
+                        kind,
+                    }),
+            )
         })
         .collect()
 }
@@ -3840,15 +3871,16 @@ mod tests {
         CommitRequest, CreateStashRequest, GitExecutable, GitStatusError, MAX_PROCESS_OUTPUT_BYTES,
         RenameKind, ResetMode, git_candidates, parse_commit_records, parse_git_progress_line,
         parse_lfs_status, parse_nul_paths, parse_numstat_line, parse_porcelain_v2_z,
-        parse_rebase_todo, parse_ref_ahead_behind, parse_ref_snapshot, parse_signature,
-        parse_stash_records, parse_unified_diff, read_limited, redact_git_text, trim_oid,
-        write_commit_message,
+        parse_rebase_todo, parse_ref_ahead_behind, parse_ref_decorations, parse_ref_snapshot,
+        parse_signature, parse_stash_records, parse_unified_diff, read_limited, redact_git_text,
+        trim_oid, write_commit_message,
     };
     use app_core::{RepositoryDiscoverer, RepositoryOpenError, open_repository};
     use git_domain::{
         CommitSignature, CommitSignatureStatus, ConflictSide, DiffLineKind, FileHistoryRequest,
         GitPath, HeadStatus, HistoryReference, HistoryRequest, InProgressOperation, RebaseAction,
-        ReflogRequest, RepositoryLocation, StatusEntry, SubmoduleState, TreeEntryKind,
+        RefDecorationKind, ReflogRequest, RepositoryLocation, StatusEntry, SubmoduleState,
+        TreeEntryKind,
     };
 
     static NEXT_REPOSITORY: AtomicUsize = AtomicUsize::new(0);
@@ -3894,6 +3926,26 @@ mod tests {
     fn parses_ref_ahead_behind_field() {
         assert_eq!(parse_ref_ahead_behind(b"").expect("empty"), (0, 0));
         assert_eq!(parse_ref_ahead_behind(b"+3 -2").expect("diverged"), (3, 2));
+    }
+
+    #[test]
+    fn parses_ref_decorations_with_full_refnames() {
+        let decorations = parse_ref_decorations(
+            b"refs/heads/main\0aaa111\0\0refs/tags/v2.0.4\0bbb222\0\0refs/remotes/origin/main\0ccc333\0\0refs/remotes/origin/HEAD\0ddd444\0\0refs/stash\0eee555\0\0refs/tags/annotated\0tagobj\0commitobj\0",
+        )
+        .expect("decorations should parse");
+        assert_eq!(decorations.len(), 4);
+        assert_eq!(decorations[0].name, b"main");
+        assert_eq!(decorations[0].kind, RefDecorationKind::LocalBranch);
+        assert_eq!(decorations[0].target, "aaa111");
+        assert_eq!(decorations[1].kind, RefDecorationKind::Tag);
+        assert_eq!(decorations[1].name, b"v2.0.4");
+        assert_eq!(decorations[1].target, "bbb222");
+        assert_eq!(decorations[2].kind, RefDecorationKind::RemoteBranch);
+        assert_eq!(decorations[2].name, b"origin/main");
+        assert_eq!(decorations[3].kind, RefDecorationKind::Tag);
+        assert_eq!(decorations[3].name, b"annotated");
+        assert_eq!(decorations[3].target, "commitobj");
     }
 
     #[test]
@@ -5667,13 +5719,28 @@ index 1111111..2222222 100644\n\
             )
             .expect("next page should load");
         assert!(!second.commits.is_empty());
+        repository.success(["tag", "v2.0.4"]);
+        let decorations = repository
+            .git
+            .ref_decorations(&worktree)
+            .expect("ref decorations should load");
         assert!(
-            repository
-                .git
-                .ref_decorations(&worktree)
-                .expect("ref decorations should load")
+            decorations
                 .iter()
-                .any(|decoration| decoration.name == b"main")
+                .any(|decoration| decoration.name == b"main"
+                    && decoration.kind == RefDecorationKind::LocalBranch)
+        );
+        assert!(
+            decorations
+                .iter()
+                .any(|decoration| decoration.name == b"v2.0.4"
+                    && decoration.kind == RefDecorationKind::Tag)
+        );
+        assert!(
+            decorations
+                .iter()
+                .any(|decoration| decoration.name == b"HEAD"
+                    && decoration.kind == RefDecorationKind::Head)
         );
     }
 

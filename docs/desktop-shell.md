@@ -108,19 +108,23 @@ Dispatch is `run_palette_command` in `main.rs`. Adding a user-facing action that
 
 Palette **Show submodules**. The view lists configured submodules and **Update all…** (`git submodule update --init` on system Git). There is no Finder-open action.
 
+## About GitRonimo
+
+**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **2.0.5**, bump after each release), “Made in Austin ✩ Texas”, https://aomega.co, in-app update status, and **Check for updates** (same handler as App Settings **Check now** and **GitRonimo → Check for Updates…**). Click outside to dismiss (fade). **Check for updates** uses `close_about_dialog_immediate` then the Settings handler. The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.
+
+## App Settings
+
+**GitRonimo → Settings…** (Command-comma, also palette **App settings**) opens a centered overlay with **UPDATES** (installed version, On/Off, **Check now**). In-app updates default on. Click outside to dismiss (fade). Repository sidebar **Settings** keeps Git engine, auto-stash, AI commits, GitHub, and appearance.
+
+## Overlays and motion
+
+Modal overlays (palette, text/choice prompts, Pull/Push, stash apply, branch-delete and `AppConfirmDialog`, About, App Settings, message history, welcome +) fade in and out (~150ms) via `views/overlay_anim.rs`. `OverlaySlot` in `app_state.rs` keeps the card mounted until fade-out finishes (`dismiss_overlay(..., immediate: false)`). Confirming an action dismisses immediately (`immediate: true`). Sidebar ref/commit context menus stay instant.
+
+The Working Copy commit composer eases description and Amend/Sign-off open (~200ms height + fade) when the subject field is focused (`COMPOSER_REVEAL_DURATION`). Collapse eases out the same way. Git/domain work stays in `main.rs`; animation helpers are view-only.
+
 ## Related docs
 
 - Shortcuts: [keyboard-shortcuts.md](keyboard-shortcuts.md)
 - UI patterns: [UI-IMPROVE.md](UI-IMPROVE.md)
 - Architecture / prefs: [architecture.md](architecture.md)
 - Recovery: [troubleshooting.md](troubleshooting.md)
-
-## About GitRonimo
-
-**GitRonimo → About GitRonimo** (also palette **About GitRonimo**) opens a centered black overlay: `assets/gitronimo-icon.png`, name, product version (`APP_VERSION` in `apps/desktop/src/views/about.rs` — currently **2.0.4**, bump after each release), “Made in Austin ✩ Texas”, https://aomega.co, in-app update status, and **Check for updates** (same handler as App Settings **Check now** and **GitRonimo → Check for Updates…**). Click outside to dismiss (fade). The macOS application menu title is the process/bundle name `GitRonimo`. The dock icon is `icon.png`.
-
-Modal overlays (palette, text/choice prompts, Pull/Push, confirms, About, App Settings, message history, welcome +) fade in and out (~150ms). Sidebar ref/commit context menus stay instant. The Working Copy commit composer eases description and Amend/Sign-off open (~200ms height + fade) when the subject field is focused.
-
-## App Settings
-
-**GitRonimo → Settings…** (Command-comma, also palette **App settings**) opens a centered overlay with **UPDATES** (installed version, On/Off, **Check now**). In-app updates default on. Click outside to dismiss. Repository sidebar **Settings** keeps Git engine, auto-stash, AI commits, GitHub, and appearance.

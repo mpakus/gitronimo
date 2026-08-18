@@ -36,7 +36,7 @@ System `cargo` older than 1.97 will fail on this workspace.
 | `docs/PLAN-v3.md` | Post-2.0.0 roadmap. F (findability), H (GitHub OAuth/enterprise), P (polish). GitLab is 3.1. Do not mix with PLAN-v2 `gix` fallbacks |
 | `docs/README.md` | Documentation index |
 | `docs/work-log.md` | Per-task intent, files, acceptance checks (write **before** coding) |
-| `docs/desktop-shell.md` | Activity bar, message history, confirms, pins, command palette, About |
+| `docs/desktop-shell.md` | Activity bar, message history, confirms, pins, command palette, About, App Settings, overlay fade |
 | `docs/UI-PLAN.md` | UI phases and screenshot regression matrix |
 | `docs/UI-IMPROVE.md` | GitRonimo view patterns and remaining UI gaps |
 | `docs/architecture.md` | Crate layers and mutation flow |
@@ -69,7 +69,7 @@ When touching file-list selection or staging:
 - **`SelectAllStatusFiles`** (`Cmd/Ctrl+A`) selects all paths from `visible_status_paths()` (Modified/All Files tab + search filter).
 - When all visible files are selected, a plain row click clears the selection; clicking that same row again re-selects all (`file_list_select_all_toggle`). Clicking any other row selects that file alone.
 - **Shift+click** and **Cmd/Ctrl+click** extend selection; checkbox clicks on a multi-selected row stage/unstage **all selected paths** and preserve list selection (`run_mutation(..., preserve_selection: true)`).
-- Commit subject/body fields keep their own `SingleLineInput` `Cmd/Ctrl+A` binding when focused.
+- Commit subject/body fields keep their own `SingleLineInput` `Cmd/Ctrl+A` binding when focused. Focusing the subject expands description / Amend / Sign-off with a short height+fade (`views/overlay_anim.rs`, `commit_composer.rs`).
 
 See `docs/keyboard-shortcuts.md` for the full shortcut list.
 
@@ -81,8 +81,8 @@ Read `docs/desktop-shell.md` before changing activity bar, overlays, pins, or th
 - **Confirms:** blocked/destructive Git outcomes that users must acknowledge belong in `AppConfirmDialog` (or the branch-delete pending modal), not only a flashing status line. Example: unmerged delete → Cancel / Delete force.
 - **Pins / archives:** persist via `RecentRepositoryStore::save_branch_organization`; sidebar shows pins flat atop BRANCHES (no “PINNED” label). Preference RMW is path-locked — do not reintroduce unlocked load-modify-save on that JSON.
 - **Command palette:** new user-facing commands that already have handlers should get a `PaletteCommand` + `PALETTE_COMMANDS` label + `run_palette_command` arm; keep the overlay list scrollable. Current extras include **Suggest commit message**, **Check for updates**, **App settings**, **Fetch Git LFS objects**, **Pull Git LFS objects**, **Save stash snapshot…**, **Apply selected stash files**.
-- **Overlays:** Git/domain work stays in `main.rs`; `views/workspace.rs` only renders and dispatches. About GitRonimo is `views/about.rs` (click outside to dismiss; **Check for updates** closes About then runs the same handler as Settings). App Settings is `views/settings.rs` `app_settings_overlay` (click outside to dismiss; **GitRonimo → Settings…** / Command-comma).
-- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs` (currently **2.0.4**). Bump that string and `[package.metadata.packager] version` together after each release. Independent of the Cargo workspace version.
+- **Overlays:** Git/domain work stays in `main.rs`; `views/workspace.rs` only renders and dispatches. Modal overlays fade in and out (~150ms) via `views/overlay_anim.rs` and `OverlaySlot` (`dismiss_overlay`; the card stays mounted until fade-out finishes). Confirming an action dismisses immediately. Sidebar ref/commit context menus stay instant. About GitRonimo is `views/about.rs` (click outside to dismiss; **Check for updates** uses `close_about_dialog_immediate` then the same handler as Settings). App Settings is `views/settings.rs` `app_settings_overlay` (click outside to dismiss; **GitRonimo → Settings…** / Command-comma).
+- **Product version:** About shows `APP_VERSION` in `apps/desktop/src/views/about.rs` (currently **2.0.5**). Bump that string and `[package.metadata.packager] version` together after each release. Independent of the Cargo workspace version.
 - **Binary / menu name:** crate remains `gitronimo-desktop`; the macOS executable and bundle name is `GitRonimo` so the application menu title is GitRonimo (`GitRonimo.app`).
 
 ## Git engine (agent context)

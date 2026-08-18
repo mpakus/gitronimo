@@ -1,7 +1,8 @@
 //! Render modules that own the visual layout of each window region.
 //!
 //! Each module contains only `impl GitronimoApp` render methods and small
-//! free render helpers. State-mutating behavior stays in `crate::main`; shared
+//! free render helpers. `overlay_anim` is motion-only (overlay fade, composer
+//! height+opacity). State-mutating behavior stays in `crate::main`; shared
 //! types and helpers live in `crate::app_state`.
 
 pub(crate) mod about;

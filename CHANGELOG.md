@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.0.5 — 2026-08-18
+
+Product version **2.0.5** (About GitRonimo / `APP_VERSION` and packager bundle version). Tag `v2.0.5` for the notarized universal zip.
+
+- Working Copy file list spans the content pane when no file is selected; selecting a file restores the list/diff split.
+- History shows filled ref pills on the author line: accent for HEAD and local branches, warning for tags, muted for remotes.
+
 ## 2.0.4 — 2026-08-17
 
 Product version **2.0.4** (About GitRonimo / `APP_VERSION` and packager bundle version). Tag `v2.0.4` for the notarized universal zip.

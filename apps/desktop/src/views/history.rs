@@ -1,4 +1,5 @@
-//! History view: virtualized commit rows, graph canvas, search, inspector.
+//! History view: virtualized two-line commit rows, graph canvas, search, inspector.
+//! Ref names are filled pills (`ref_label`): accent for HEAD/local branches, warning for tags.
 
 use gpui::{
     Bounds, ClickEvent, MouseButton, MouseDownEvent, PathBuilder, Pixels, Rgba, SharedString,
@@ -6,7 +7,7 @@ use gpui::{
 };
 use ui_kit::ThemeColors;
 
-use git_domain::{DiffLineKind, HistoryReference, WorktreeRepository};
+use git_domain::{DiffLineKind, HistoryReference, RefDecorationKind, WorktreeRepository};
 
 use crate::app_state::{ChoicePromptKind, GitronimoApp, HistoryDetailMode};
 use crate::views::components::{
@@ -34,8 +35,7 @@ enum HistoryListItem {
 #[derive(Clone)]
 struct RefPill {
     label: String,
-    is_head: bool,
-    is_remote: bool,
+    kind: RefDecorationKind,
 }
 
 impl GitronimoApp {
@@ -58,19 +58,14 @@ impl GitronimoApp {
                 continue;
             }
             let label = String::from_utf8_lossy(&decoration.name).into_owned();
-            let is_head = label == "HEAD";
-            let is_remote = label.contains('/');
             pills.push(RefPill {
                 label,
-                is_head,
-                is_remote,
+                kind: decoration.kind,
             });
         }
         pills.sort_by(|left, right| {
-            right
-                .is_head
-                .cmp(&left.is_head)
-                .then_with(|| left.is_remote.cmp(&right.is_remote))
+            left.kind
+                .cmp(&right.kind)
                 .then_with(|| left.label.cmp(&right.label))
         });
         pills
@@ -259,12 +254,12 @@ impl GitronimoApp {
                                         .w_full()
                                         .flex()
                                         .items_center()
-                                        .justify_between()
-                                        .gap_2()
+                                        .gap_1p5()
+                                        .overflow_hidden()
                                         .child(
                                             div()
-                                                .flex_1()
-                                                .min_w(px(0.0))
+                                                .flex_shrink_0()
+                                                .max_w(px(140.0))
                                                 .overflow_hidden()
                                                 .whitespace_nowrap()
                                                 .text_ellipsis()
@@ -272,6 +267,18 @@ impl GitronimoApp {
                                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                                 .text_color(primary)
                                                 .child(author),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_1()
+                                                .min_w(px(0.0))
+                                                .items_center()
+                                                .gap_1()
+                                                .overflow_hidden()
+                                                .children(refs.iter().map(|pill| {
+                                                    ref_label(pill, selected_row, &list_colors)
+                                                })),
                                         )
                                         .child(
                                             div()
@@ -306,10 +313,7 @@ impl GitronimoApp {
                                                 .text_xs()
                                                 .text_color(secondary)
                                                 .child(subject),
-                                        )
-                                        .children(refs.iter().map(|pill| {
-                                            ref_label(pill, selected_row, &list_colors)
-                                        })),
+                                        ),
                                 ),
                         )
                         .cursor_pointer()
@@ -853,30 +857,45 @@ fn meta_row(label: &str, value: String, colors: &ThemeColors) -> gpui::AnyElemen
 }
 
 fn ref_label(pill: &RefPill, selected_row: bool, colors: &ThemeColors) -> gpui::AnyElement {
-    let label = truncate_ref_label(&pill.label, 32);
-    let color = if selected_row {
-        colors.panel_background
-    } else if pill.is_head {
-        colors.accent
-    } else if pill.is_remote {
-        colors.text_muted
-    } else {
-        colors.accent
+    let label = truncate_ref_label(&pill.label, 24);
+    let tag_foreground = gpui::rgb(0x1a_24_30);
+    let (bg, fg) = match pill.kind {
+        RefDecorationKind::Head | RefDecorationKind::LocalBranch => {
+            if selected_row {
+                (colors.panel_background, colors.accent)
+            } else {
+                (colors.accent, colors.accent_foreground)
+            }
+        }
+        RefDecorationKind::Tag => (colors.warning, tag_foreground),
+        RefDecorationKind::RemoteBranch => {
+            if selected_row {
+                (colors.panel_background, colors.accent)
+            } else {
+                (colors.raised_background, colors.text_muted)
+            }
+        }
     };
     div()
         .flex_shrink_0()
-        .max_w(px(180.0))
+        .h(px(16.0))
+        .max_w(px(140.0))
+        .px_1p5()
+        .flex()
+        .items_center()
+        .rounded(px(8.0))
+        .bg(bg)
         .overflow_hidden()
-        .whitespace_nowrap()
-        .text_ellipsis()
-        .text_xs()
-        .font_weight(if pill.is_head || !pill.is_remote {
-            gpui::FontWeight::MEDIUM
-        } else {
-            gpui::FontWeight::NORMAL
-        })
-        .text_color(color)
-        .child(label)
+        .child(
+            div()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .text_size(px(10.0))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(fg)
+                .child(label),
+        )
         .into_any_element()
 }
 
@@ -904,6 +923,7 @@ fn changeset_file_row(
     };
     div()
         .id(SharedString::from(format!("history-file-{index}")))
+        .w_full()
         .h(px(26.0))
         .px_3()
         .flex()

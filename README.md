@@ -6,7 +6,7 @@
 
 GitRonimo is a native macOS Git client written in Rust with [GPUI](https://gpui.rs). It keeps Git as the source of truth. The default engine is gitoxide [`gix`](https://github.com/GitoxideLabs/gitoxide) for repository discovery, status, history, stage/commit, and HTTPS fetch/clone. Your installed Git executable remains the fallback (Settings **Use system Git**) and still handles credential helpers, SSH, hooks, signing, filters, LFS, checkout, merge, rebase, stash, and push.
 
-Product version **2.0.4** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
+Product version **2.0.5** (About GitRonimo). The Cargo workspace version stays independent; bump the string users see in [`apps/desktop/src/views/about.rs`](apps/desktop/src/views/about.rs) (`APP_VERSION`) after each release.
 
 ![GitRonimo working copy](docs/screenshot.png)
 
@@ -15,14 +15,14 @@ Product version **2.0.4** (About GitRonimo). The Cargo workspace version stays i
 The current release includes:
 
 - **Welcome / Repositories** — open, add, create, and clone local repositories; grouped bookmark folders
-- **Working Copy** — status and diffs, Modified/All Files toggle, multi-select (`Command-A`, Shift-click), batch stage/unstage via checkboxes, partial line/hunk staging, commit/amend/sign-off; the changes preview scrolls when hunks or lines overflow the pane
-- **History** — bounded commit log with graph, scope filter, Changeset/Tree detail, double-click to Commit Detail, commit context menu
+- **Working Copy** — status and diffs, Modified/All Files toggle, multi-select (`Command-A`, Shift-click), batch stage/unstage via checkboxes, partial line/hunk staging, commit/amend/sign-off; focusing Commit Subject eases the description and options open; the changes preview scrolls when hunks or lines overflow the pane
+- **History** — bounded commit log with graph, two-line rows (author + branch/tag pills, then short hash + subject), scope filter, Changeset/Tree detail, double-click to Commit Detail, commit context menu
 - **Stashes, Remotes, Pull Requests, Settings** — two-pane list + detail layouts (some secondary views remain palette-only)
 - **Workflow** — GitHub Flow / GitLab Flow / git-flow templates, auto-detect, Start / Finish / Sync topic branches (welcome + in-repo)
 - **Branches** — context menu (pin/archive/rename/delete…); pinned branches persist and sit at the top of BRANCHES; unmerged delete offers a force-confirm dialog
 - **Network** — fetch, pull, publish, and push in the background with cancellation; progress in the activity bar; Pull/Push dialogs for options
-- **Command palette / Message history** — searchable scrollable palette (`Command-Shift-P`); activity-bar history of statuses, errors, and confirmations
-- **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **2.0.4**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co), **Check for updates**)
+- **Command palette / Message history** — searchable scrollable palette (`Command-Shift-P`); activity-bar history of statuses, errors, and confirmations. Modal popups fade in and out; context menus stay instant.
+- **About GitRonimo** — application menu **GitRonimo → About GitRonimo** (icon, version **2.0.5**, “Made in Austin ✩ Texas”, [aomega.co](https://aomega.co), **Check for updates**)
 - **App Settings** — **GitRonimo → Settings…** (Command-comma) for in-app updates
 - **Git engine** — default `gix`; Settings **Use system Git** forces the installed executable
 - **Git LFS** — Fetch / Pull from the LFS view and palette
@@ -44,7 +44,7 @@ See [PLAN.md](PLAN.md) for the full implementation contract and [CHANGELOG.md](C
 | Command-O | Open repository |
 | Command-R | Refresh working copy |
 | Command-A | Select all visible files (Working Copy) |
-| Command-Shift-C | Focus commit subject |
+| Command-Shift-C | Focus commit subject (expands composer) |
 | Command-Shift-S | Save stash |
 | Command-Shift-P | Command palette |
 | Command-/ | Shortcut reference overlay |
@@ -58,7 +58,7 @@ Working Copy selection and batch checkbox staging: [`docs/keyboard-shortcuts.md`
 
 ## Install and run
 
-Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (Apple Silicon and Intel in one zip). After the `v2.0.4` tag that file is `GitRonimo-v2.0.4.zip`.
+Download the notarized universal app from [GitHub Releases](https://github.com/mpakus/gitronimo/releases/latest) (Apple Silicon and Intel in one zip). After the `v2.0.5` tag that file is `GitRonimo-v2.0.5.zip`.
 
 To build a local `.app`:
 
@@ -85,10 +85,11 @@ cargo deny check
 |-----|-------------|
 | [docs/README.md](docs/README.md) | Documentation index |
 | [PLAN-v2](docs/PLAN-v2.md) | Post-1.0 `gix`, updater, LFS/stash, AI commits (A/E/D/G in tree) |
+| [PLAN-v3](docs/PLAN-v3.md) | Post-2.0 findability, GitHub OAuth/enterprise, polish (not mixed with `gix` fallbacks) |
 | [v1 todo](docs/todo-v1.md) | Leftover work and doc hygiene toward 1.0 |
 | [Architecture](docs/architecture.md) | Crate layers and mutation flow |
 | [Keyboard shortcuts](docs/keyboard-shortcuts.md) | Global and Working Copy shortcuts |
-| [Desktop shell](docs/desktop-shell.md) | Activity bar, palette, confirms, pins, About |
+| [Desktop shell](docs/desktop-shell.md) | Activity bar, palette, confirms, pins, About, App Settings, overlay fade |
 | [UI plan](docs/UI-PLAN.md) | UI phases |
 | [UI improve](docs/UI-IMPROVE.md) | View patterns and remaining UI gaps |
 | [Work log](docs/work-log.md) | Implementation notes |

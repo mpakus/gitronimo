@@ -29,7 +29,7 @@ gpui = { workspace = true, features = ["test-support"] }
 [package.metadata.packager]
 product-name = "GitRonimo"
 # Keep in sync with APP_VERSION in src/views/about.rs (user-facing product version).
-version = "2.0.4"
+version = "2.0.5"
 identifier = "com.gitronimo.desktop"
 category = "DeveloperTool"
 copyright = "Copyright (c) 2026 Gitronimo contributors"

@@ -1,16 +1,18 @@
 # PLAN-v3.md — GitRonimo 3.0.0
 
 **Status:** not started. Record only; do not mix with remaining PLAN-v2 `gix` fallbacks.  
-**As of:** 2026-08-16  
-**Product today:** **2.0.4** (`APP_VERSION` / packager). Architecture and crate rules stay in [`PLAN.md`](../PLAN.md) unless an item below supersedes them.
+**As of:** 2026-08-17  
+**Product today:** **2.0.5** (`APP_VERSION` / packager). Architecture and crate rules stay in [`PLAN.md`](../PLAN.md) unless an item below supersedes them.
 
 This is post-2.0.0 work. Remaining checkout / merge / rebase / stash / push / hooks migrations stay in [`PLAN-v2.md`](PLAN-v2.md) until `gix` orchestrates them. Do not start 3.0 while tagging or smoking 2.0.0.
 
 ---
 
-## 2.0.0 already ships
+## 2.x already ships
 
-Working Copy, History, branches, stashes, remotes, GitHub PRs (personal-access token), Workflow, command palette, Message history, merge/rebase/cherry-pick/revert/reset plus continue/abort and Interactive rebase, fetch/pull/push with cancel, in-app updater (GitRonimo Settings, on by default), LFS fetch/pull, stash extras, optional AI commit messages, default `gix` engine with system Git fallback.
+Working Copy, History, branches, stashes, remotes, GitHub PRs (personal-access token), Workflow, command palette, Message history, merge/rebase/cherry-pick/revert/reset plus continue/abort and Interactive rebase, fetch/pull/push with cancel, in-app updater (**GitRonimo → Settings…**, on by default), LFS fetch/pull, stash extras, optional AI commit messages, default `gix` engine with system Git fallback.
+
+2.0.4 chrome: App Settings overlay, modal overlay fade-in/out, commit composer height+fade on subject focus. History uses two-line rows with filled ref pills (accent for branches/HEAD, warning for tags).
 
 WORKSPACE sidebar destinations are Working Copy / History / Stashes / Settings. Pull Requests, LFS, Worktrees, Submodules, Reflog, Blame, Compare, Branches Review, and Conflicts remain palette-only.
 

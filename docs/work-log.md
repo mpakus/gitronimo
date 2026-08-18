@@ -1,5 +1,31 @@
 # Implementation work log
 
+## 2026-08-18 — Cut product version 2.0.5
+
+**Intent:** Bump product version to **2.0.5** (`APP_VERSION` + packager) for Working Copy full-width file list and History branch/tag pills. Cargo workspace version stays `0.1.0`.
+
+**Files:** `apps/desktop/src/views/about.rs`, `apps/desktop/Cargo.toml`, `apps/desktop/src/tests.rs`, CHANGELOG, README, AGENTS.md, PLAN.md, docs.
+
+**Acceptance:** About and packager show `2.0.5`. Test asserts `APP_VERSION`. Changelog has a 2.0.5 section. Gates green.
+
+## 2026-08-18 — Working Copy file list full width; History branch/tag pills
+
+**Intent:** Working Copy file rows shrink instead of filling the list pane, and the empty diff placeholder eats the rest of the window when nothing is selected. History paints refs as typographic labels; they should read as distinct branch vs tag chips (solid pills, original GitRonimo colors — not a third-party clone). Do not bump `APP_VERSION`.
+
+**Files:** `docs/work-log.md`, `crates/git_domain/src/lib.rs`, `crates/git_cli/src/lib.rs`, `apps/desktop/src/views/working_copy.rs`, `apps/desktop/src/views/history.rs`, `docs/UI-IMPROVE.md`, `README.md`.
+
+**Acceptance:** With no file selected, the Working Copy file list spans the content pane. With one file selected, the split + diff return. History puts filled pills on the author line: accent for HEAD/local branches, warning for tags, muted for remotes. Parser tests classify `refs/heads/*`, `refs/tags/*`, `refs/remotes/*`. Gates green.
+
+**References:** rgitui `crates/rgitui_ui/src/badge.rs` and graph `Badge` per `RefLabel` (MIT) — adapted pill chrome. Tower is a study screenshot only; GitComet is AGPL — approach-only.
+
+## 2026-08-17 — Align docs with 2.0.4 shell (overlays, composer, App Settings)
+
+**Intent:** README, AGENTS.md, and `docs/` still describe 2.0 chrome without overlay fade, composer expand motion, `overlay_anim.rs` / `OverlaySlot`, or App Settings as a first-class overlay. Match the source. Do not bump `APP_VERSION`.
+
+**Files:** `docs/work-log.md`, `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `docs/README.md`, `docs/desktop-shell.md`, `docs/architecture.md`, `docs/UI-IMPROVE.md`, `docs/implementation-boundaries.md`, `docs/keyboard-shortcuts.md`, `docs/troubleshooting.md`, `docs/PLAN-v2.md`, `docs/PLAN-v3.md`, `apps/desktop/src/views/mod.rs`, `apps/desktop/src/views/history.rs`.
+
+**Acceptance:** Agent and user docs name fade-in/out overlays, instant context menus, composer height+fade, and App Settings (Command-comma). History still documented as typographic ref labels (not pills). Cargo workspace version stays `0.1.0`.
+
 ## 2026-08-17 — Cut product version 2.0.4
 
 **Intent:** Bump product version to **2.0.4** (`APP_VERSION` + packager) for overlay fade, composer expand motion, About overflow, and REST publish retry. Cargo workspace version stays `0.1.0`.

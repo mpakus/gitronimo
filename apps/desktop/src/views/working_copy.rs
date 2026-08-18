@@ -128,6 +128,11 @@ impl GitronimoApp {
         let file_groups = div()
             .flex()
             .flex_col()
+            .flex_1()
+            .w_full()
+            .min_w(px(0.0))
+            .min_h(px(0.0))
+            .overflow_hidden()
             .child(self.file_list_header(modified_count, colors, cx))
             .when(self.worktree_show_all_files, |this| {
                 this.child(self.all_files_group_view(colors, cx))
@@ -135,7 +140,13 @@ impl GitronimoApp {
             .when(!self.worktree_show_all_files, |this| {
                 this.child(self.modified_files_list_view(colors, cx))
             });
-        let file_list = div().flex_1().overflow_hidden().child(file_groups);
+        let file_list = div()
+            .flex_1()
+            .w_full()
+            .min_w(px(0.0))
+            .overflow_hidden()
+            .child(file_groups);
+        let show_diff_pane = self.selected_paths.len() == 1 || self.selected_diff.is_some();
         let diff = self.diff_view(colors, cx).unwrap_or_else(|| {
             let (title, detail) = if self.selected_paths.len() > 1 {
                 (
@@ -158,6 +169,23 @@ impl GitronimoApp {
             .overflow_hidden()
             .child(diff);
         let col_w = px(self.column_width);
+        let list_pane = div()
+            .when(show_diff_pane, |this| {
+                this.w(col_w)
+                    .min_w(px(crate::app_state::MINIMUM_LIST_PANE_WIDTH))
+                    .max_w(px(crate::app_state::MAXIMUM_LIST_PANE_WIDTH))
+            })
+            .when(!show_diff_pane, |this| {
+                this.flex_1()
+                    .w_full()
+                    .min_w(px(crate::app_state::MINIMUM_LIST_PANE_WIDTH))
+            })
+            .h_full()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(self.commit_composer_view(colors, cx))
+            .child(file_list);
         div()
             .id("workspace-flex")
             .flex()
@@ -165,20 +193,11 @@ impl GitronimoApp {
             .h_full()
             .min_w(px(0.0))
             .overflow_hidden()
-            .child(
-                div()
-                    .w(col_w)
-                    .min_w(px(crate::app_state::MINIMUM_LIST_PANE_WIDTH))
-                    .max_w(px(crate::app_state::MAXIMUM_LIST_PANE_WIDTH))
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .overflow_hidden()
-                    .child(self.commit_composer_view(colors, cx))
-                    .child(file_list),
-            )
-            .child(list_pane_resize_handle(self.column_width, colors, cx))
-            .child(diff_pane)
+            .child(list_pane)
+            .when(show_diff_pane, |this| {
+                this.child(list_pane_resize_handle(self.column_width, colors, cx))
+                    .child(diff_pane)
+            })
             .into_any_element()
     }
 
@@ -258,6 +277,7 @@ impl GitronimoApp {
 
     fn file_list_column_header(colors: &ThemeColors) -> impl IntoElement {
         div()
+            .w_full()
             .h(px(22.0))
             .px_2()
             .flex()
@@ -278,6 +298,7 @@ impl GitronimoApp {
     ) -> impl IntoElement {
         let show_all = self.worktree_show_all_files;
         div()
+            .w_full()
             .h(px(28.0))
             .px_2()
             .flex()
@@ -358,8 +379,14 @@ impl GitronimoApp {
             })
             .collect();
         div()
+            .id("modified-files-scroll")
             .flex()
             .flex_col()
+            .flex_1()
+            .w_full()
+            .min_w(px(0.0))
+            .min_h(px(0.0))
+            .overflow_scroll()
             .child(Self::file_list_column_header(colors))
             .children(rows)
             .into_any_element()
@@ -681,11 +708,25 @@ impl GitronimoApp {
                 .child("No tracked files to list.")
                 .into_any_element()
         } else {
-            div().flex().flex_col().children(rows).into_any_element()
+            div()
+                .id("all-files-scroll")
+                .flex()
+                .flex_col()
+                .flex_1()
+                .w_full()
+                .min_w(px(0.0))
+                .overflow_scroll()
+                .children(rows)
+                .into_any_element()
         };
         div()
             .flex()
             .flex_col()
+            .flex_1()
+            .w_full()
+            .min_w(px(0.0))
+            .min_h(px(0.0))
+            .overflow_hidden()
             .child(Self::file_list_column_header(colors))
             .child(body)
     }
@@ -790,6 +831,7 @@ impl GitronimoApp {
         });
         let mut row = div()
             .id(id)
+            .w_full()
             .h(px(22.0))
             .px_2()
             .flex()

@@ -288,7 +288,7 @@ fn application_menu_is_named_gitronimo_and_starts_with_about() {
 fn about_dialog_uses_the_release_version() {
     assert_eq!(
         crate::views::about::APP_VERSION,
-        "2.0.4",
+        "2.0.5",
         "bump APP_VERSION in views/about.rs after each release"
     );
 }

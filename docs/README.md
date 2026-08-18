@@ -1,6 +1,6 @@
 # GitRonimo documentation
 
-Index of project documentation. Start with [README.md](../README.md) for install and overview. Product version **2.0.4** is `APP_VERSION` in `apps/desktop/src/views/about.rs` (bump after each release).
+Index of project documentation. Start with [README.md](../README.md) for install and overview. Product version **2.0.5** is `APP_VERSION` in `apps/desktop/src/views/about.rs` (bump after each release).
 
 ## Product and planning
 
@@ -29,7 +29,7 @@ Index of project documentation. Start with [README.md](../README.md) for install
 
 | Document | Purpose |
 |----------|---------|
-| [desktop-shell.md](desktop-shell.md) | Activity bar, message history, confirms, pins, command palette, About |
+| [desktop-shell.md](desktop-shell.md) | Activity bar, message history, confirms, pins, command palette, About, App Settings, overlay fade |
 | [keyboard-shortcuts.md](keyboard-shortcuts.md) | Global shortcuts and Working Copy multi-select |
 | [troubleshooting.md](troubleshooting.md) | Repo open failures, index locks, auth, toolchain, Gatekeeper |
 | [third-party-notices.md](third-party-notices.md) | License attributions |
@@ -55,8 +55,8 @@ When you change user-visible behavior:
 
 1. Add or update an entry in [work-log.md](work-log.md) **before** coding.
 2. Update [keyboard-shortcuts.md](keyboard-shortcuts.md) if shortcuts or selection rules change.
-3. Update [desktop-shell.md](desktop-shell.md) if activity bar, palette, confirms, branch pin/archive, Settings opt-ins, or About behavior changes.
+3. Update [desktop-shell.md](desktop-shell.md) if activity bar, palette, confirms, branch pin/archive, Settings opt-ins, About, App Settings, or overlay/composer motion changes.
 4. Update [README.md](../README.md) screenshots if the UI changed materially.
 5. Sync [UI-IMPROVE.md](UI-IMPROVE.md) implementation status when a user-visible UI pattern lands.
 6. Add a [CHANGELOG.md](../CHANGELOG.md) note when preparing a release.
-7. Bump `APP_VERSION` in `apps/desktop/src/views/about.rs` after each product release (currently **2.0.4**).
+7. Bump `APP_VERSION` in `apps/desktop/src/views/about.rs` after each product release (currently **2.0.5**).
