@@ -362,17 +362,25 @@ impl GitronimoApp {
                 div()
                     .flex_1()
                     .h_full()
+                    .min_h(px(0.0))
                     .overflow_hidden()
                     .flex()
                     .child(
                         div()
                             .flex_1()
                             .min_w(px(320.0))
+                            .min_h(px(0.0))
                             .h_full()
                             .overflow_hidden()
                             .flex()
                             .flex_col()
-                            .child(div().flex_1().overflow_hidden().child(commit_list))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_h(px(0.0))
+                                    .overflow_hidden()
+                                    .child(commit_list),
+                            )
                             .children(load_more),
                     )
                     .child(div().w(px(1.0)).h_full().bg(colors.border))
@@ -380,6 +388,7 @@ impl GitronimoApp {
                         div()
                             .flex_1()
                             .min_w(px(360.0))
+                            .min_h(px(0.0))
                             .h_full()
                             .overflow_hidden()
                             .child(detail),
@@ -464,49 +473,12 @@ impl GitronimoApp {
         let refs = self.decorations_for_oid(&commit.oid);
         let (file_count, additions, deletions) = self.history_change_summary();
 
-        div()
+        let detail_body = div()
+            .id("history-detail-scroll-content")
+            .debug_selector(|| "history-detail-scroll-content".into())
+            .w_full()
             .flex()
             .flex_col()
-            .h_full()
-            .overflow_hidden()
-            .child(
-                div()
-                    .px_3()
-                    .py_2()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .border_b_1()
-                    .border_color(colors.border)
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(colors.text_primary)
-                            .child(short_oid),
-                    )
-                    .child(segmented_detail_toggle(
-                        "Changeset",
-                        "Tree",
-                        self.history_detail_mode == HistoryDetailMode::Changeset,
-                        colors,
-                        cx,
-                        move |app, cx| {
-                            app.toggle_history_detail_mode(
-                                HistoryDetailMode::Changeset,
-                                changeset_repo.clone(),
-                                cx,
-                            );
-                        },
-                        move |app, cx| {
-                            app.toggle_history_detail_mode(
-                                HistoryDetailMode::Tree,
-                                tree_repo.clone(),
-                                cx,
-                            );
-                        },
-                    )),
-            )
             .child(
                 div()
                     .px_3()
@@ -518,6 +490,7 @@ impl GitronimoApp {
                     .child(
                         div()
                             .flex_1()
+                            .min_w(px(0.0))
                             .flex()
                             .flex_col()
                             .gap_1()
@@ -589,6 +562,7 @@ impl GitronimoApp {
                 div()
                     .px_3()
                     .py_2()
+                    .w_full()
                     .border_b_1()
                     .border_color(colors.separator)
                     .child(
@@ -602,6 +576,7 @@ impl GitronimoApp {
                         this.child(
                             div()
                                 .mt_1()
+                                .w_full()
                                 .text_xs()
                                 .text_color(colors.text_secondary)
                                 .child(body),
@@ -630,25 +605,71 @@ impl GitronimoApp {
                                     )),
                             ),
                     )
-                    .child(
-                        div()
-                            .flex_1()
-                            .overflow_hidden()
-                            .child(self.history_changeset_files(colors)),
-                    )
+                    .child(self.history_changeset_files(colors))
                 },
             )
             .when(
                 self.history_detail_mode == HistoryDetailMode::Tree,
                 |this| {
-                    this.child(
-                        div().flex_1().overflow_hidden().child(self.tree_panel(
-                            &repository_for_toggle,
-                            colors,
-                            cx,
-                        )),
-                    )
+                    this.child(self.tree_panel(&repository_for_toggle, colors, cx))
                 },
+            );
+
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .h_full()
+            .min_h(px(0.0))
+            .overflow_hidden()
+            .child(
+                div()
+                    .px_3()
+                    .py_2()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(colors.border)
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(colors.text_primary)
+                            .child(short_oid),
+                    )
+                    .child(segmented_detail_toggle(
+                        "Changeset",
+                        "Tree",
+                        self.history_detail_mode == HistoryDetailMode::Changeset,
+                        colors,
+                        cx,
+                        move |app, cx| {
+                            app.toggle_history_detail_mode(
+                                HistoryDetailMode::Changeset,
+                                changeset_repo.clone(),
+                                cx,
+                            );
+                        },
+                        move |app, cx| {
+                            app.toggle_history_detail_mode(
+                                HistoryDetailMode::Tree,
+                                tree_repo.clone(),
+                                cx,
+                            );
+                        },
+                    )),
+            )
+            .child(
+                div()
+                    .id("history-detail-scroll")
+                    .debug_selector(|| "history-detail-scroll".into())
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .min_w(px(0.0))
+                    .overflow_scroll()
+                    .scrollbar_width(px(8.0))
+                    .child(detail_body),
             )
             .into_any_element()
     }
@@ -686,6 +707,7 @@ impl GitronimoApp {
             return div()
                 .flex()
                 .flex_col()
+                .w_full()
                 .children(self.history_paths.iter().enumerate().map(|(index, path)| {
                     let path = String::from_utf8_lossy(&path.0).into_owned();
                     changeset_file_row(index, "changed", path, colors)
@@ -703,7 +725,7 @@ impl GitronimoApp {
         div()
             .flex()
             .flex_col()
-            .overflow_hidden()
+            .w_full()
             .children(loaded.diff.files.iter().enumerate().map(|(index, file)| {
                 let path = file
                     .new_path
@@ -848,6 +870,7 @@ fn meta_row(label: &str, value: String, colors: &ThemeColors) -> gpui::AnyElemen
         .child(
             div()
                 .flex_1()
+                .min_w(px(0.0))
                 .text_right()
                 .text_xs()
                 .text_color(colors.text_primary)
@@ -923,6 +946,7 @@ fn changeset_file_row(
     };
     div()
         .id(SharedString::from(format!("history-file-{index}")))
+        .debug_selector(|| format!("history-file-{index}"))
         .w_full()
         .h(px(26.0))
         .px_3()

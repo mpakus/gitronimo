@@ -3,7 +3,8 @@
 
 use app_core::RecentRepositoryStore;
 use git_domain::{
-    CommitIdentity, GitPath, InProgressOperation, ReflogEntry, WorktreeRepository, WorktreeStatus,
+    CommitIdentity, GitPath, HistoryCommit, InProgressOperation, ReflogEntry, WorktreeRepository,
+    WorktreeStatus,
 };
 use gpui::{AppContext, Keystroke, TestAppContext};
 
@@ -1091,5 +1092,75 @@ fn working_copy_diff_preview_paints_a_scroll_area(cx: &mut TestAppContext) {
     assert!(
         cx.debug_bounds("discard-chunk-0").is_some(),
         "Discard Chunk must stay on the hunk header"
+    );
+}
+
+fn sample_history_commit(body: &[u8]) -> HistoryCommit {
+    HistoryCommit {
+        oid: "52ab1054b3a9d9db21ccba3fdb8a2bcc93651ae6".into(),
+        parents: vec!["543e5497abcdef0123456789abcdef0123456789".into()],
+        author: CommitIdentity {
+            name: b"Mpak".to_vec(),
+            email: b"test@gitronimo.invalid".to_vec(),
+            timestamp: 1_755_532_800,
+        },
+        committer: CommitIdentity {
+            name: b"Mpak".to_vec(),
+            email: b"test@gitronimo.invalid".to_vec(),
+            timestamp: 1_755_532_800,
+        },
+        subject: b"Fix: tags and history display".to_vec(),
+        body: body.to_vec(),
+    }
+}
+
+fn tall_history_diff(file_count: usize) -> git_cli::LoadedDiff {
+    let template = sample_loaded_diff().diff.files[0].clone();
+    git_cli::LoadedDiff {
+        diff: git_domain::UnifiedDiff {
+            files: (0..file_count)
+                .map(|index| {
+                    let mut file = template.clone();
+                    file.new_path = Some(GitPath(format!("docs/file-{index}.md").into_bytes()));
+                    file
+                })
+                .collect(),
+        },
+        truncated: false,
+    }
+}
+
+#[gpui::test]
+fn history_inspector_paints_a_scroll_area_for_long_changesets(cx: &mut TestAppContext) {
+    let fixture = StagingFixture::new("history-detail-scroll");
+    let store =
+        RecentRepositoryStore::new(std::env::temp_dir().join("gitronimo-test-recents.json"));
+    let (app, cx) =
+        cx.add_window_view(|window, cx| GitronimoApp::welcome(Vec::new(), store, window, cx));
+    let long_body = "paragraph\n".repeat(40).into_bytes();
+    app.update(cx, |app, _| {
+        app.state = ShellState::Repository(fixture.repository.clone());
+        app.repository_view = RepositoryView::History;
+        app.history = vec![sample_history_commit(&long_body)];
+        app.selected_history = Some(0);
+        app.history_diff = Some(tall_history_diff(40));
+    });
+    cx.update(|window, _| window.refresh());
+    cx.run_until_parked();
+    let scroll = cx
+        .debug_bounds("history-detail-scroll")
+        .expect("the History inspector must be a scroll container");
+    let content = cx
+        .debug_bounds("history-detail-scroll-content")
+        .expect("the History inspector must size content taller than the pane");
+    assert!(
+        content.size.height > scroll.size.height,
+        "many changeset files and a long commit body must overflow the inspector so they can scroll (content {:?}, pane {:?})",
+        content.size.height,
+        scroll.size.height
+    );
+    assert!(
+        cx.debug_bounds("history-file-39").is_some(),
+        "the last changeset file must still be in the tree"
     );
 }

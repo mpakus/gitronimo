@@ -1,5 +1,15 @@
 # Implementation work log
 
+## 2026-09-15 — History inspector scrolls long file lists and commit text
+
+**Intent:** The History right pane clips changeset files and long commit copy. `overflow_hidden` without a scroll container means extra rows and body text are unreachable. Do not bump `APP_VERSION`.
+
+**Files:** `docs/work-log.md`, `apps/desktop/src/views/history.rs`, `apps/desktop/src/views/commit_detail.rs`, `apps/desktop/src/tests.rs`.
+
+**Acceptance:** History inspector paints `history-detail-scroll`. Many changed files or a long commit body make scroll-content taller than the pane. Commit Detail changeset/diff also scroll. Gates green.
+
+**References:** in-tree Working Copy `diff-scroll` / `overflow_scroll` + `id`. GitComet is AGPL — approach-only. XERJ node was unreachable.
+
 ## 2026-08-18 — Cut product version 2.0.5
 
 **Intent:** Bump product version to **2.0.5** (`APP_VERSION` + packager) for Working Copy full-width file list and History branch/tag pills. Cargo workspace version stays `0.1.0`.

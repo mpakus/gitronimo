@@ -24,66 +24,83 @@ impl GitronimoApp {
         };
         let current = repository.clone();
         div()
+            .id("commit-detail-scroll")
+            .debug_selector(|| "commit-detail-scroll".into())
             .flex()
             .flex_col()
-            .gap_3()
-            .child(div().text_xl().child("Commit detail"))
-            .child(div().child(format!("OID: {}", commit.oid)))
-            .child(div().child(format!(
-                "Author: {}",
-                String::from_utf8_lossy(&commit.author.name)
-            )))
-            .child(div().child(format!("Date: {}", commit.author.timestamp)))
-            .child(div().child(format!(
-                "Subject: {}",
-                String::from_utf8_lossy(&commit.subject)
-            )))
+            .flex_1()
+            .h_full()
+            .min_h(px(0.0))
+            .min_w(px(0.0))
+            .overflow_scroll()
+            .scrollbar_width(px(8.0))
             .child(
                 div()
-                    .child(format!("Body: {}", String::from_utf8_lossy(&commit.body)))
-                    .when(commit.body.is_empty(), |this| {
-                        this.child(div().text_color(colors.text_muted).child("(empty)"))
-                    }),
-            )
-            .child(div().child(format!("Parents: {}", commit.parents.join(" "))))
-            .child(
-                div()
+                    .id("commit-detail-scroll-content")
+                    .debug_selector(|| "commit-detail-scroll-content".into())
+                    .w_full()
                     .flex()
-                    .gap_2()
-                    .child(file_action_button("Working Copy", colors, cx, |app, cx| {
-                        app.navigate_to(RepositoryView::WorkingCopy, cx);
-                    }))
-                    .child(file_action_button("History", colors, cx, {
-                        let repository = current.clone();
-                        move |app, cx| app.show_history(repository.clone(), cx)
-                    })),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(self.detail_mode_button(
-                        HistoryDetailMode::Changeset,
-                        "Changeset",
-                        colors,
-                        cx,
-                        repository,
-                    ))
-                    .child(self.detail_mode_button(
-                        HistoryDetailMode::Tree,
-                        "Tree",
-                        colors,
-                        cx,
-                        repository,
-                    )),
-            )
-            .when(
-                self.history_detail_mode == HistoryDetailMode::Changeset,
-                |this| this.child(self.changeset_panel(colors)),
-            )
-            .when(
-                self.history_detail_mode == HistoryDetailMode::Tree,
-                |this| this.child(self.tree_panel(repository, colors, cx)),
+                    .flex_col()
+                    .gap_3()
+                    .p_3()
+                    .child(div().text_xl().child("Commit detail"))
+                    .child(div().child(format!("OID: {}", commit.oid)))
+                    .child(div().child(format!(
+                        "Author: {}",
+                        String::from_utf8_lossy(&commit.author.name)
+                    )))
+                    .child(div().child(format!("Date: {}", commit.author.timestamp)))
+                    .child(div().child(format!(
+                        "Subject: {}",
+                        String::from_utf8_lossy(&commit.subject)
+                    )))
+                    .child(
+                        div()
+                            .child(format!("Body: {}", String::from_utf8_lossy(&commit.body)))
+                            .when(commit.body.is_empty(), |this| {
+                                this.child(div().text_color(colors.text_muted).child("(empty)"))
+                            }),
+                    )
+                    .child(div().child(format!("Parents: {}", commit.parents.join(" "))))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(file_action_button("Working Copy", colors, cx, |app, cx| {
+                                app.navigate_to(RepositoryView::WorkingCopy, cx);
+                            }))
+                            .child(file_action_button("History", colors, cx, {
+                                let repository = current.clone();
+                                move |app, cx| app.show_history(repository.clone(), cx)
+                            })),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(self.detail_mode_button(
+                                HistoryDetailMode::Changeset,
+                                "Changeset",
+                                colors,
+                                cx,
+                                repository,
+                            ))
+                            .child(self.detail_mode_button(
+                                HistoryDetailMode::Tree,
+                                "Tree",
+                                colors,
+                                cx,
+                                repository,
+                            )),
+                    )
+                    .when(
+                        self.history_detail_mode == HistoryDetailMode::Changeset,
+                        |this| this.child(self.changeset_panel(colors)),
+                    )
+                    .when(
+                        self.history_detail_mode == HistoryDetailMode::Tree,
+                        |this| this.child(self.tree_panel(repository, colors, cx)),
+                    ),
             )
             .into_any_element()
     }
@@ -139,7 +156,7 @@ impl GitronimoApp {
             .collect();
         let file_list = div()
             .w(px(240.0))
-            .h_full()
+            .min_w(px(240.0))
             .border_r_1()
             .border_color(colors.border)
             .flex()
@@ -172,13 +189,13 @@ impl GitronimoApp {
             }));
         div()
             .flex()
-            .h_full()
-            .overflow_hidden()
+            .w_full()
+            .min_w(px(0.0))
             .child(file_list)
             .child(
                 div()
                     .flex_1()
-                    .overflow_hidden()
+                    .min_w(px(0.0))
                     .child(self.readonly_diff(colors)),
             )
             .into_any_element()
